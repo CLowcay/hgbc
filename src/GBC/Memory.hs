@@ -3,10 +3,11 @@
 
 module GBC.Memory where
 
-import           GBC.ROM
+import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
-import           Data.Word
+import           Foreign.Storable
+import           GBC.ROM
 import qualified Data.ByteString               as B
 
 data Memory = Memory {
@@ -16,6 +17,11 @@ data Memory = Memory {
 
 initMemory :: ROM -> IO Memory
 initMemory (ROM rom) = Memory rom <$> mallocForeignPtrArray 0x7FFF
+
+readByte :: Memory -> Word16 -> IO Word8
+readByte Memory {..} addr = if addr < 0x8000
+  then pure $ memRom `B.index` fromIntegral addr
+  else withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
 
 readChunk :: Memory -> Word16 -> Int -> IO B.ByteString
 readChunk Memory {..} base len = (<>) <$> romData <*> ramData

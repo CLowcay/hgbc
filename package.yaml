@@ -20,10 +20,11 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
+- array
 - base >= 4.7 && < 5
-- bytestring
 - binary
-
+- bytestring
+- mtl
 
 library:
   source-dirs: src
