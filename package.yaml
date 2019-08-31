@@ -21,10 +21,14 @@ description:         Please see the README on GitHub at <https://github.com/CLow
 
 dependencies:
 - base >= 4.7 && < 5
-- attoparsec
+- bytestring
+- binary
+
 
 library:
   source-dirs: src
+  ghc-options:
+    - -Wall
 
 executables:
   hgbc:
