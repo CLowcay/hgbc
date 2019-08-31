@@ -116,6 +116,3 @@ extractHeader (ROM rom) =
     0x1A -> pure $ CartridgeType (Just MBC5) True False
     0x1B -> pure $ CartridgeType (Just MBC5) True True
     x    -> fail $ "unknown cartridge type code " ++ show x
-
-
-
