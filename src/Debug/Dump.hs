@@ -1,14 +1,15 @@
 {-# LANGUAGE RecordWildCards #-}
 module Debug.Dump where
 
-import           GBC.Memory
-import           GBC.CPU
-import           GBC.ROM
-import           Data.Word
 import           Common
 import           Control.Monad
-import           GBC.Decode
 import           Data.Bits
+import           Data.Word
+import           GBC.CPU
+import           GBC.Decode
+import           GBC.ISA
+import           GBC.Memory
+import           GBC.ROM
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 
@@ -80,7 +81,15 @@ dumpDisassembly decorator mem base n = do
   instructions <- decodeN mem base n
   forM_ instructions $ \(addr, instruction) -> do
     decoration <- decorator addr
-    putStrLn $ decoration ++ formatHex addr ++ ": " ++ format instruction
+    putStrLn
+      $  decoration
+      ++ formatHex addr
+      ++ ": "
+      ++ format instruction
+      ++ extraInfo addr instruction
+ where
+  extraInfo addr (JR _ e) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo _    _         = ""
 
 dumpMem :: Memory -> Word16 -> IO ()
 dumpMem mem base = forM_ [0 .. 15]

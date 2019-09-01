@@ -15,6 +15,7 @@ import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
 import           Data.Maybe
 import qualified Text.Megaparsec.Char.Lexer    as L
+import           GBC.ISA
 
 nextCommand :: IO (Maybe Command)
 nextCommand = do
@@ -42,19 +43,30 @@ symbol :: T.Text -> Parser T.Text
 symbol s = lexeme $ string' s
 
 address :: Parser Word16
-address = L.hexadecimal
+address = lexeme L.hexadecimal
+
+value :: Parser Word8
+value = lexeme L.hexadecimal
+
+value16 :: Parser Word16
+value16 = lexeme L.hexadecimal
 
 command :: Parser Command
 command =
   (ShowHeader <$ symbol "header")
+    <|> (RunTo <$> try (symbol "run" *> address))
     <|> (Run <$ symbol "run")
     <|> (Reset <$ symbol "reset")
     <|> (ShowRegs <$ symbol "registers")
-    <|> (ShowRegs <$ symbol "reg")
-    <|> (ShowRegs <$ symbol "r")
-    <|> (ShowMem <$> (symbol "memory" *> address))
-    <|> (ShowMem <$> (symbol "mem" *> address))
-    <|> (ShowMem <$> (symbol "m" *> address))
+    <|> try (PokeR8 <$> ((symbol "reg" <|> symbol "r") *> register8) <*> (symbol "=" *> value))
+    <|> try (PokeR16 <$> ((symbol "reg" <|> symbol "r") *> register16) <*> (symbol "=" *> value16))
+    <|> (ShowRegs <$ (symbol "reg" <|> symbol "r"))
+    <|> try
+          (   Poke8
+          <$> ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address)
+          <*> (symbol "=" *> value)
+          )
+    <|> (ShowMem <$> ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address))
     <|> (ShowDisassembly <$> (symbol "code" *> optional address))
     <|> (ShowDisassembly <$> (symbol "c" *> optional address))
     <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
@@ -63,3 +75,17 @@ command =
     <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
     <|> (DisableBreakpiont <$> try (symbol "disable" *> symbol "break" *> address))
     <|> (ListBreakpoints <$ symbol "breakpoints")
+
+register8 :: Parser Register8
+register8 =
+  (RegA <$ "A")
+    <|> (RegB <$ "B")
+    <|> (RegC <$ "C")
+    <|> (RegD <$ "D")
+    <|> (RegE <$ "E")
+    <|> (RegF <$ "F")
+    <|> (RegH <$ "H")
+    <|> (RegL <$ "L")
+
+register16 :: Parser Register16
+register16 = (RegBC <$ "BC") <|> (RegDE <$ "DE") <|> (RegHL <$ "HL") <|> (RegSP <$ "SP")

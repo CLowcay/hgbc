@@ -14,6 +14,7 @@ import           Debug.Dump
 import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.CPU
+import           GBC.ISA
 import           GBC.Memory
 
 -- | Debugger commands.
@@ -23,7 +24,11 @@ data Command = ShowHeader
              | ShowDisassembly (Maybe Word16)
              | Step Int
              | Run
+             | RunTo Word16
              | Reset
+             | Poke8 Word16 Word8
+             | PokeR8 Register8 Word8
+             | PokeR16 Register16 Word16
              | AddBreakpoint Word16
              | DeleteBreakpoint Word16
              | DisableBreakpiont Word16
@@ -96,6 +101,10 @@ breakOnBreakpoints = do
   table <- gets breakpoints
   pure . const $ shouldBreak table
 
+-- | Break when the PC equals a certain value.
+breakOnPC :: Word16 -> BreakPostCondition
+breakOnPC pc = const $ (pc ==) <$> readPC
+
 -- | Run the interpreter until one of the break conditions is met.
 doRun :: [BreakPreCondition] -> [BreakPostCondition] -> Debug ()
 doRun preConditions postConditions = hoistCPU go
@@ -147,7 +156,16 @@ doCommand Run = do
   postConditions <- sequence [breakOnBreakpoints]
   doRun [] postConditions
   disassembleAtPC
-doCommand Reset                = hoistCPU reset
+doCommand (RunTo breakAddr) = do
+  postConditions <- sequence [breakOnBreakpoints, pure $ breakOnPC breakAddr]
+  doRun [] postConditions
+  disassembleAtPC
+doCommand Reset              = hoistCPU reset
+doCommand (Poke8 addr value) = do
+  mem <- ask
+  liftIO $ writeMem mem addr value
+doCommand (PokeR8  reg value ) = hoistCPU $ writeR8 reg value
+doCommand (PokeR16 reg value ) = hoistCPU $ writeR16 reg value
 doCommand (AddBreakpoint addr) = do
   table <- gets breakpoints
   liftIO $ setBreakpoint table addr True
