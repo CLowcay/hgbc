@@ -5,7 +5,9 @@ module Debug.Commands where
 import           Common
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Control.Monad.Loops
 import           Data.Functor
+import           Data.IORef
 import           Data.Word
 import           Debug.Breakpoints
 import           Debug.Dump
@@ -34,15 +36,18 @@ data DebugState = DebugState {
   , breakpoints :: BreakpointTable
 }
 
+-- | Initialise the debugger.
 initDebug :: CPUState -> IO DebugState
 initDebug cpuState = DebugState cpuState <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a
 
+-- | Run the debugger.
 runDebug :: Memory -> DebugState -> Debug a -> IO a
 runDebug mem debugState computation = evalStateT (runReaderT computation mem) debugState
 
+-- | Lift a CPU computation into the Debug monad.
 hoistCPU :: CPU a -> Debug a
 hoistCPU computation = do
   mem            <- ask
@@ -52,14 +57,67 @@ hoistCPU computation = do
   put $ debugState { cpu = cpuState' }
   pure r
 
-breakpointDecorator :: Debug (Word16 -> IO Char)
-breakpointDecorator = do
+-- | Create a function to decorate disassembly dumps. Adds symbols to indicate
+-- breakpoints, PC and other information.
+makeDecorator :: Debug (Word16 -> IO String)
+makeDecorator = do
   table <- gets breakpoints
-  pure $ \addr -> getBreakpoint table addr <&> \case
-    Nothing    -> ' '
-    Just True  -> '*'
-    Just False -> '-'
+  pc    <- hoistCPU readPC
+  pure $ \addr -> do
+    bp <- getBreakpoint table addr <&> \case
+      Nothing    -> ' '
+      Just True  -> '*'
+      Just False -> '-'
+    pure [bp, if addr == pc then '>' else ' ']
 
+-- | A condition to check before executing the next instruction. Break if the
+-- condition is True.
+type BreakPreCondition = CPU Bool
+
+-- | A condition to check after executing the next instruction. Break if the
+-- condition is True.
+type BreakPostCondition = DebugInfo -> CPU Bool
+
+-- | Break after a certain number of instructions have been executed.
+breakOnCountOf :: Int -> Debug BreakPreCondition
+breakOnCountOf n0 = do
+  counter <- liftIO $ newIORef n0
+  pure . liftIO $ do
+    c <- readIORef counter
+    if c == 0
+      then pure True
+      else do
+        writeIORef counter $c - 1
+        pure False
+
+-- | Break when breakpoints are triggered.
+breakOnBreakpoints :: Debug BreakPostCondition
+breakOnBreakpoints = do
+  table <- gets breakpoints
+  pure . const $ shouldBreak table
+
+-- | Run the interpreter until one of the break conditions is met.
+doRun :: [BreakPreCondition] -> [BreakPostCondition] -> Debug ()
+doRun preConditions postConditions = hoistCPU go
+ where
+  go = do
+    doPreBreak <- orM preConditions
+    if doPreBreak
+      then pure ()
+      else do
+        debugInfo   <- cpuStep
+        doPostBreak <- orM $ fmap ($debugInfo) postConditions
+        if doPostBreak then pure () else go
+
+-- | Disassemble the next 4 instructions at the current PC.
+disassembleAtPC :: Debug ()
+disassembleAtPC = do
+  mem       <- ask
+  decorator <- makeDecorator
+  pc        <- hoistCPU readPC
+  liftIO $ dumpDisassembly decorator mem pc 4
+
+-- | Execute a debugger command.
 doCommand :: Command -> Debug ()
 doCommand ShowHeader = do
   mem <- ask
@@ -74,37 +132,21 @@ doCommand (ShowMem addr) = do
 doCommand (ShowDisassembly Nothing) = do
   mem       <- ask
   pc        <- hoistCPU readPC
-  decorator <- breakpointDecorator
+  decorator <- makeDecorator
   liftIO $ dumpDisassembly decorator mem pc 10
 doCommand (ShowDisassembly (Just addr)) = do
   mem       <- ask
-  decorator <- breakpointDecorator
+  decorator <- makeDecorator
   liftIO $ dumpDisassembly decorator mem addr 10
-doCommand (Step n0) = do
-  mem        <- ask
-  breakpoint <- gets breakpoints
-  hoistCPU $ go breakpoint n0
-  decorator <- breakpointDecorator
-  pc        <- hoistCPU readPC
-  liftIO $ dumpDisassembly decorator mem pc 4
- where
-  go _          0 = pure ()
-  go breakpoint n = do
-    void cpuStep
-    brk <- shouldBreak breakpoint
-    if brk then pure () else go breakpoint (n - 1)
+doCommand (Step n) = do
+  preConditions  <- sequence [breakOnCountOf n]
+  postConditions <- sequence [breakOnBreakpoints]
+  doRun preConditions postConditions
+  disassembleAtPC
 doCommand Run = do
-  mem        <- ask
-  breakpoint <- gets breakpoints
-  hoistCPU $ go breakpoint
-  decorator <- breakpointDecorator
-  pc        <- hoistCPU readPC
-  liftIO $ dumpDisassembly decorator mem pc 4
- where
-  go breakpoint = do
-    void cpuStep
-    brk <- shouldBreak breakpoint
-    if brk then pure () else go breakpoint
+  postConditions <- sequence [breakOnBreakpoints]
+  doRun [] postConditions
+  disassembleAtPC
 doCommand Reset                = hoistCPU reset
 doCommand (AddBreakpoint addr) = do
   table <- gets breakpoints

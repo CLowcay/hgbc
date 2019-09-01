@@ -75,12 +75,12 @@ formatByteCount b | b < 1024        = show b
                   | b < 1024 * 1024 = show (b `div` 1024) ++ "KiB"
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
-dumpDisassembly :: (Word16 -> IO Char) -> Memory -> Word16 -> Int -> IO ()
-dumpDisassembly statusByte mem base n = do
+dumpDisassembly :: (Word16 -> IO String) -> Memory -> Word16 -> Int -> IO ()
+dumpDisassembly decorator mem base n = do
   instructions <- decodeN mem base n
   forM_ instructions $ \(addr, instruction) -> do
-    sb <- statusByte addr
-    putStrLn $ sb : formatHex addr ++ ": " ++ format instruction
+    decoration <- decorator addr
+    putStrLn $ decoration ++ formatHex addr ++ ": " ++ format instruction
 
 dumpMem :: Memory -> Word16 -> IO ()
 dumpMem mem base = forM_ [0 .. 15]
