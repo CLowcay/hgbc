@@ -23,6 +23,12 @@ readByte Memory {..} addr = if addr < 0x8000
   then pure $ memRom `B.index` fromIntegral addr
   else withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
 
+writeMem :: Storable a => Memory -> Word16 -> a -> IO ()
+writeMem Memory {..} addr value = if addr < 0x8000
+  then pure ()
+  else withForeignPtr memRam
+    $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
+
 readChunk :: Memory -> Word16 -> Int -> IO B.ByteString
 readChunk Memory {..} base len = (<>) <$> romData <*> ramData
  where

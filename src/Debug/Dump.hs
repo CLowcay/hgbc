@@ -4,13 +4,13 @@ import           GBC.Memory
 import           Data.Word
 import           Common
 import           Control.Monad
-import           GBC.Disassembler
+import           GBC.Decode
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 
 dumpDisassembly :: Memory -> Word16 -> IO ()
 dumpDisassembly mem base = do
-  instructions <- disassembleN mem base 10
+  instructions <- decodeN mem base 10
   forM_ instructions $ \(addr, instruction) ->
     putStrLn $ formatHex addr ++ ": " ++ format instruction
 
