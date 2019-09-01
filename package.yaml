@@ -24,7 +24,10 @@ dependencies:
 - base >= 4.7 && < 5
 - binary
 - bytestring
+- megaparsec
+- monad-loops
 - mtl
+- text
 
 library:
   source-dirs: src

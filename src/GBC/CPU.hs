@@ -17,20 +17,21 @@ import           Data.Int
 
 -- | The register file.
 data RegisterFile = RegisterFile {
-    regA :: Word8
-  , regB :: Word8
-  , regC :: Word8
-  , regD :: Word8
-  , regE :: Word8
-  , regF :: Word8
-  , regH :: Word8
-  , regL :: Word8
-  , regSP :: Word16
-  , regPC :: Word16
+    regA :: !Word8
+  , regB :: !Word8
+  , regC :: !Word8
+  , regD :: !Word8
+  , regE :: !Word8
+  , regF :: !Word8
+  , regH :: !Word8
+  , regL :: !Word8
+  , regSP :: !Word16
+  , regPC :: !Word16
+  , regHidden :: !Word16
 } deriving (Eq, Ord, Show)
 
 offsetF, offsetA, offsetC, offsetB :: Int
-offsetE, offsetD, offsetL, offsetH, offsetPC, offsetSP :: Int
+offsetE, offsetD, offsetL, offsetH, offsetPC, offsetSP, offsetHidden :: Int
 offsetF = 0
 offsetA = 1
 offsetC = 2
@@ -41,38 +42,41 @@ offsetL = 6
 offsetH = 7
 offsetPC = 8
 offsetSP = 10
+offsetHidden = 12
 
 instance Storable RegisterFile where
-  sizeOf _ = 12
+  sizeOf _ = 14
   alignment _ = 2
   peek ptr = do
-    regA  <- peekByteOff ptr offsetA
-    regB  <- peekByteOff ptr offsetB
-    regC  <- peekByteOff ptr offsetC
-    regD  <- peekByteOff ptr offsetD
-    regE  <- peekByteOff ptr offsetE
-    regF  <- peekByteOff ptr offsetF
-    regH  <- peekByteOff ptr offsetH
-    regL  <- peekByteOff ptr offsetL
-    regSP <- peekByteOff ptr offsetSP
-    regPC <- peekByteOff ptr offsetPC
+    regA      <- peekByteOff ptr offsetA
+    regB      <- peekByteOff ptr offsetB
+    regC      <- peekByteOff ptr offsetC
+    regD      <- peekByteOff ptr offsetD
+    regE      <- peekByteOff ptr offsetE
+    regF      <- peekByteOff ptr offsetF
+    regH      <- peekByteOff ptr offsetH
+    regL      <- peekByteOff ptr offsetL
+    regSP     <- peekByteOff ptr offsetSP
+    regPC     <- peekByteOff ptr offsetPC
+    regHidden <- peekByteOff ptr offsetHidden
     pure RegisterFile { .. }
   poke ptr RegisterFile {..} = do
-    pokeByteOff ptr offsetA  regA
-    pokeByteOff ptr offsetB  regB
-    pokeByteOff ptr offsetC  regC
-    pokeByteOff ptr offsetD  regD
-    pokeByteOff ptr offsetE  regE
-    pokeByteOff ptr offsetF  regF
-    pokeByteOff ptr offsetH  regH
-    pokeByteOff ptr offsetL  regL
-    pokeByteOff ptr offsetSP regSP
-    pokeByteOff ptr offsetPC regPC
+    pokeByteOff ptr offsetA      regA
+    pokeByteOff ptr offsetB      regB
+    pokeByteOff ptr offsetC      regC
+    pokeByteOff ptr offsetD      regD
+    pokeByteOff ptr offsetE      regE
+    pokeByteOff ptr offsetF      regF
+    pokeByteOff ptr offsetH      regH
+    pokeByteOff ptr offsetL      regL
+    pokeByteOff ptr offsetSP     regSP
+    pokeByteOff ptr offsetPC     regPC
+    pokeByteOff ptr offsetHidden regHidden
 
 -- | Information for the debugger.
 data DebugInfo = DebugInfo {
-    readAddress :: [Word16]
-  , writeAddress :: [Word16]
+    readAddress :: ![Word16]
+  , writeAddress :: ![Word16]
 } deriving (Eq, Ord, Show)
 
 -- | The current CPU mode.
@@ -80,12 +84,20 @@ data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded
 
 -- | The internal CPU state.
 data CPUState = CPUState {
-    registers :: ForeignPtr RegisterFile
-  , cpuMode :: CPUMode
+    registers :: !(ForeignPtr RegisterFile)
+  , cpuMode :: !CPUMode
 } deriving (Eq, Ord, Show)
 
 -- | The CPU monad.
 type CPU a = ReaderT Memory (StateT CPUState IO) a
+
+-- | Initialize a new CPU.
+initCPU :: IO CPUState
+initCPU = CPUState <$> mallocForeignPtr <*> pure ModeNormal
+
+-- | Run a computation in the CPU monad.
+runCPU :: Memory -> CPUState -> CPU a -> IO CPUState
+runCPU mem cpuState computation = execStateT (runReaderT computation mem) cpuState
 
 -- | Read data from the register file.
 readRegister :: Storable a => Int -> CPU a
@@ -180,6 +192,10 @@ flagN = 0x40
 flagH = 0x20
 flagCY = 0x10
 
+-- Master interrupt enable flag
+flagIME :: Word16
+flagIME = 0x0100
+
 -- | Check if a flag is set.
 testFlag :: Flag -> CPU Bool
 testFlag flag = do
@@ -206,6 +222,18 @@ setFlagsMask
 setFlagsMask mask flags = do
   oldFlags <- readR8 RegF
   writeR8 RegF $ (oldFlags .&. complement mask) .|. (flags .&. mask)
+
+-- | Set the master interrupt flag.
+setIME :: CPU ()
+setIME = do
+  ime <- readRegister offsetHidden
+  writeRegister offsetHidden (ime .|. flagIME)
+
+-- | Clear the master interrupt flag.
+clearIME :: CPU ()
+clearIME = do
+  ime <- readRegister offsetHidden
+  writeRegister offsetHidden (ime .&. complement flagIME)
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -611,7 +639,7 @@ cpuStep = do
         shouldJump <- testCondition cc
         when shouldJump $ do
           pc <- readPC
-          writePC $ pc + fromIntegral i8 + 2
+          writePC $ pc + fromIntegral i8
         pure $ DebugInfo [] []
       -- JP (HL)
       JPI -> do
@@ -632,12 +660,12 @@ cpuStep = do
             pure $ DebugInfo [] [sp', sp' + 1]
       -- RETI
       RETI -> do
-        -- TODO: reset master interrupt enable flag
         sp  <- readR16 RegSP
         pcL <- liftIO $ fromIntegral <$> readByte mem sp
         pcH <- liftIO $ fromIntegral <$> readByte mem (sp + 1)
         writePC $ (pcH `unsafeShiftL` 8) .|. pcL
         writeR16 RegSP $ sp + 2
+        setIME
         pure $ DebugInfo [sp, sp + 1] []
       -- RET cc
       RET cc -> do
@@ -675,4 +703,21 @@ cpuStep = do
       -- STOP
       STOP -> do
         modify $ \cpu -> cpu { cpuMode = ModeStop }
+        pure $ DebugInfo [] []
+      -- EI
+      EI -> do
+        setIME
+        pure $ DebugInfo [] []
+      -- DI
+      DI -> do
+        clearIME
+        pure $ DebugInfo [] []
+      -- CCF
+      CCF -> do
+        cf <- testFlag flagCY
+        setFlagsMask flagCY $ if cf then 0 else flagCY
+        pure $ DebugInfo [] []
+      -- SCF
+      SCF -> do
+        setFlagsMask flagCY flagCY
         pure $ DebugInfo [] []

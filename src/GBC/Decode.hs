@@ -15,18 +15,14 @@ type Decode a = ReaderT Memory (StateT Word16 IO) a
 table :: Array Word8 (Decode (Maybe Instruction))
 table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
  where
-  doDecode x =
-    ( x
-    , decodeBytes (x `shiftR` 6 .&. 0x03) (x `shiftR` 3 .&. 0x07) (x .&. 0x07)
-    )
+  doDecode x = (x, decodeBytes (x `shiftR` 6 .&. 0x03) (x `shiftR` 3 .&. 0x07) (x .&. 0x07))
   decodeBytes 0 0 0 = pure . Just $ NOP
   decodeBytes 0 1 0 = Just . LDI16I_SP <$> nextWord
   decodeBytes 0 2 0 = do
     b1 <- nextByte
     pure $ if b1 == 0 then Just STOP else Nothing
-  decodeBytes 0 3 0 = Just . JR Nothing . fromIntegral <$> nextByte
-  decodeBytes 0 cc 0 =
-    Just . JR (conditionCode $ cc .&. 0x03) . fromIntegral <$> nextByte
+  decodeBytes 0 3  0 = Just . JR Nothing . fromIntegral <$> nextByte
+  decodeBytes 0 cc 0 = Just . JR (conditionCode $ cc .&. 0x03) . fromIntegral <$> nextByte
   decodeBytes 0 dd 1 = if dd .&. 0x01 == 0
     then Just . LD16_I16 (registerPair dd) <$> nextWord
     else pure $ Just $ ADDHL (registerPair $ dd .&. 0x06)
@@ -53,6 +49,8 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 0 3  7  = pure . Just $ RRA
   decodeBytes 0 4  7  = pure . Just $ DAA
   decodeBytes 0 5  7  = pure . Just $ CPL
+  decodeBytes 0 6  7  = pure . Just $ SCF
+  decodeBytes 0 7  7  = pure . Just $ CCF
 
   decodeBytes 1 6  6  = pure $ Just HALT
   decodeBytes 1 r  6  = pure $ Just $ LD_R8 (register r) HLI
@@ -78,6 +76,8 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 3 7  2  = Just . LDA_I16I <$> nextWord
   decodeBytes 3 cc 2  = Just . JP (conditionCode cc) <$> nextWord
   decodeBytes 3 0  3  = Just . JP Nothing <$> nextWord
+  decodeBytes 3 6  3  = pure . Just $ DI
+  decodeBytes 3 7  3  = pure . Just $ EI
   decodeBytes 3 cc 4  = Just . CALL (conditionCode cc) <$> nextWord
   decodeBytes 3 1  5  = Just . CALL Nothing <$> nextWord
   decodeBytes 3 qq 5  = pure . Just $ PUSH (registerPair qq)

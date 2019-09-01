@@ -124,6 +124,11 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
                  | NOP                                 -- ^ NOP
                  | HALT                                -- ^ HALT
                  | STOP                                -- ^ STOP
+
+                 | CCF                                 -- ^ CCF
+                 | SCF                                 -- ^ SCF
+                 | DI                                  -- ^ DI
+                 | EI                                  -- ^ EI
                  deriving (Eq, Ord, Show)
 
 instance Format Instruction where
@@ -135,7 +140,7 @@ instance Format Instruction where
   format LDA_CI               = "LD A (C)"
   format LDCI_A               = "LD (C) A"
   format (LDA_I8I  w8 )       = "LD A " ++ formatHex w8
-  format (LDI8I_A  w8 )       = "LD (" ++ formatHex w8 ++ ") A"
+  format (LDI8I_A  w8 )       = "LD (FF" ++ formatHex w8 ++ ") A"
   format (LDA_I16I w16)       = "LD A (" ++ formatHex w16 ++ ")"
   format (LDI16I_A w16)       = "LD (" ++ formatHex w16 ++ ") A"
   format LDA_INC              = "LD A (HL++)"
@@ -197,3 +202,7 @@ instance Format Instruction where
   format NOP                  = "NOP"
   format HALT                 = "HALT"
   format STOP                 = "STOP"
+  format DI                   = "DI"
+  format EI                   = "EI"
+  format CCF                  = "CCF"
+  format SCF                  = "SCF"
