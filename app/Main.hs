@@ -1,13 +1,13 @@
 module Main where
 
-import           GBC.ROM
-import           GBC.Memory
-import           GBC.CPU
+import           Control.Monad.IO.Class
+import           Control.Monad.Loops
 import           Debug.CLI
 import           Debug.Commands
+import           GBC.CPU
+import           GBC.Memory
+import           GBC.ROM
 import           System.Environment
-import           Control.Monad.Loops
-import           Control.Monad.IO.Class
 import           System.Exit
 import qualified Data.ByteString               as B
 
@@ -26,7 +26,8 @@ main = do
       cpuState  <- runCPU mem cpuState0 $ do
         writePC $ startAddress header
         setIME
-      runDebugger mem (DebugState cpuState)
+      debugState <- initDebug cpuState
+      runDebugger mem debugState
 
 runDebugger :: Memory -> DebugState -> IO ()
 runDebugger mem debugState = runDebug mem debugState $ whileJust_ (liftIO nextCommand) doCommand

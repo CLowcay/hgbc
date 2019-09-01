@@ -13,21 +13,25 @@ import           Text.Megaparsec.Char
 import           System.IO
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
+import           Data.Maybe
 import qualified Text.Megaparsec.Char.Lexer    as L
 
 nextCommand :: IO (Maybe Command)
 nextCommand = do
+  T.putStr "> "
+  hFlush stdout
   endOfStream <- isEOF
   if endOfStream
     then pure Nothing
     else do
-      line <- T.hGetLine stdin
-      let result = parse (space *> command) "CONSOLE" line
-      case result of
-        Left err -> do
-          putStrLn $ errorBundlePretty err
-          nextCommand
-        Right cmd -> pure $ Just cmd
+      line <- T.getLine
+      if T.null $ T.strip line
+        then nextCommand
+        else case parse (space *> command) "CONSOLE" line of
+          Left err -> do
+            putStrLn $ errorBundlePretty err
+            nextCommand
+          Right cmd -> pure $ Just cmd
 
 type Parser = Parsec Void T.Text
 
@@ -43,16 +47,19 @@ address = L.hexadecimal
 command :: Parser Command
 command =
   (ShowHeader <$ symbol "header")
+    <|> (Run <$ symbol "run")
+    <|> (Reset <$ symbol "reset")
     <|> (ShowRegs <$ symbol "registers")
+    <|> (ShowRegs <$ symbol "reg")
     <|> (ShowRegs <$ symbol "r")
     <|> (ShowMem <$> (symbol "memory" *> address))
+    <|> (ShowMem <$> (symbol "mem" *> address))
     <|> (ShowMem <$> (symbol "m" *> address))
-    <|> (ShowDisassembly . Just <$> (symbol "code" *> address))
-    <|> (ShowDisassembly Nothing <$ symbol "code")
-    <|> (ShowDisassembly . Just <$> try (symbol "c" *> address))
-    <|> (ShowDisassembly Nothing <$ symbol "c")
-    <|> (Step <$> try (symbol "step" *> L.decimal))
-    <|> (Step <$> try (symbol "s" *> L.decimal))
-    <|> (Step 1 <$ symbol "step")
-    <|> (Step 1 <$ symbol "s")
-    <|> (Reset <$ symbol "reset")
+    <|> (ShowDisassembly <$> (symbol "code" *> optional address))
+    <|> (ShowDisassembly <$> (symbol "c" *> optional address))
+    <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
+    <|> (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
+    <|> (AddBreakpoint <$> try (symbol "break" *> address))
+    <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
+    <|> (DisableBreakpiont <$> try (symbol "disable" *> symbol "break" *> address))
+    <|> (ListBreakpoints <$ symbol "breakpoints")

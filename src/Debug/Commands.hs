@@ -1,8 +1,13 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Debug.Commands where
 
+import           Common
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Data.Functor
 import           Data.Word
+import           Debug.Breakpoints
 import           Debug.Dump
 import           Foreign.ForeignPtr
 import           Foreign.Storable
@@ -15,13 +20,22 @@ data Command = ShowHeader
              | ShowMem Word16
              | ShowDisassembly (Maybe Word16)
              | Step Int
+             | Run
              | Reset
+             | AddBreakpoint Word16
+             | DeleteBreakpoint Word16
+             | DisableBreakpiont Word16
+             | ListBreakpoints
              deriving (Eq, Ord, Show)
 
 -- | The current state of the debugger.
 data DebugState = DebugState {
     cpu :: !CPUState
+  , breakpoints :: BreakpointTable
 }
+
+initDebug :: CPUState -> IO DebugState
+initDebug cpuState = DebugState cpuState <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a
@@ -38,6 +52,14 @@ hoistCPU computation = do
   put $ debugState { cpu = cpuState' }
   pure r
 
+breakpointDecorator :: Debug (Word16 -> IO Char)
+breakpointDecorator = do
+  table <- gets breakpoints
+  pure $ \addr -> getBreakpoint table addr <&> \case
+    Nothing    -> ' '
+    Just True  -> '*'
+    Just False -> '-'
+
 doCommand :: Command -> Debug ()
 doCommand ShowHeader = do
   mem <- ask
@@ -50,20 +72,53 @@ doCommand (ShowMem addr) = do
   mem <- ask
   liftIO $ dumpMem mem addr
 doCommand (ShowDisassembly Nothing) = do
-  mem <- ask
-  pc  <- hoistCPU readPC
-  liftIO $ dumpDisassembly mem pc 10
+  mem       <- ask
+  pc        <- hoistCPU readPC
+  decorator <- breakpointDecorator
+  liftIO $ dumpDisassembly decorator mem pc 10
 doCommand (ShowDisassembly (Just addr)) = do
-  mem <- ask
-  liftIO $ dumpDisassembly mem addr 10
+  mem       <- ask
+  decorator <- breakpointDecorator
+  liftIO $ dumpDisassembly decorator mem addr 10
 doCommand (Step n0) = do
-  mem <- ask
-  hoistCPU $ go n0
-  pc  <- hoistCPU readPC
-  liftIO $ dumpDisassembly mem pc 4
+  mem        <- ask
+  breakpoint <- gets breakpoints
+  hoistCPU $ go breakpoint n0
+  decorator <- breakpointDecorator
+  pc        <- hoistCPU readPC
+  liftIO $ dumpDisassembly decorator mem pc 4
  where
-  go 0 = pure ()
-  go n = do
-    cpuStep
-    go (n - 1)
-doCommand Reset = hoistCPU $ writePC 0x150
+  go _          0 = pure ()
+  go breakpoint n = do
+    void cpuStep
+    brk <- shouldBreak breakpoint
+    if brk then pure () else go breakpoint (n - 1)
+doCommand Run = do
+  mem        <- ask
+  breakpoint <- gets breakpoints
+  hoistCPU $ go breakpoint
+  decorator <- breakpointDecorator
+  pc        <- hoistCPU readPC
+  liftIO $ dumpDisassembly decorator mem pc 4
+ where
+  go breakpoint = do
+    void cpuStep
+    brk <- shouldBreak breakpoint
+    if brk then pure () else go breakpoint
+doCommand Reset                = hoistCPU reset
+doCommand (AddBreakpoint addr) = do
+  table <- gets breakpoints
+  liftIO $ setBreakpoint table addr True
+doCommand (DeleteBreakpoint addr) = do
+  table <- gets breakpoints
+  liftIO $ clearBreakpoint table addr
+doCommand (DisableBreakpiont addr) = do
+  table <- gets breakpoints
+  liftIO $ setBreakpoint table addr False
+doCommand ListBreakpoints = do
+  table <- gets breakpoints
+  liftIO $ do
+    allBreakpoints <- listBreakpoints table
+    when (null allBreakpoints) $ putStrLn "No breakpoints set"
+    forM_ allBreakpoints
+      $ \(addr, enabled) -> putStrLn $ formatHex addr ++ if not enabled then " (disabled)" else ""

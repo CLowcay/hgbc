@@ -235,6 +235,21 @@ clearIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .&. complement flagIME)
 
+-- | Reset the CPU.
+reset :: CPU ()
+reset = do
+  writeR8 RegA 0
+  writeR8 RegB 0
+  writeR8 RegC 0
+  writeR8 RegD 0
+  writeR8 RegE 0
+  writeR8 RegF 0
+  writeR8 RegH 0
+  writeR8 RegL 0
+  writeR16 RegSP 0
+  setIME
+  writePC 0x150
+
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
 

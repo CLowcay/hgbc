@@ -139,7 +139,7 @@ instance Format Instruction where
   format LDA_DEI              = "LD A (DE)"
   format LDA_CI               = "LD A (C)"
   format LDCI_A               = "LD (C) A"
-  format (LDA_I8I  w8 )       = "LD A " ++ formatHex w8
+  format (LDA_I8I  w8 )       = "LD A (FF" ++ formatHex w8 ++ ")"
   format (LDI8I_A  w8 )       = "LD (FF" ++ formatHex w8 ++ ") A"
   format (LDA_I16I w16)       = "LD A (" ++ formatHex w16 ++ ")"
   format (LDI16I_A w16)       = "LD (" ++ formatHex w16 ++ ") A"
