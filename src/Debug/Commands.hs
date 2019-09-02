@@ -11,8 +11,6 @@ import           Data.IORef
 import           Data.Word
 import           Debug.Breakpoints
 import           Debug.Dump
-import           Foreign.ForeignPtr
-import           Foreign.Storable
 import           GBC.CPU
 import           GBC.ISA
 import           GBC.Memory
@@ -81,7 +79,7 @@ type BreakPreCondition = CPU Bool
 
 -- | A condition to check after executing the next instruction. Break if the
 -- condition is True.
-type BreakPostCondition = DebugInfo -> CPU Bool
+type BreakPostCondition = BusEvent -> CPU Bool
 
 -- | Break after a certain number of instructions have been executed.
 breakOnCountOf :: Int -> Debug BreakPreCondition
@@ -132,8 +130,7 @@ doCommand ShowHeader = do
   mem <- ask
   liftIO . dumpHeader $ getROMHeader mem
 doCommand ShowRegs = do
-  rawRegisters <- registers <$> gets cpu
-  registerFile <- liftIO $ withForeignPtr rawRegisters peek
+  registerFile <- hoistCPU getRegisterFile
   liftIO $ dumpRegisters registerFile
 doCommand (ShowMem addr) = do
   mem <- ask
@@ -160,12 +157,10 @@ doCommand (RunTo breakAddr) = do
   postConditions <- sequence [breakOnBreakpoints, pure $ breakOnPC breakAddr]
   doRun [] postConditions
   disassembleAtPC
-doCommand Reset              = hoistCPU reset
-doCommand (Poke8 addr value) = do
-  mem <- ask
-  liftIO $ writeMem mem addr value
-doCommand (PokeR8  reg value ) = hoistCPU $ writeR8 reg value
-doCommand (PokeR16 reg value ) = hoistCPU $ writeR16 reg value
+doCommand Reset                = hoistCPU reset
+doCommand (Poke8   addr value) = writeMem addr value
+doCommand (PokeR8  reg  value) = hoistCPU $ writeR8 reg value
+doCommand (PokeR16 reg  value) = hoistCPU $ writeR16 reg value
 doCommand (AddBreakpoint addr) = do
   table <- gets breakpoints
   liftIO $ setBreakpoint table addr True

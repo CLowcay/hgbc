@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -6,6 +7,7 @@ module GBC.Memory where
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
+import           Control.Monad.Reader
 import           Foreign.Storable
 import           GBC.ROM
 import qualified Data.ByteString               as B
@@ -21,15 +23,19 @@ initMemory (ROM rom) = Memory rom <$> mallocForeignPtrArray 0x7FFF
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
 
-readByte :: Memory -> Word16 -> IO Word8
-readByte Memory {..} addr = if addr < 0x8000
-  then pure $ memRom `B.index` fromIntegral addr
-  else withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
+readByte :: (MonadIO m, MonadReader Memory m) => Word16 -> m Word8
+readByte addr = do
+  Memory {..} <- ask
+  if addr < 0x8000
+    then pure $ memRom `B.index` fromIntegral addr
+    else liftIO $ withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
 
-writeMem :: Storable a => Memory -> Word16 -> a -> IO ()
-writeMem Memory {..} addr value = if addr < 0x8000
-  then pure ()
-  else withForeignPtr memRam $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
+writeMem :: (Storable a, MonadIO m, MonadReader Memory m) => Word16 -> a -> m ()
+writeMem addr value = do
+  Memory {..} <- ask
+  if addr < 0x8000
+    then pure ()
+    else liftIO $ withForeignPtr memRam $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
 
 readChunk :: Memory -> Word16 -> Int -> IO B.ByteString
 readChunk Memory {..} base len = (<>) <$> romData <*> ramData

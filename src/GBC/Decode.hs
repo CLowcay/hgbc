@@ -160,17 +160,15 @@ decode = do
 
 nextByte :: Decode Word8
 nextByte = do
-  mem  <- ask
   addr <- get
-  r    <- liftIO $ readByte mem addr
+  r    <- readByte addr
   modify (+ 1)
   pure r
 
 nextWord :: Decode Word16
 nextWord = do
-  mem  <- ask
   addr <- get
-  l    <- liftIO $ fromIntegral <$> readByte mem addr
-  h    <- liftIO $ fromIntegral <$> readByte mem (addr + 1)
+  l    <- fromIntegral <$> readByte addr
+  h    <- fromIntegral <$> readByte (addr + 1)
   modify (+ 2)
   pure $ (h `unsafeShiftL` 8) .|. l

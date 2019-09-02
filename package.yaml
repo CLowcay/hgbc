@@ -57,3 +57,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - hgbc
+    - hspec
