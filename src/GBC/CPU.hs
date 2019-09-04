@@ -191,10 +191,10 @@ writeSmallOperand8 SmallHLI           value = do
 
 type Flag = Word8
 flagZ, flagN, flagH, flagCY :: Flag
-flagZ = 0x80
-flagN = 0x40
-flagH = 0x20
-flagCY = 0x10
+flagZ = 0x10
+flagN = 0x20
+flagH = 0x40
+flagCY = 0x80
 
 -- Master interrupt enable flag
 flagIME :: Word16
@@ -265,8 +265,8 @@ adder8 op a1 a2 carry = do
         OpAdd -> wa1 + wa2 + (if carry then 1 else 0)
         OpSub -> wa1 - wa2 - (if carry then 1 else 0)
   let r       = fromIntegral wr
-  let carryH = (wa1 .&. 0x0010) `xor` (wa1 .&. 0x0010) /= (wr .&. 0x0010)
-  let carryCY = (wa1 .&. 0x0100) `xor` (wa1 .&. 0x0100) /= (wr .&. 0x0100)
+  let carryH = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
+  let carryCY = (wa1 .&. 0x0100) `xor` (wa2 .&. 0x0100) /= (wr .&. 0x0100)
   setFlags
     $   (if r == 0 then flagZ else 0)
     .|. (if op == OpSub then flagN else 0)
