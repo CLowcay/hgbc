@@ -176,6 +176,30 @@ spec = do
     incdec DEC 1    0    (flagN .|. flagZ)
     incdec DEC 0x10 0x0F (flagN .|. flagH)
     incdec DEC 0    0xFF (flagN .|. flagH)
+  describe "ADDHL" $ do
+    addHL 0      0      0      0
+    addHL 0      1      1      0
+    addHL 0x00FF 1      0x0100 0
+    addHL 0x0800 0x0800 0x1000 flagH
+    addHL 0x8000 0x8000 0x0000 flagCY
+    addHL 0x8800 0x8800 0x1000 (flagCY .|. flagH)
+    addHLHL 0      0      0
+    addHLHL 0x0800 0x1000 flagH
+    addHLHL 0x8000 0x0000 flagCY
+    addHLHL 0x8800 0x1000 (flagCY .|. flagH)
+  describe "ADDSP" $ do
+    addSP 300    1    301    0
+    addSP 300    (-1) 299    (flagCY .|. flagH)
+    addSP 0x00FF 1    0x0100 0
+    addSP 0x0FFF 1    0x1000 flagH
+    addSP 0xFFFF 1    0x0000 (flagH .|. flagCY)
+  describe "INC16" $ do
+    incdec16 INC16 0 1
+    incdec16 INC16 0xFFFF 0
+  describe "DEC16" $ do
+    incdec16 DEC16 3 2
+    incdec16 DEC16 1 0
+    incdec16 DEC16 0 0xFFFF
 
 noReadWrite :: BusEvent
 noReadWrite = BusEvent [] []
@@ -513,7 +537,7 @@ arithmeticOpA instruction value (expected, expectedCarry) (expectedFlags, expect
 incdec :: (SmallOperand8 -> Instruction) -> Word8 -> Word8 -> Word8 -> Spec
 incdec instruction value expected expectedFlags = do
   forM_ [minBound .. maxBound] $ \register ->
-    it ("works for " ++ format (instruction $ SmallR8 register) ++ " " ++ show value)
+    it ("works for " ++ format (instruction $ SmallR8 register) ++ " (" ++ show value ++ ")")
       $ withNewCPU
       $ do
           writeR8 register value
@@ -526,7 +550,7 @@ incdec instruction value expected expectedFlags = do
                 liftIO $ do
                   ev `shouldBe` noReadWrite
                   r `shouldBe` expected
-  it ("works for " ++ format (instruction SmallHLI) ++ " " ++ show value) $ withNewCPU $ do
+  it ("works for " ++ format (instruction SmallHLI) ++ " (" ++ show value ++ ")") $ withNewCPU $ do
     writeR16 RegHL 0xC000
     withAllFlagCombos $ withFlagsUpdate (flagH .|. flagN .|. flagZ) expectedFlags $ do
       writeMem 0xC000 value
@@ -534,4 +558,58 @@ incdec instruction value expected expectedFlags = do
       r  <- readByte 0xC000
       liftIO $ do
         ev `shouldBe` BusEvent [0xC000] [0xC000]
+        r `shouldBe` expected
+
+addHL :: Word16 -> Word16 -> Word16 -> Word8 -> Spec
+addHL value addend expected expectedFlags =
+  forM_ (filter (/= RegHL) [minBound .. maxBound]) $ \register ->
+    it ("works for ADD HL " ++ show register ++ " (" ++ show (value, addend) ++ ")")
+      $ withNewCPU
+      $ do
+          writeR16 RegHL    value
+          writeR16 register addend
+          withAllFlagCombos
+            $ withFlagsUpdate (flagCY .|. flagH .|. flagN) expectedFlags
+            $ preserving16 RegHL
+            $ do
+                ev <- executeInstruction $ ADDHL register
+                r  <- readR16 RegHL
+                liftIO $ do
+                  ev `shouldBe` noReadWrite
+                  r `shouldBe` expected
+
+addHLHL :: Word16 -> Word16 -> Word8 -> Spec
+addHLHL value expected expectedFlags =
+  it ("works for ADD HL HL (" ++ show value ++ ")") $ withNewCPU $ do
+    writeR16 RegHL value
+    withAllFlagCombos
+      $ withFlagsUpdate (flagCY .|. flagH .|. flagN) expectedFlags
+      $ preserving16 RegHL
+      $ do
+          ev <- executeInstruction $ ADDHL RegHL
+          r  <- readR16 RegHL
+          liftIO $ do
+            ev `shouldBe` noReadWrite
+            r `shouldBe` expected
+
+addSP :: Word16 -> Int8 -> Word16 -> Word8 -> Spec
+addSP value e expected expectedFlags =
+  it ("works for ADD SP e (" ++ show e ++ ")") $ withNewCPU $ do
+    writeR16 RegSP value
+    withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ preserving16 RegSP $ do
+      ev <- executeInstruction $ ADDSP e
+      r  <- readR16 RegSP
+      liftIO $ do
+        ev `shouldBe` noReadWrite
+        r `shouldBe` expected
+
+incdec16 :: (Register16 -> Instruction) -> Word16 -> Word16 -> Spec
+incdec16 instruction value expected = forM_ [minBound .. maxBound] $ \register ->
+  it ("works for " ++ format (instruction register) ++ " (" ++ show value ++ ")") $ withNewCPU $ do
+    writeR16 register value
+    withAllFlagCombos $ withNoChangeToRegisters $ preserving16 register $ do
+      ev <- executeInstruction $ instruction register
+      r  <- readR16 register
+      liftIO $ do
+        ev `shouldBe` noReadWrite
         r `shouldBe` expected
