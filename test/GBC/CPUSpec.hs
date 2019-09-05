@@ -46,7 +46,7 @@ withNewCPU computation = do
 
 withAllFlagCombos :: CPU () -> CPU ()
 withAllFlagCombos computation = forM_ [0 .. 0xF] $ \flags -> do
-  writeR8 RegF $ (flags `unsafeShiftL` 4) .|. 0x0A
+  writeF $ (flags `unsafeShiftL` 4) .|. 0x0A
   computation
 
 withNoChangeToRegisters :: CPU () -> CPU ()
@@ -59,10 +59,10 @@ withNoChangeToRegisters computation = do
 withFlagsUpdate :: Word8 -> Word8 -> CPU () -> CPU ()
 withFlagsUpdate mask expected computation = do
   registerFile0 <- getRegisterFile
-  flags0        <- readR8 RegF
+  flags0        <- readF
   computation
-  flags1 <- readR8 RegF
-  writeR8 RegF flags0
+  flags1 <- readF
+  writeF flags0
   registerFile1 <- getRegisterFile
   liftIO $ do
     registerFile1 `shouldBe` registerFile0
@@ -71,13 +71,13 @@ withFlagsUpdate mask expected computation = do
 withFlagsUpdateZ :: Word8 -> (Word8, Word8) -> CPU () -> CPU ()
 withFlagsUpdateZ mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
-  flags0        <- readR8 RegF
+  flags0        <- readF
   a0            <- readR8 RegA
   hasCarry      <- testFlag flagCY
   computation
-  flags1 <- readR8 RegF
+  flags1 <- readF
   a1     <- readR8 RegA
-  writeR8 RegF flags0
+  writeF flags0
   writeR8 RegA a0
   registerFile1 <- getRegisterFile
   liftIO $ do
@@ -192,11 +192,9 @@ ld_r8 = do
     $ \(source, dest) -> it ("works for LD " ++ show dest ++ ", " ++ show source) $ withNewCPU $ do
         writeR8 source 0x42
         withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
-          flags0 <- readR8 RegF
-          ev     <- executeInstruction $ LD_R8 dest (R8 source)
-          r      <- readR8 dest
-          when (dest == RegF) $ writeR8 RegF flags0
-          liftIO $ verifyLoad r (if source == RegF then flags0 else 0x42) ev noReadWrite
+          ev <- executeInstruction $ LD_R8 dest (R8 source)
+          r  <- readR8 dest
+          liftIO $ verifyLoad r 0x42 ev noReadWrite
   forM_ [minBound .. maxBound] $ \dest -> do
     it ("works for LD " ++ show dest ++ ", 0x42")
       $ withNewCPU
@@ -204,19 +202,15 @@ ld_r8 = do
       $ withNoChangeToRegisters
       $ preservingR8 dest
       $ do
-          flags0 <- readR8 RegF
-          ev     <- executeInstruction $ LD_R8 dest (I8 0x42)
-          r      <- readR8 dest
-          when (dest == RegF) $ writeR8 RegF flags0
+          ev <- executeInstruction $ LD_R8 dest (I8 0x42)
+          r  <- readR8 dest
           liftIO $ verifyLoad r 0x42 ev noReadWrite
     it ("works for LD " ++ show dest ++ ", (HL)") $ withNewCPU $ do
       writeR16 RegHL 0xC000
       withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
-        flags0 <- readR8 RegF
         writeMem 0xC000 (0x42 :: Word8)
         ev <- executeInstruction $ LD_R8 dest HLI
         r  <- readR8 dest
-        when (dest == RegF) $ writeR8 RegF flags0
         liftIO $ verifyLoad r 0x42 ev (didRead [0xC000])
 
 ldhli_r8 :: Spec
@@ -230,7 +224,6 @@ ldhli_r8 = forM_ [minBound .. maxBound] $ \source ->
       expected <- case source of
         RegH -> pure 0xC0
         RegL -> pure 0x00
-        RegF -> readR8 RegF
         _    -> pure 0x42
       liftIO $ verifyLoad r expected ev (didWrite [0xC000])
 
@@ -369,7 +362,7 @@ push = forM_ [minBound .. maxBound] $ \source ->
       RegSP -> writeR8 RegA 0x42
       _     -> writeR16 source 0x0102
     withAllFlagCombos $ withNoChangeToRegisters $ preserving16 RegSP $ do
-      flags0 <- readR8 RegF
+      flags0 <- readF
       ev     <- executeInstruction $ PUSH source
       sp'    <- readR16 RegSP
       l      <- readByte sp'
@@ -390,7 +383,7 @@ pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest)
     sp' <- readR16 RegSP
     r   <- case dest of
       RegSP -> do
-        l <- readR8 RegF
+        l <- readF
         h <- readR8 RegA
         pure $ (fromIntegral h `unsafeShiftL` 8) .|. fromIntegral l
       _ -> readR16 dest
@@ -401,9 +394,9 @@ pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest)
  where
   specialPreserving16 RegSP computation = do
     a <- readR8 RegA
-    f <- readR8 RegF
+    f <- readF
     void computation
-    writeR8 RegF f
+    writeF f
     writeR8 RegA a
   specialPreserving16 r computation = do
     v <- readR16 r
@@ -440,23 +433,20 @@ allFlags = flagCY .|. flagH .|. flagZ .|. flagN
 
 arithmeticOp :: (Operand8 -> Instruction) -> (Word8, Word8) -> (Word8, Word8) -> Word8 -> Spec
 arithmeticOp instruction (a, r) (expected, expectedWithCarry) expectedFlags = do
-  forM_ (filter (\register -> register /= RegA && register /= RegF) [minBound .. maxBound])
-    $ \register ->
-        it ("works for " ++ format (instruction $ R8 register) ++ " " ++ show (a, r))
-          $ withNewCPU
-          $ do
-              writeR8 RegA     a
-              writeR8 register r
-              withAllFlagCombos
-                $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
-                $ preservingR8 register
-                $ do
-                    hasCarry <- testFlag flagCY
-                    ev       <- executeInstruction $ instruction $ R8 register
-                    a'       <- readR8 RegA
-                    liftIO $ do
-                      ev `shouldBe` noReadWrite
-                      a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
+  forM_ (filter (/= RegA) [minBound .. maxBound]) $ \register ->
+    it ("works for " ++ format (instruction $ R8 register) ++ " " ++ show (a, r)) $ withNewCPU $ do
+      writeR8 RegA     a
+      writeR8 register r
+      withAllFlagCombos
+        $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
+        $ preservingR8 register
+        $ do
+            hasCarry <- testFlag flagCY
+            ev       <- executeInstruction $ instruction $ R8 register
+            a'       <- readR8 RegA
+            liftIO $ do
+              ev `shouldBe` noReadWrite
+              a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
   it ("works for " ++ format (instruction $ I8 r) ++ " " ++ show (a, r)) $ withNewCPU $ do
     writeR8 RegA a
     withAllFlagCombos $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags) $ do
@@ -480,13 +470,13 @@ arithmeticOp instruction (a, r) (expected, expectedWithCarry) expectedFlags = do
 
 cp :: (Word8, Word8) -> Word8 -> Spec
 cp (a, r) expectedFlags = do
-  forM_ (filter (\register -> register /= RegA && register /= RegF) [minBound .. maxBound])
-    $ \register -> it ("works for CP " ++ show register ++ " " ++ show (a, r)) $ withNewCPU $ do
-        writeR8 RegA     a
-        writeR8 register r
-        withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
-          ev <- executeInstruction $ CP $ R8 register
-          liftIO $ ev `shouldBe` noReadWrite
+  forM_ (filter (/= RegA) [minBound .. maxBound]) $ \register ->
+    it ("works for CP " ++ show register ++ " " ++ show (a, r)) $ withNewCPU $ do
+      writeR8 RegA     a
+      writeR8 register r
+      withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
+        ev <- executeInstruction $ CP $ R8 register
+        liftIO $ ev `shouldBe` noReadWrite
   it ("works for CP " ++ show r ++ " " ++ show (a, r)) $ withNewCPU $ do
     writeR8 RegA a
     withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
@@ -522,7 +512,7 @@ arithmeticOpA instruction value (expected, expectedCarry) (expectedFlags, expect
 
 incdec :: (SmallOperand8 -> Instruction) -> Word8 -> Word8 -> Word8 -> Spec
 incdec instruction value expected expectedFlags = do
-  forM_ (filter (/= RegF) [minBound .. maxBound]) $ \register ->
+  forM_ [minBound .. maxBound] $ \register ->
     it ("works for " ++ format (instruction $ SmallR8 register) ++ " " ++ show value)
       $ withNewCPU
       $ do
@@ -545,5 +535,3 @@ incdec instruction value expected expectedFlags = do
       liftIO $ do
         ev `shouldBe` BusEvent [0xC000] [0xC000]
         r `shouldBe` expected
-
-

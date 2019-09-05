@@ -83,7 +83,6 @@ register8 =
     <|> (RegC <$ "C")
     <|> (RegD <$ "D")
     <|> (RegE <$ "E")
-    <|> (RegF <$ "F")
     <|> (RegH <$ "H")
     <|> (RegL <$ "L")
 

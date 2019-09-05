@@ -132,7 +132,6 @@ offsetR8 RegB = offsetB
 offsetR8 RegC = offsetC
 offsetR8 RegD = offsetD
 offsetR8 RegE = offsetE
-offsetR8 RegF = offsetF
 offsetR8 RegH = offsetH
 offsetR8 RegL = offsetL
 
@@ -203,7 +202,7 @@ flagIME = 0x0100
 -- | Check if a flag is set.
 testFlag :: Flag -> CPU Bool
 testFlag flag = do
-  f <- readR8 RegF
+  f <- readRegister offsetF
   pure $ f .&. flag /= 0
 
 -- | Check if a condition code is true.
@@ -213,6 +212,14 @@ testCondition (Just CondNZ) = not <$> testFlag flagZ
 testCondition (Just CondZ ) = testFlag flagZ
 testCondition (Just CondNC) = not <$> testFlag flagCY
 testCondition (Just CondC ) = testFlag flagCY
+
+-- | Read the F register.
+readF :: CPU Word8
+readF = readRegister offsetF
+
+-- | Write the F register.
+writeF :: Word8 -> CPU ()
+writeF = writeRegister offsetF
 
 -- | Set all the flags.
 setFlags :: Word8 -> CPU ()
@@ -224,8 +231,8 @@ setFlagsMask
   -> Word8 -- ^ new flags values.
   -> CPU ()
 setFlagsMask mask flags = do
-  oldFlags <- readR8 RegF
-  writeR8 RegF $ (oldFlags .&. complement mask) .|. (flags .&. mask)
+  oldFlags <- readRegister offsetF
+  writeRegister offsetF $ (oldFlags .&. complement mask) .|. (flags .&. mask)
 
 -- | Set the master interrupt flag.
 setIME :: CPU ()
@@ -247,7 +254,7 @@ reset = do
   writeR8 RegC 0
   writeR8 RegD 0
   writeR8 RegE 0
-  writeR8 RegF 0
+  writeRegister offsetF (0 :: Word8)
   writeR8 RegH 0
   writeR8 RegL 0
   writeR16 RegSP 0

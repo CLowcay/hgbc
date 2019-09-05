@@ -5,7 +5,7 @@ import           Common
 import           Data.Int
 
 -- | An 8-bit register.
-data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL | RegF deriving (Eq, Ord, Show, Bounded, Enum)
+data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | A 16-bit register.
 data Register16 = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Show, Bounded, Enum)
@@ -25,7 +25,6 @@ instance Format Register8 where
   format RegC = "C"
   format RegD = "D"
   format RegE = "E"
-  format RegF = "F"
   format RegH = "H"
   format RegL = "L"
 
