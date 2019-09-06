@@ -222,16 +222,18 @@ spec = do
     shiftRotate RLC (False, 1)    (False, 2)
     shiftRotate RLC (True , 1)    (False, 2)
     shiftRotate RLC (False, 0x81) (True , 0x03)
+    shiftRotate RLC (True , 0)    (False, 0)
   describe "RL" $ do
     shiftRotate RL (False, 1)    (False, 2)
     shiftRotate RL (True , 1)    (False, 3)
     shiftRotate RL (False, 0x81) (True , 0x02)
-    shiftRotate RL (True , 0x81) (True , 0x03)
+    shiftRotate RL (False, 0x80) (True , 0x00)
   describe "RRC" $ do
     shiftRotate RRC (False, 1) (True , 0x80)
     shiftRotate RRC (True , 1) (True , 0x80)
     shiftRotate RRC (False, 2) (False, 1)
     shiftRotate RRC (True , 2) (False, 1)
+    shiftRotate RRC (True , 0) (False, 0)
   describe "RR" $ do
     shiftRotate RR (False, 1) (True , 0)
     shiftRotate RR (True , 1) (True , 0x80)
@@ -249,7 +251,8 @@ spec = do
   describe "SWAP" $ do
     shiftRotate SWAP (False, 0xDE) (False, 0xED)
     shiftRotate SWAP (True , 0xDE) (False, 0xED)
-  bitTest
+    shiftRotate SWAP (True , 0)    (False, 0)
+  describe "BIT " bitTest
   describe "SET" $ setReset SET True
   describe "RES" $ setReset RES False
 
@@ -424,11 +427,20 @@ simpleLoads = do
         verifyLoad r 0x42 ev (didWrite [0xC000])
         hl `shouldBe` 0xBFFF
   describe "LDSP" $ it "works for LD SP, HL" $ withNewCPU $ do
-    writeR16 RegHL 0x4242
+    writeR16 RegHL 0x5642
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ do
       ev <- executeInstruction LDSP
       r  <- readR16 RegSP
-      liftIO $ verifyLoad r 0x4242 ev noReadWrite
+      liftIO $ verifyLoad r 0x5642 ev noReadWrite
+  describe "LD16_I16" $ forM_ [minBound .. maxBound] $ \register ->
+    it ("works for LD " ++ show register ++ " 0x5642")
+      $ withNewCPU
+      $ withNoChangeToRegisters
+      $ preservingR16 register
+      $ do
+          ev <- executeInstruction $ LD16_I16 register 0x5642
+          r  <- readR16 register
+          liftIO $ verifyLoad r 0x5642 ev noReadWrite
 
 push :: Spec
 push = forM_ [minBound .. maxBound] $ \source ->
