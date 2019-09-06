@@ -646,17 +646,17 @@ executeInstruction instruction = case instruction of
     (value, readAddr) <- readSmallOperand8 so8
     setFlagsMask (flagH .|. flagN .|. flagZ)
       $   flagH
-      .|. (if value `testBit` (fromIntegral w8) then 0 else 1)
+      .|. (if value `testBit` fromIntegral w8 then 0 else flagZ)
     pure $ BusEvent readAddr []
   -- SET b \<r8|(HL)\>
   SET w8 so8 -> do
     (value, readAddr) <- readSmallOperand8 so8
-    writeAddr         <- writeSmallOperand8 so8 (value `setBit` (fromIntegral w8))
+    writeAddr         <- writeSmallOperand8 so8 (value `setBit` fromIntegral w8)
     pure $ BusEvent readAddr writeAddr
   -- RES b \<r8|(HL)\>
   RES w8 so8 -> do
     (value, readAddr) <- readSmallOperand8 so8
-    writeAddr         <- writeSmallOperand8 so8 (value `clearBit` (fromIntegral w8))
+    writeAddr         <- writeSmallOperand8 so8 (value `clearBit` fromIntegral w8)
     pure $ BusEvent readAddr writeAddr
   -- JP cc im16
   JP cc w16 -> do
