@@ -1,6 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 
-module GBC.Decode where
+module GBC.Decode
+  ( Decode
+  , runDecode
+  , decode
+  , decodeN
+  )
+where
 
 import           GBC.Memory
 import           GBC.ISA

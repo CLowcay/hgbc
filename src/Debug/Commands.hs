@@ -24,6 +24,7 @@ import           Debug.Dump
 import           Debug.Map
 import           GBC.CPU
 import           GBC.ISA
+import           GBC.Decode
 import           GBC.Memory
 
 data MemAddress = ConstAddress Word16 | LabelAddress String deriving (Eq, Ord, Show)
@@ -34,6 +35,7 @@ data Command = ShowHeader
              | ShowMem MemAddress
              | ShowDisassembly (Maybe MemAddress)
              | Step Int
+             | StepOut
              | Run
              | RunTo MemAddress
              | Reset
@@ -124,6 +126,18 @@ breakOnBreakpoints = do
 breakOnPC :: Word16 -> BreakPostCondition
 breakOnPC pc = const $ (pc ==) <$> readPC
 
+-- | Break when a RET instruction is executed with the current stack pointer.
+breakOnRet :: Word16 -> BreakPreCondition
+breakOnRet originalSP = do
+  sp <- readR16 RegSP
+  instruction <- decodeOnly decode
+  case instruction of
+    Just (RET condition) -> do
+      shouldRet <- testCondition condition
+      pure $ shouldRet && originalSP == sp
+    Just RETI -> pure $ originalSP == sp
+    _ -> pure False
+
 -- | Run the interpreter until one of the break conditions is met.
 doRun :: [BreakPreCondition] -> [BreakPostCondition] -> Debug ()
 doRun preConditions postConditions = hoistCPU go
@@ -181,6 +195,15 @@ doCommand (Step n) = do
   preConditions  <- sequence [breakOnCountOf n]
   postConditions <- sequence [breakOnBreakpoints]
   doRun preConditions postConditions
+  disassembleAtPC
+doCommand StepOut = do
+  sp <- hoistCPU $ readR16 RegSP
+  postConditions <- sequence [breakOnBreakpoints]
+  doRun [breakOnRet sp] postConditions
+  table <- gets breakpoints
+  hoistCPU $ do
+    wasBreakpoint <- shouldBreak table
+    unless wasBreakpoint $ void cpuStep
   disassembleAtPC
 doCommand Run = do
   postConditions <- sequence [breakOnBreakpoints]

@@ -74,6 +74,7 @@ command =
     <|> (ShowDisassembly <$> (symbol "c" *> optional address))
     <|> (ListSymbols <$ symbol "symbols")
     <|> (AddSymbol <$> try (symbol "symbol" *> labelValue) <*> try (symbol "=" *> value16))
+    <|> (StepOut <$ try (symbol "step" *> symbol "out"))
     <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (AddBreakpoint <$> try (symbol "break" *> address))

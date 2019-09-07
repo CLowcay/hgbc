@@ -301,20 +301,28 @@ inc8 op value = do
     .|. (if carryH then flagH else 0)
   pure r
 
--- | Embed a 'Decode' action inside the 'CPU' monad.
-hoistDecode :: Decode a -> CPU a
-hoistDecode action = do
+-- | Decode an instruction and advance the PC.
+decodeAndAdvancePC :: Decode a -> CPU a
+decodeAndAdvancePC action = do
   mem      <- ask
   pc       <- readPC
   (r, pc') <- liftIO $ runStateT (runReaderT action mem) pc
   writePC pc'
   pure r
 
+-- | Decode an instruction.
+decodeOnly :: Decode a -> CPU a
+decodeOnly action = do
+  mem      <- ask
+  pc       <- readPC
+  (r, _) <- liftIO $ runStateT (runReaderT action mem) pc
+  pure r
+
 -- | Fetch, decode, and execute a single instruction.
 cpuStep :: CPU BusEvent
 cpuStep = do
   pc0 <- readPC
-  hoistDecode decode >>= \case
+  decodeAndAdvancePC decode >>= \case
     Nothing          -> error $ "Invalid instruction at " ++ show pc0
     Just instruction -> executeInstruction instruction
 
