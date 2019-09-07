@@ -516,3 +516,10 @@ spec = describe "decode" $ do
   it "decodes HALT" $ [0b01_110_110] `decodesTo` Just HALT
   it "decodes STOP" $ [0b00_010_000, 0] `decodesTo` Just STOP
   it "does not decode invalid STOP" $ [0b00_010_000, 1] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_100 100" $ [0b11_100_100] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_101 100" $ [0b11_101_100] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_110 100" $ [0b11_110_100] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_111 100" $ [0b11_111_100] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_011 101" $ [0b11_011_101] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_101 101" $ [0b11_101_101] `decodesTo` Nothing
+  it "does not decode invalid instruction 11_111 101" $ [0b11_111_101] `decodesTo` Nothing

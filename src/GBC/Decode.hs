@@ -87,13 +87,17 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 3 0  3  = Just . JP Nothing <$> nextWord
   decodeBytes 3 6  3  = pure . Just $ DI
   decodeBytes 3 7  3  = pure . Just $ EI
-  decodeBytes 3 cc 4  = Just . CALL (conditionCode cc) <$> nextWord
-  decodeBytes 3 1  5  = Just . CALL Nothing <$> nextWord
-  decodeBytes 3 qq 5  = pure . Just $ PUSH (registerPair qq)
-  decodeBytes 3 op 6  = Just . aluOp op . I8 <$> nextByte
-  decodeBytes 3 t  7  = pure . Just $ RST t
+  decodeBytes 3 cc 4 =
+    if cc .&. 0x04 /= 0 then pure Nothing else Just . CALL (conditionCode cc) <$> nextWord
+  decodeBytes 3 1  5 = Just . CALL Nothing <$> nextWord
+  decodeBytes 3 3  5 = pure Nothing
+  decodeBytes 3 5  5 = pure Nothing
+  decodeBytes 3 7  5 = pure Nothing
+  decodeBytes 3 qq 5 = pure . Just $ PUSH (registerPair qq)
+  decodeBytes 3 op 6 = Just . aluOp op . I8 <$> nextByte
+  decodeBytes 3 t  7 = pure . Just $ RST t
 
-  decodeBytes 3 1  3  = do
+  decodeBytes 3 1  3 = do
     b1 <- nextByte
     pure $ case splitByte b1 of
       (0, 0, 6) -> Just $ RLC SmallHLI
