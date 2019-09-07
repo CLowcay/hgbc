@@ -2,6 +2,7 @@ module GBC.CPUSpec where
 
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.State.Class
 import           Data.Bits
 import           Data.Int
 import           Data.Word
@@ -23,6 +24,7 @@ withNewCPU computation = do
   void $ runCPU mem cpu computationWithVerification
  where
   computationWithVerification = do
+    reset
     computation
     registersConsistent
 
@@ -57,16 +59,20 @@ withNoChangeToRegisters computation = do
   liftIO $ registerFile1 `shouldBe` registerFile0
 
 withFlagsUpdate :: Word8 -> Word8 -> CPU () -> CPU ()
-withFlagsUpdate mask expected computation = do
+withFlagsUpdate mask expected = withFlagsUpdateC mask (expected, expected)
+
+withFlagsUpdateC :: Word8 -> (Word8, Word8) -> CPU () -> CPU ()
+withFlagsUpdateC mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
   flags0        <- readF
+  hasCarry      <- testFlag flagCY
   computation
   flags1 <- readF
   writeF flags0
   registerFile1 <- getRegisterFile
   liftIO $ do
     registerFile1 `shouldBe` registerFile0
-    (flags1 .&. mask) `shouldBe` expected
+    (flags1 .&. mask) `shouldBe` (if hasCarry then expectedCarry else expected)
 
 withFlagsUpdateZ :: Word8 -> (Word8, Word8) -> CPU Word8 -> CPU ()
 withFlagsUpdateZ mask (expected, expectedCarry) computation = do
@@ -81,6 +87,15 @@ withFlagsUpdateZ mask (expected, expectedCarry) computation = do
     registerFile1 `shouldBe` registerFile0
     (flags1 .&. mask)
       `shouldBe` ((if hasCarry then expectedCarry else expected) .|. if a1 == 0 then flagZ else 0)
+
+withIMEUpdate :: CPU () -> CPU ()
+withIMEUpdate computation = do
+  ime <- testIME
+  setIME
+  computation
+  clearIME
+  computation
+  if ime then setIME else clearIME
 
 preservingR8 :: Register8 -> CPU a -> CPU a
 preservingR8 register computation = do
@@ -255,6 +270,81 @@ spec = do
   describe "BIT " bitTest
   describe "SET" $ setReset SET True
   describe "RES" $ setReset RES False
+  jp
+  call
+  rst
+  ret
+  describe "CPL"
+    $ it "works for CPL"
+    $ withNewCPU
+    $ withAllFlagCombos
+    $ withFlagsUpdate (flagH .|. flagN) (flagH .|. flagN)
+    $ preservingR8 RegA
+    $ do
+        writeR8 RegA 0x12
+        ev <- executeInstruction CPL
+        a' <- readR8 RegA
+        liftIO $ do
+          ev `shouldBe` noReadWrite
+          a' `shouldBe` 0xED
+  describe "NOP"
+    $ it "works for NOP"
+    $ withNewCPU
+    $ withAllFlagCombos
+    $ withNoChangeToRegisters
+    $ do
+        ev <- executeInstruction NOP
+        liftIO $ ev `shouldBe` noReadWrite
+  describe "HALT" $ it "halts the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
+    ev   <- executeInstruction HALT
+    mode <- gets cpuMode
+    liftIO $ do
+      ev `shouldBe` noReadWrite
+      mode `shouldBe` ModeHalt
+  describe "STOP" $ it "stops the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
+    ev   <- executeInstruction STOP
+    mode <- gets cpuMode
+    liftIO $ do
+      ev `shouldBe` noReadWrite
+      mode `shouldBe` ModeStop
+  describe "DI"
+    $ it "disables the master interrupt flat"
+    $ withNewCPU
+    $ withNoChangeToRegisters
+    $ withIMEUpdate
+    $ do
+        ev  <- executeInstruction DI
+        ime <- testIME
+        liftIO $ do
+          ev `shouldBe` noReadWrite
+          ime `shouldBe` False
+  describe "EI"
+    $ it "enables the master interrupt flat"
+    $ withNewCPU
+    $ withNoChangeToRegisters
+    $ withIMEUpdate
+    $ do
+        ev  <- executeInstruction EI
+        ime <- testIME
+        liftIO $ do
+          ev `shouldBe` noReadWrite
+          ime `shouldBe` True
+  describe "SCF"
+    $ it "sets the carry flag"
+    $ withNewCPU
+    $ withAllFlagCombos
+    $ withFlagsUpdate (flagCY .|. flagH .|. flagN) flagCY
+    $ do
+        ev <- executeInstruction SCF
+        liftIO $ ev `shouldBe` noReadWrite
+  describe "CCF"
+    $ it "complements the carry flag"
+    $ withNewCPU
+    $ withAllFlagCombos
+    $ withFlagsUpdateC (flagCY .|. flagH .|. flagN) (flagCY, 0)
+    $ do
+        ev <- executeInstruction CCF
+        liftIO $ ev `shouldBe` noReadWrite
 
 noReadWrite :: BusEvent
 noReadWrite = BusEvent [] []
@@ -799,3 +889,126 @@ setReset instruction doSet = do
         r `shouldBe` result
   preserving SmallHLI    = id
   preserving (SmallR8 r) = preservingR8 r
+
+preservingPC :: CPU a -> CPU a
+preservingPC computation = do
+  pc <- readPC
+  r  <- computation
+  writePC pc
+  pure r
+
+isConditionTrue :: Maybe ConditionCode -> CPU Bool
+isConditionTrue Nothing       = pure True
+isConditionTrue (Just CondC ) = testFlag flagCY
+isConditionTrue (Just CondNC) = not <$> testFlag flagCY
+isConditionTrue (Just CondZ ) = testFlag flagZ
+isConditionTrue (Just CondNZ) = not <$> testFlag flagZ
+
+jp :: Spec
+jp = do
+  describe "JP" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
+    it ("works for JP " ++ show condition ++ " 0x3242")
+      $ withNewCPU
+      $ withAllFlagCombos
+      $ withNoChangeToRegisters
+      $ preservingPC
+      $ do
+          pc0        <- readPC
+          ev         <- executeInstruction $ JP condition 0x3242
+          pc1        <- readPC
+          shouldJump <- isConditionTrue condition
+          liftIO $ do
+            ev `shouldBe` noReadWrite
+            pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
+  describe "JR"
+    $ forM_
+        [ (condition, value)
+        | condition <- Nothing : (Just <$> [minBound .. maxBound])
+        , value     <- [3, -5]
+        ]
+    $ \(condition, value) ->
+        it ("works for JR " ++ show condition ++ " " ++ show (condition, value))
+          $ withNewCPU
+          $ withAllFlagCombos
+          $ withNoChangeToRegisters
+          $ preservingPC
+          $ do
+              pc0        <- readPC
+              ev         <- executeInstruction $ JR condition value
+              pc1        <- readPC
+              shouldJump <- isConditionTrue condition
+              liftIO $ do
+                ev `shouldBe` noReadWrite
+                pc1 `shouldBe` (if shouldJump then pc0 + fromIntegral value else pc0)
+  describe "JP (HL)" $ it "works for JP (HL)" $ withNewCPU $ withAllFlagCombos $ do
+    writeR16 RegHL 0x3242
+    withNoChangeToRegisters $ preservingPC $ do
+      ev <- executeInstruction JPI
+      pc <- readPC
+      liftIO $ do
+        ev `shouldBe` noReadWrite
+        pc `shouldBe` 0x3242
+
+call :: Spec
+call = describe "CALL" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
+  it ("works for CALL " ++ show condition ++ " 0x3242") $ withNewCPU $ do
+    writeR16 RegSP 0xC000
+    withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
+      pc0        <- readPC
+      ev         <- executeInstruction $ CALL condition 0x3242
+      pc1        <- readPC
+      sp1        <- readR16 RegSP
+      shouldJump <- isConditionTrue condition
+      liftIO $ do
+        ev `shouldBe` (if shouldJump then didWrite [0xBFFE, 0xBFFF] else noReadWrite)
+        pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
+        sp1 `shouldBe` (if shouldJump then 0xBFFE else 0xC000)
+
+rst :: Spec
+rst = describe "RST" $ forM_ [0 .. 7] $ \op -> it ("works for RST " ++ show op) $ withNewCPU $ do
+  writeR16 RegSP 0xC000
+  withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
+    ev  <- executeInstruction $ RST op
+    pc1 <- readPC
+    sp1 <- readR16 RegSP
+    liftIO $ do
+      ev `shouldBe` didWrite [0xBFFE, 0xBFFF]
+      pc1 `shouldBe` fromIntegral (op * 8)
+      sp1 `shouldBe` 0xBFFE
+
+ret :: Spec
+ret = do
+  describe "RET" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
+    it ("works for RET " ++ show condition) $ withNewCPU $ do
+      writeR16 RegSP 0xC000
+      writeMem 0xC000 (0x3242 :: Word16)
+      withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
+        pc0        <- readPC
+        ev         <- executeInstruction $ RET condition
+        pc1        <- readPC
+        sp1        <- readR16 RegSP
+        shouldJump <- isConditionTrue condition
+        liftIO $ do
+          ev `shouldBe` (if shouldJump then didRead [0xC000, 0xC001] else noReadWrite)
+          pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
+          sp1 `shouldBe` (if shouldJump then 0xC002 else 0xC000)
+  describe "RETI"
+    $ it "works for RETI"
+    $ withNewCPU
+    $ withAllFlagCombos
+    $ withNoChangeToRegisters
+    $ preservingPC
+    $ preservingR16 RegSP
+    $ withIMEUpdate
+    $ do
+        writeR16 RegSP 0xC000
+        writeMem 0xC000 (0x3242 :: Word16)
+        ev  <- executeInstruction RETI
+        pc1 <- readPC
+        sp1 <- readR16 RegSP
+        ime <- testIME
+        liftIO $ do
+          ev `shouldBe` didRead [0xC000, 0xC001]
+          pc1 `shouldBe` 0x3242
+          sp1 `shouldBe` 0xC002
+          ime `shouldBe` True

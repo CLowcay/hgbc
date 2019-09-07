@@ -246,6 +246,12 @@ clearIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .&. complement flagIME)
 
+-- | Check the status of the interrupt flag.
+testIME :: CPU Bool
+testIME = do
+  ime <- readRegister offsetHidden
+  pure $ ime .&. flagIME /= 0
+
 -- | Reset the CPU.
 reset :: CPU ()
 reset = do
@@ -258,6 +264,7 @@ reset = do
   writeR8 RegH 0
   writeR8 RegL 0
   writeR16 RegSP 0
+  writeRegister offsetHidden (0 :: Word8)
   setIME
   writePC 0x150
 
@@ -689,6 +696,7 @@ executeInstruction instruction = case instruction of
         pure $ BusEvent [] [sp', sp' + 1]
   -- RETI
   RETI -> do
+    -- TODO: Revisit this.
     sp  <- readR16 RegSP
     pcL <- fromIntegral <$> readByte sp
     pcH <- fromIntegral <$> readByte (sp + 1)
@@ -722,6 +730,7 @@ executeInstruction instruction = case instruction of
   -- CPL
   CPL -> do
     writeR8 RegA =<< complement <$> readR8 RegA
+    setFlagsMask (flagH .|. flagN) (flagH .|. flagN)
     pure $ BusEvent [] []
   -- NOP
   NOP  -> pure $ BusEvent [] []
@@ -744,9 +753,9 @@ executeInstruction instruction = case instruction of
   -- CCF
   CCF -> do
     cf <- testFlag flagCY
-    setFlagsMask flagCY $ if cf then 0 else flagCY
+    setFlagsMask (flagCY .|. flagH .|. flagN) $ if cf then 0 else flagCY
     pure $ BusEvent [] []
   -- SCF
   SCF -> do
-    setFlagsMask flagCY flagCY
+    setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
     pure $ BusEvent [] []
