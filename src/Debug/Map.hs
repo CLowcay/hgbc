@@ -1,4 +1,13 @@
-module Debug.Map where
+module Debug.Map
+  ( addToMap
+  , removeFromMap
+  , listSymbols
+  , mapFileName
+  , saveMap
+  , loadMap
+  , initMap
+  )
+where
 
 import           Common
 import           Control.Monad
@@ -6,6 +15,7 @@ import           Data.List
 import           Data.Word
 import           System.FilePath
 import           System.IO
+import           System.Directory
 import qualified Data.HashMap.Strict           as HM
 
 -- | Add a symbol to the code map.
@@ -22,11 +32,12 @@ removeFromMap (SymbolTable to from) label = case HM.lookup label from of
 -- | List all the symbols in the code map.
 listSymbols :: SymbolTable -> [(String, Word16)]
 listSymbols (SymbolTable _ allSymbols) =
-  let SymbolTable _ builtIn = defaultCodeMap in sortOn snd . HM.toList $ allSymbols `HM.difference` builtIn
+  let SymbolTable _ builtIn = defaultCodeMap
+  in  sortOn snd . HM.toList $ allSymbols `HM.difference` builtIn
 
 -- | Get the default name for the map file for a ROM file.
 mapFileName :: FilePath -> FilePath
-mapFileName romPath = romPath <.> ".map~"
+mapFileName romPath = romPath <.> ".map"
 
 -- | Save the map file.
 saveMap :: FilePath -> SymbolTable -> IO ()
@@ -41,6 +52,12 @@ loadMap filePath = do
   pure $ SymbolTable (to `HM.union` HM.fromList (swap <$> symbols))
                      (from `HM.union` HM.fromList symbols)
   where swap (a, b) = (b, a)
+
+-- | Initialize the code map for a given ROM file name.
+initMap :: FilePath -> IO SymbolTable
+initMap romFile = do
+  hasMapFile <- doesFileExist $ mapFileName romFile
+  if hasMapFile then loadMap (mapFileName romFile) else pure defaultCodeMap
 
 -- | The built-in code map.
 defaultCodeMap :: SymbolTable

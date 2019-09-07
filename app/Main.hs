@@ -20,12 +20,9 @@ main = do
       putStrLn $ "Error validating ROM " ++ show romFile ++ ": " ++ err
       exitFailure
     Right rom -> do
-      let header = extractHeader rom
-      mem       <- initMemory rom
-      cpuState0 <- initCPU
-      cpuState  <- runCPU mem cpuState0 $ do
-        writePC $ startAddress header
-        setIME
+      mem        <- initMemory rom
+      cpuState0  <- initCPU
+      cpuState   <- runCPU mem cpuState0 reset
       debugState <- initDebug romFile cpuState
       runDebugger mem debugState
 

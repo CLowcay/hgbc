@@ -1,4 +1,13 @@
-module Debug.Breakpoints where
+module Debug.Breakpoints
+  ( BreakpointTable
+  , initBreakpointTable
+  , setBreakpoint
+  , getBreakpoint
+  , shouldBreak
+  , clearBreakpoint
+  , listBreakpoints
+  )
+where
 
 import           Prelude                 hiding ( lookup )
 import           Data.HashTable.IO
@@ -19,8 +28,8 @@ getBreakpoint = lookup
 
 shouldBreak :: BreakpointTable -> CPU Bool
 shouldBreak table = do
-    pc <- readPC
-    liftIO $ (== Just True) <$> lookup table pc
+  pc <- readPC
+  liftIO $ (== Just True) <$> lookup table pc
 
 clearBreakpoint :: BreakpointTable -> Word16 -> IO ()
 clearBreakpoint = delete

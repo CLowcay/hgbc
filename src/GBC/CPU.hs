@@ -2,7 +2,44 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module GBC.CPU where
+module GBC.CPU
+  ( RegisterFile(..)
+  , CPUMode(..)
+  , CPUState(..)
+  , CPU
+  , BusEvent(..)
+  , initCPU
+  , reset
+  , runCPU
+  , decodeOnly
+  , getRegisterFile
+  , readR8
+  , writeR8
+  , readR16
+  , writeR16
+  , readPC
+  , writePC
+  , readF
+  , writeF
+  , testFlag
+  , setFlags
+  , setFlagsMask
+  , setIME
+  , clearIME
+  , testIME
+  , flagCY
+  , flagN
+  , flagH
+  , flagZ
+  , flagIME
+  , testCondition
+  , readOperand8
+  , readSmallOperand8
+  , writeSmallOperand8
+  , executeInstruction
+  , cpuStep
+  )
+where
 
 import           Data.Word
 import           Foreign.Storable
@@ -346,8 +383,8 @@ decodeAndAdvancePC action = do
 -- | Decode an instruction.
 decodeOnly :: Decode a -> CPU a
 decodeOnly action = do
-  mem      <- ask
-  pc       <- readPC
+  mem    <- ask
+  pc     <- readPC
   (r, _) <- liftIO $ runStateT (runReaderT action mem) pc
   pure r
 

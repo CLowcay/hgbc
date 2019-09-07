@@ -16,7 +16,6 @@ import           Control.Monad.Loops
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
 import           Data.Functor
-import           System.Directory
 import           Data.IORef
 import           Data.Word
 import           Debug.Breakpoints
@@ -62,9 +61,8 @@ data DebugState = DebugState {
 -- | Initialise the debugger.
 initDebug :: FilePath -> CPUState -> IO DebugState
 initDebug romFile cpuState = do
-  hasMapFile <- doesFileExist $ mapFileName romFile
-  initMap    <- if hasMapFile then loadMap (mapFileName romFile) else pure defaultCodeMap
-  DebugState cpuState romFile initMap <$> initBreakpointTable
+  codeMap <- initMap romFile
+  DebugState cpuState romFile codeMap <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a

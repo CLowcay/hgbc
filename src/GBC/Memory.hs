@@ -2,7 +2,15 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module GBC.Memory where
+module GBC.Memory
+  ( Memory
+  , initMemory
+  , getROMHeader
+  , readByte
+  , writeMem
+  , readChunk
+  )
+where
 
 import           Data.Word
 import           Foreign.ForeignPtr

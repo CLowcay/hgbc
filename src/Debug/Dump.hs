@@ -1,5 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
-module Debug.Dump where
+module Debug.Dump
+  ( dumpRegisters
+  , dumpHeader
+  , dumpDisassembly
+  , dumpMem
+  )
+where
 
 import           Common
 import           Control.Monad
