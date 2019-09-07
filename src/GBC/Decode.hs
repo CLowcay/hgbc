@@ -6,7 +6,7 @@ import           GBC.Memory
 import           GBC.ISA
 import           Data.Bits
 import           Data.Array
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 import           Control.Monad.Reader
 import           Data.Word
 

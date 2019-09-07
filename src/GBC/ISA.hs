@@ -134,7 +134,8 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
 
 formatOrLookup16 :: SymbolTable -> Word16 -> String
 formatOrLookup16 table value =
-  maybe (formatHex value) (\l -> formatHex value ++ "[" ++ l ++ "]") $ HM.lookup value table
+  let SymbolTable reverseMap _ = table
+  in maybe (formatHex value) (\l -> formatHex value ++ "#" ++ l) $ HM.lookup value reverseMap
 
 formatOrLookup8 :: SymbolTable -> Word8 -> String
 formatOrLookup8 table value = formatOrLookup16 table $ 0xFF00 .|. fromIntegral value

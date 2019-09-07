@@ -1,5 +1,7 @@
 module Common
-  ( SymbolTable
+  ( SymbolTable(..)
+  , lookupByAddress
+  , lookupBySymbol
   , Format(..)
   , formatHex
   )
@@ -9,11 +11,17 @@ import           Data.Bits
 import           Data.Word
 import qualified Data.HashMap.Strict           as HM
 
-type SymbolTable = HM.HashMap Word16 String
+data SymbolTable = SymbolTable !(HM.HashMap Word16 String) !(HM.HashMap String Word16)
+
+lookupByAddress :: SymbolTable -> Word16 -> Maybe String
+lookupByAddress (SymbolTable addrTable _) addr = HM.lookup addr addrTable
+
+lookupBySymbol :: SymbolTable -> String -> Maybe Word16
+lookupBySymbol (SymbolTable _ symbolTable) label = HM.lookup label symbolTable
 
 class Format c where
   format :: c -> String
-  format = formatWithSymbolTable HM.empty
+  format = formatWithSymbolTable $ SymbolTable HM.empty HM.empty
   formatWithSymbolTable :: SymbolTable -> c -> String
   formatWithSymbolTable _ = format
 

@@ -12,7 +12,7 @@ import           GBC.Memory
 import           GBC.ISA
 import           GBC.Decode
 import           Control.Monad.Reader
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 import           Data.Int
 
 -- | The register file.

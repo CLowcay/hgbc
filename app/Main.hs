@@ -26,7 +26,7 @@ main = do
       cpuState  <- runCPU mem cpuState0 $ do
         writePC $ startAddress header
         setIME
-      debugState <- initDebug cpuState
+      debugState <- initDebug romFile cpuState
       runDebugger mem debugState
 
 runDebugger :: Memory -> DebugState -> IO ()

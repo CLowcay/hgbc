@@ -42,14 +42,17 @@ lexeme = L.lexeme (space1 <|> eof)
 symbol :: T.Text -> Parser T.Text
 symbol s = lexeme $ string' s
 
-address :: Parser Word16
-address = lexeme L.hexadecimal
+address :: Parser MemAddress
+address = (ConstAddress <$> lexeme L.hexadecimal) <|> (LabelAddress <$> labelValue)
 
 value :: Parser Word8
 value = lexeme L.hexadecimal
 
 value16 :: Parser Word16
 value16 = lexeme L.hexadecimal
+
+labelValue :: Parser String
+labelValue = lexeme $ (:) <$> letterChar <*> many alphaNumChar
 
 command :: Parser Command
 command =
@@ -69,12 +72,15 @@ command =
     <|> (ShowMem <$> ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address))
     <|> (ShowDisassembly <$> (symbol "code" *> optional address))
     <|> (ShowDisassembly <$> (symbol "c" *> optional address))
+    <|> (ListSymbols <$ symbol "symbols")
+    <|> (AddSymbol <$> try (symbol "symbol" *> labelValue) <*> try (symbol "=" *> value16))
     <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (AddBreakpoint <$> try (symbol "break" *> address))
-    <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
     <|> (DisableBreakpiont <$> try (symbol "disable" *> symbol "break" *> address))
     <|> (ListBreakpoints <$ symbol "breakpoints")
+    <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
+    <|> (DeleteSymbol <$> try (symbol "delete" *> symbol "symbol" *> labelValue))
 
 register8 :: Parser Register8
 register8 =

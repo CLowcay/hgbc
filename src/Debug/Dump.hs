@@ -81,6 +81,9 @@ dumpDisassembly decorator symbolTable mem base n = do
   instructions <- decodeN mem base n
   forM_ instructions $ \(addr, instruction) -> do
     decoration <- decorator addr
+    case lookupByAddress symbolTable addr of
+      Nothing    -> pure ()
+      Just label -> putStrLn $ (' ' <$ decoration) ++ label ++ ":"
     putStrLn
       $  decoration
       ++ formatHex addr

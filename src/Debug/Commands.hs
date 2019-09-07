@@ -1,110 +1,68 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedLists #-}
 
-module Debug.Commands where
+module Debug.Commands
+  ( Command(..)
+  , MemAddress(..)
+  , DebugState
+  , initDebug
+  , runDebug
+  , doCommand
+  )
+where
 
 import           Common
-import           Control.Monad.Reader
-import           Control.Monad.State
 import           Control.Monad.Loops
+import           Control.Monad.Reader
+import           Control.Monad.State.Strict
 import           Data.Functor
+import           System.Directory
 import           Data.IORef
 import           Data.Word
 import           Debug.Breakpoints
 import           Debug.Dump
+import           Debug.Map
 import           GBC.CPU
 import           GBC.ISA
 import           GBC.Memory
 
+data MemAddress = ConstAddress Word16 | LabelAddress String deriving (Eq, Ord, Show)
+
 -- | Debugger commands.
 data Command = ShowHeader
              | ShowRegs
-             | ShowMem Word16
-             | ShowDisassembly (Maybe Word16)
+             | ShowMem MemAddress
+             | ShowDisassembly (Maybe MemAddress)
              | Step Int
              | Run
-             | RunTo Word16
+             | RunTo MemAddress
              | Reset
-             | Poke8 Word16 Word8
+             | Poke8 MemAddress Word8
              | PokeR8 Register8 Word8
              | PokeR16 Register16 Word16
-             | AddBreakpoint Word16
-             | DeleteBreakpoint Word16
-             | DisableBreakpiont Word16
+             | AddBreakpoint MemAddress
+             | DeleteBreakpoint MemAddress
+             | DisableBreakpiont MemAddress
              | ListBreakpoints
+             | AddSymbol String Word16
+             | DeleteSymbol String
+             | ListSymbols
              deriving (Eq, Ord, Show)
 
 -- | The current state of the debugger.
 data DebugState = DebugState {
     cpu :: !CPUState
-  , symbolTable :: SymbolTable
-  , breakpoints :: BreakpointTable
+  , romFile :: !FilePath
+  , codeMap :: !SymbolTable
+  , breakpoints :: !BreakpointTable
 }
 
-initSymbolTable :: SymbolTable
-initSymbolTable =
-  [ (0xFF00, "P1")
-  , (0xFF01, "SB")
-  , (0xFF01, "SB")
-  , (0xFF02, "SC")
-  , (0xFF04, "DIV")
-  , (0xFF05, "TIMA")
-  , (0xFF06, "TMA")
-  , (0xFF07, "TAC")
-  , (0xFF0F, "IF")
-  , (0xFF10, "NR10")
-  , (0xFF11, "NR11")
-  , (0xFF12, "NR12")
-  , (0xFF13, "NR13")
-  , (0xFF14, "NR14")
-  , (0xFF16, "NR21")
-  , (0xFF17, "NR22")
-  , (0xFF18, "NR23")
-  , (0xFF19, "NR24")
-  , (0xFF1A, "NR30")
-  , (0xFF1B, "NR31")
-  , (0xFF1C, "NR32")
-  , (0xFF1D, "NR33")
-  , (0xFF1E, "NR34")
-  , (0xFF20, "NR41")
-  , (0xFF21, "NR42")
-  , (0xFF22, "NR43")
-  , (0xFF23, "NR44")
-  , (0xFF24, "NR50")
-  , (0xFF25, "NR51")
-  , (0xFF26, "NR52")
-  , (0xFF40, "LCDC")
-  , (0xFF41, "STAT")
-  , (0xFF42, "SCY")
-  , (0xFF43, "SCX")
-  , (0xFF44, "LY")
-  , (0xFF45, "LYC")
-  , (0xFF46, "DMA")
-  , (0xFF47, "BGP")
-  , (0xFF48, "OBP0")
-  , (0xFF49, "OBP1")
-  , (0xFF4A, "WY")
-  , (0xFF4B, "WX")
-  , (0xFF4D, "KEY1")
-  , (0xFF4F, "VBK")
-  , (0xFF51, "HDMA1")
-  , (0xFF52, "HDMA2")
-  , (0xFF53, "HDMA3")
-  , (0xFF54, "HDMA4")
-  , (0xFF55, "HDMA5")
-  , (0xFF56, "RP")
-  , (0xFF68, "BCPS")
-  , (0xFF69, "BCPD")
-  , (0xFF6A, "OCPS")
-  , (0xFF6B, "OCPD")
-  , (0xFF70, "SVBK")
-  , (0xFFFF, "IE")
-  ]
-
 -- | Initialise the debugger.
-initDebug :: CPUState -> IO DebugState
-initDebug cpuState = DebugState cpuState initSymbolTable <$> initBreakpointTable
+initDebug :: FilePath -> CPUState -> IO DebugState
+initDebug romFile cpuState = do
+  hasMapFile <- doesFileExist $ mapFileName romFile
+  initMap    <- if hasMapFile then loadMap (mapFileName romFile) else pure defaultCodeMap
+  DebugState cpuState romFile initMap <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a
@@ -186,7 +144,15 @@ disassembleAtPC = do
   DebugState {..} <- get
   decorator       <- makeDecorator
   pc              <- hoistCPU readPC
-  liftIO $ dumpDisassembly decorator symbolTable mem pc 4
+  liftIO $ dumpDisassembly decorator codeMap mem pc 4
+
+withAddress :: MemAddress -> (Word16 -> Debug ()) -> Debug ()
+withAddress (ConstAddress addr ) action = action addr
+withAddress (LabelAddress label) action = do
+  symbolTable <- gets codeMap
+  case lookupBySymbol symbolTable label of
+    Just addr -> action addr
+    Nothing   -> liftIO $ putStrLn $ "Unknown symbol " ++ label
 
 -- | Execute a debugger command.
 doCommand :: Command -> Debug ()
@@ -198,18 +164,19 @@ doCommand ShowRegs = do
   liftIO $ dumpRegisters registerFile
 doCommand (ShowMem addr) = do
   mem <- ask
-  liftIO $ dumpMem mem addr
+  withAddress addr $ liftIO . dumpMem mem
 doCommand (ShowDisassembly Nothing) = do
   mem             <- ask
   DebugState {..} <- get
   pc              <- hoistCPU readPC
   decorator       <- makeDecorator
-  liftIO $ dumpDisassembly decorator symbolTable mem pc 10
+  liftIO $ dumpDisassembly decorator codeMap mem pc 10
 doCommand (ShowDisassembly (Just addr)) = do
   mem             <- ask
   DebugState {..} <- get
   decorator       <- makeDecorator
-  liftIO $ dumpDisassembly decorator symbolTable mem addr 10
+  withAddress addr
+    $ \actualAddress -> liftIO $ dumpDisassembly decorator codeMap mem actualAddress 10
 doCommand (Step n) = do
   preConditions  <- sequence [breakOnCountOf n]
   postConditions <- sequence [breakOnBreakpoints]
@@ -219,23 +186,23 @@ doCommand Run = do
   postConditions <- sequence [breakOnBreakpoints]
   doRun [] postConditions
   disassembleAtPC
-doCommand (RunTo breakAddr) = do
-  postConditions <- sequence [breakOnBreakpoints, pure $ breakOnPC breakAddr]
+doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
+  postConditions <- sequence [breakOnBreakpoints, pure $ breakOnPC addr]
   doRun [] postConditions
   disassembleAtPC
 doCommand Reset                = hoistCPU reset
-doCommand (Poke8   addr value) = writeMem addr value
+doCommand (Poke8   addr value) = withAddress addr $ \actualAddr -> writeMem actualAddr value
 doCommand (PokeR8  reg  value) = hoistCPU $ writeR8 reg value
 doCommand (PokeR16 reg  value) = hoistCPU $ writeR16 reg value
-doCommand (AddBreakpoint addr) = do
+doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
   table <- gets breakpoints
-  liftIO $ setBreakpoint table addr True
-doCommand (DeleteBreakpoint addr) = do
+  liftIO $ setBreakpoint table breakAddr True
+doCommand (DeleteBreakpoint addr) = withAddress addr $ \breakAddr -> do
   table <- gets breakpoints
-  liftIO $ clearBreakpoint table addr
-doCommand (DisableBreakpiont addr) = do
+  liftIO $ clearBreakpoint table breakAddr
+doCommand (DisableBreakpiont addr) = withAddress addr $ \breakAddr -> do
   table <- gets breakpoints
-  liftIO $ setBreakpoint table addr False
+  liftIO $ setBreakpoint table breakAddr False
 doCommand ListBreakpoints = do
   table <- gets breakpoints
   liftIO $ do
@@ -243,3 +210,16 @@ doCommand ListBreakpoints = do
     when (null allBreakpoints) $ putStrLn "No breakpoints set"
     forM_ allBreakpoints
       $ \(addr, enabled) -> putStrLn $ formatHex addr ++ if not enabled then " (disabled)" else ""
+doCommand (AddSymbol symbol value) = do
+  debug <- get
+  let codeMap' = addToMap (codeMap debug) (symbol, value)
+  modify $ \s -> s { codeMap = codeMap' }
+  liftIO $ saveMap (mapFileName $ romFile debug) codeMap'
+doCommand (DeleteSymbol symbol) = do
+  debug <- get
+  let codeMap' = removeFromMap (codeMap debug) symbol
+  modify $ \s -> s { codeMap = codeMap' }
+  liftIO $ saveMap (mapFileName $ romFile debug) codeMap'
+doCommand ListSymbols = do
+  symbols <- listSymbols <$> gets codeMap
+  forM_ symbols $ \(label, value) -> liftIO $ putStrLn $ label ++ ": " ++ formatHex value

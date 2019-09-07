@@ -22,7 +22,9 @@ description:         Please see the README on GitHub at <https://github.com/CLow
 dependencies:
 - array
 - base >= 4.7 && < 5
+- filepath
 - binary
+- directory
 - bytestring
 - unordered-containers
 - hashable
