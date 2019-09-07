@@ -1,9 +1,21 @@
-module Common where
+module Common
+  ( SymbolTable
+  , Format(..)
+  , formatHex
+  )
+where
 
 import           Data.Bits
+import           Data.Word
+import qualified Data.HashMap.Strict           as HM
+
+type SymbolTable = HM.HashMap Word16 String
 
 class Format c where
   format :: c -> String
+  format = formatWithSymbolTable HM.empty
+  formatWithSymbolTable :: SymbolTable -> c -> String
+  formatWithSymbolTable _ = format
 
 {-# INLINABLE padLeft #-}
 padLeft :: Int -> String -> String

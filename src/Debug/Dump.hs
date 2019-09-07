@@ -76,8 +76,8 @@ formatByteCount b | b < 1024        = show b
                   | b < 1024 * 1024 = show (b `div` 1024) ++ "KiB"
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
-dumpDisassembly :: (Word16 -> IO String) -> Memory -> Word16 -> Int -> IO ()
-dumpDisassembly decorator mem base n = do
+dumpDisassembly :: (Word16 -> IO String) -> SymbolTable -> Memory -> Word16 -> Int -> IO ()
+dumpDisassembly decorator symbolTable mem base n = do
   instructions <- decodeN mem base n
   forM_ instructions $ \(addr, instruction) -> do
     decoration <- decorator addr
@@ -85,11 +85,11 @@ dumpDisassembly decorator mem base n = do
       $  decoration
       ++ formatHex addr
       ++ ": "
-      ++ format instruction
+      ++ formatWithSymbolTable symbolTable instruction
       ++ extraInfo addr instruction
  where
-  extraInfo addr (JR _ e) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo _    _         = ""
+  extraInfo addr (JR _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo _    _        = ""
 
 dumpMem :: Memory -> Word16 -> IO ()
 dumpMem mem base = forM_ [0 .. 15]
