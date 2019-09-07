@@ -12,6 +12,9 @@ import           Data.Word
 
 type Decode a = ReaderT Memory (StateT Word16 IO) a
 
+runDecode :: Memory -> Word16 -> Decode a -> IO (a, Word16)
+runDecode memory addr computation = runStateT (runReaderT computation memory) addr
+
 table :: Array Word8 (Decode (Maybe Instruction))
 table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
  where
