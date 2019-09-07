@@ -13,6 +13,8 @@ import           GBC.Memory
 import           GBC.ROM
 import           Test.Hspec
 import qualified Data.ByteString               as B
+import           Data.Function
+import           Data.Maybe
 
 blankROM :: ROM
 blankROM = ROM $ B.replicate (32 * 1024 * 1024) 0
@@ -347,13 +349,16 @@ spec = do
         liftIO $ ev `shouldBe` noReadWrite
 
 noReadWrite :: BusEvent
-noReadWrite = BusEvent [] []
+noReadWrite = BusEvent [] [] 4
 
 didRead :: [Word16] -> BusEvent
-didRead r = BusEvent r []
+didRead r = BusEvent r [] 8
 
 didWrite :: [Word16] -> BusEvent
-didWrite = BusEvent []
+didWrite w = BusEvent [] w 8
+
+expectClocks :: Int -> BusEvent -> BusEvent
+expectClocks c e = e { clockAdvance = c }
 
 ld_r8 :: Spec
 ld_r8 = do
@@ -373,14 +378,14 @@ ld_r8 = do
       $ do
           ev <- executeInstruction $ LD_R8 dest (I8 0x42)
           r  <- readR8 dest
-          liftIO $ verifyLoad r 0x42 ev noReadWrite
+          liftIO $ verifyLoad r 0x42 ev (noReadWrite & expectClocks 8)
     it ("works for LD " ++ show dest ++ ", (HL)") $ withNewCPU $ do
       writeR16 RegHL 0xC000
       withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
         writeMem 0xC000 (0x42 :: Word8)
         ev <- executeInstruction $ LD_R8 dest HLI
         r  <- readR8 dest
-        liftIO $ verifyLoad r 0x42 ev (didRead [0xC000])
+        liftIO $ verifyLoad r 0x42 ev (didRead [0xC000] & expectClocks 8)
 
 ldhli_r8 :: Spec
 ldhli_r8 = forM_ [minBound .. maxBound] $ \source ->
@@ -402,7 +407,7 @@ ldhli_i8 = it "works for LD (HL) 0x42" $ withNewCPU $ do
   withAllFlagCombos $ withNoChangeToRegisters $ do
     ev <- executeInstruction $ LDHLI_I8 0x42
     r  <- readByte 0xC000
-    liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000])
+    liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000] & expectClocks 12)
 
 simpleLoads :: Spec
 simpleLoads = do
@@ -439,25 +444,25 @@ simpleLoads = do
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDA_I8I 0x44
       r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev (didRead [0xFF44])
+      liftIO $ verifyLoad r 0x42 ev (didRead [0xFF44] & expectClocks 12)
   describe "LDI8I_A" $ it "works for LD (i8), A" $ withNewCPU $ do
     writeR8 RegA 0x42
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDI8I_A 0x44
       r  <- readByte 0xFF44
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44])
+      liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44] & expectClocks 12)
   describe "LDA_I16I" $ it "works for LD A, (i16)" $ withNewCPU $ do
     writeMem 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDA_I16I 0xC000
       r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev (didRead [0xC000])
+      liftIO $ verifyLoad r 0x42 ev (didRead [0xC000] & expectClocks 16)
   describe "LDI16I_A" $ it "works for LD (i16), A" $ withNewCPU $ do
     writeR8 RegA 0x42
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDI16I_A 0xC000
       r  <- readByte 0xC000
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000])
+      liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000] & expectClocks 16)
   describe "LDA_INC" $ it "works for LD A, (HL++)" $ withNewCPU $ do
     writeR16 RegHL 0xC000
     writeMem 0xC000 (0x42 :: Word8)
@@ -521,7 +526,7 @@ simpleLoads = do
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ do
       ev <- executeInstruction LDSP
       r  <- readR16 RegSP
-      liftIO $ verifyLoad r 0x5642 ev noReadWrite
+      liftIO $ verifyLoad r 0x5642 ev (noReadWrite & expectClocks 8)
   describe "LD16_I16" $ forM_ [minBound .. maxBound] $ \register ->
     it ("works for LD " ++ show register ++ " 0x5642")
       $ withNewCPU
@@ -530,7 +535,7 @@ simpleLoads = do
       $ do
           ev <- executeInstruction $ LD16_I16 register 0x5642
           r  <- readR16 register
-          liftIO $ verifyLoad r 0x5642 ev noReadWrite
+          liftIO $ verifyLoad r 0x5642 ev (noReadWrite & expectClocks 12)
 
 push :: Spec
 push = forM_ [minBound .. maxBound] $ \source ->
@@ -547,7 +552,7 @@ push = forM_ [minBound .. maxBound] $ \source ->
       h      <- readByte (sp' + 1)
       liftIO $ do
         sp' `shouldBe` 0xFFEE
-        ev `shouldBe` didWrite [sp', sp' + 1]
+        ev `shouldBe` (didWrite [sp', sp' + 1] & expectClocks 16)
         l `shouldBe` (if source == RegSP then flags0 else 0x02)
         h `shouldBe` (if source == RegSP then 0x42 else 0x01)
 
@@ -567,7 +572,7 @@ pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest)
       _ -> readR16 dest
     liftIO $ do
       sp' `shouldBe` 0xFFF2
-      ev `shouldBe` didRead [sp, sp + 1]
+      ev `shouldBe` (didRead [sp, sp + 1] & expectClocks 12)
       r `shouldBe` 0x0102
  where
   specialPreserving16 RegSP computation = do
@@ -591,7 +596,7 @@ ldi16i_sp = it "works for LD (0xC000), SP" $ withNewCPU $ do
     liftIO $ do
       l `shouldBe` 0xAD
       h `shouldBe` 0xDE
-      ev `shouldBe` didWrite [0xC000, 0xC001]
+      ev `shouldBe` (didWrite [0xC000, 0xC001] & expectClocks 20)
 
 ldhl :: Word16 -> Int8 -> Bool -> Bool -> Spec
 ldhl sp e expectCY expectH = it ("works for LDHL SP, " ++ show e) $ withNewCPU $ do
@@ -603,7 +608,7 @@ ldhl sp e expectCY expectH = it ("works for LDHL SP, " ++ show e) $ withNewCPU $
         ev <- executeInstruction $ LDHL e
         hl <- readR16 RegHL
         liftIO $ do
-          ev `shouldBe` noReadWrite
+          ev `shouldBe` (noReadWrite & expectClocks 12)
           hl `shouldBe` sp + fromIntegral e
 
 allFlags :: Word8
@@ -637,7 +642,7 @@ arithmeticOp instruction (a, r) (expected, expectedWithCarry) expectedFlags = do
           ev       <- executeInstruction $ instruction $ I8 r
           a'       <- readR8 RegA
           liftIO $ do
-            ev `shouldBe` noReadWrite
+            ev `shouldBe` (noReadWrite & expectClocks 8)
             a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
           pure a'
   it ("works for " ++ format (instruction HLI) ++ " " ++ show (a, r)) $ withNewCPU $ do
@@ -669,7 +674,7 @@ cp (a, r) expectedFlags = do
     writeR8 RegA a
     withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
       ev <- executeInstruction $ CP $ I8 r
-      liftIO $ ev `shouldBe` noReadWrite
+      liftIO $ ev `shouldBe` (noReadWrite & expectClocks 8)
   it ("works for CP (HL) " ++ show (a, r)) $ withNewCPU $ do
     writeR8 RegA a
     writeR16 RegHL 0xC000
@@ -724,7 +729,7 @@ incdec instruction value expected expectedFlags = do
       ev <- executeInstruction $ instruction SmallHLI
       r  <- readByte 0xC000
       liftIO $ do
-        ev `shouldBe` BusEvent [0xC000] [0xC000]
+        ev `shouldBe` BusEvent [0xC000] [0xC000] 12
         r `shouldBe` expected
 
 addHL :: Word16 -> Word16 -> Word16 -> Word8 -> Spec
@@ -742,7 +747,7 @@ addHL value addend expected expectedFlags =
                 ev <- executeInstruction $ ADDHL register
                 r  <- readR16 RegHL
                 liftIO $ do
-                  ev `shouldBe` noReadWrite
+                  ev `shouldBe` (noReadWrite & expectClocks 8)
                   r `shouldBe` expected
 
 addHLHL :: Word16 -> Word16 -> Word8 -> Spec
@@ -756,7 +761,7 @@ addHLHL value expected expectedFlags =
           ev <- executeInstruction $ ADDHL RegHL
           r  <- readR16 RegHL
           liftIO $ do
-            ev `shouldBe` noReadWrite
+            ev `shouldBe` (noReadWrite & expectClocks 8)
             r `shouldBe` expected
 
 addSP :: Word16 -> Int8 -> Word16 -> Word8 -> Spec
@@ -767,7 +772,7 @@ addSP value e expected expectedFlags =
       ev <- executeInstruction $ ADDSP e
       r  <- readR16 RegSP
       liftIO $ do
-        ev `shouldBe` noReadWrite
+        ev `shouldBe` (noReadWrite & expectClocks 16)
         r `shouldBe` expected
 
 incdec16 :: (Register16 -> Instruction) -> Word16 -> Word16 -> Spec
@@ -778,7 +783,7 @@ incdec16 instruction value expected = forM_ [minBound .. maxBound] $ \register -
       ev <- executeInstruction $ instruction register
       r  <- readR16 register
       liftIO $ do
-        ev `shouldBe` noReadWrite
+        ev `shouldBe` (noReadWrite & expectClocks 8)
         r `shouldBe` expected
 
 rotA :: Instruction -> (Bool, Word8) -> (Bool, Word8) -> Spec
@@ -814,7 +819,7 @@ shiftRotate instruction (carry, value) (expectedCarry, expected) = do
                 ev <- executeInstruction $ instruction $ SmallR8 register
                 r  <- readR8 register
                 liftIO $ do
-                  ev `shouldBe` noReadWrite
+                  ev `shouldBe` (noReadWrite & expectClocks 8)
                   r `shouldBe` expected
                 pure r
   it ("works for " ++ format (instruction SmallHLI) ++ show (carry, value))
@@ -828,7 +833,7 @@ shiftRotate instruction (carry, value) (expectedCarry, expected) = do
           ev <- executeInstruction $ instruction SmallHLI
           r  <- readByte 0xC000
           liftIO $ do
-            ev `shouldBe` BusEvent [0xC000] [0xC000]
+            ev `shouldBe` BusEvent [0xC000] [0xC000] 16
             r `shouldBe` expected
           pure r
 
@@ -839,13 +844,16 @@ bitTest = do
       $ withNewCPU
       $ withAllFlagCombos
       $ do
-          doTest (SmallR8 register) bitIndex (bit bitIndex)              0     noReadWrite
-          doTest (SmallR8 register) bitIndex (complement $ bit bitIndex) flagZ noReadWrite
+          doTest (SmallR8 register) bitIndex (bit bitIndex) 0 $ noReadWrite & expectClocks 8
+          doTest (SmallR8 register) bitIndex (complement $ bit bitIndex) flagZ
+            $ noReadWrite
+            & expectClocks 8
   forM_ [0 .. 7] $ \bitIndex ->
     it ("works for BIT (HL) " ++ show bitIndex) $ withNewCPU $ withAllFlagCombos $ do
       writeR16 RegHL 0xC000
-      doTest SmallHLI bitIndex (bit bitIndex) 0 $ didRead [0xC000]
-      doTest SmallHLI bitIndex (complement $ bit bitIndex) flagZ $ didRead [0xC000]
+      doTest SmallHLI bitIndex (bit bitIndex) 0 $ didRead [0xC000] & expectClocks 12
+      doTest SmallHLI bitIndex (complement $ bit bitIndex) flagZ $ didRead [0xC000] & expectClocks
+        12
 
  where
   doTest op8 bitIndex value expectedFlags expectedBusEvent = do
@@ -861,12 +869,15 @@ setReset instruction doSet = do
       $ withNewCPU
       $ withAllFlagCombos
       $ do
-          doTest (SmallR8 register) bitIndex 0 (if doSet then bit bitIndex else 0) noReadWrite
+          doTest (SmallR8 register) bitIndex 0 (if doSet then bit bitIndex else 0)
+            $ noReadWrite
+            & expectClocks 8
           doTest (SmallR8 register)
                  bitIndex
                  0xFF
                  (if doSet then 0xFF else complement (bit bitIndex))
-                 noReadWrite
+            $ noReadWrite
+            & expectClocks 8
   forM_ [0 .. 7] $ \bitIndex ->
     it ("works for " ++ format (instruction (fromIntegral bitIndex) SmallHLI))
       $ withNewCPU
@@ -874,9 +885,9 @@ setReset instruction doSet = do
       $ do
           writeR16 RegHL 0xC000
           doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0)
-            $ BusEvent [0xC000] [0xC000]
+            $ BusEvent [0xC000] [0xC000] 16
           doTest SmallHLI bitIndex 0xFF (if doSet then 0xFF else complement (bit bitIndex))
-            $ BusEvent [0xC000] [0xC000]
+            $ BusEvent [0xC000] [0xC000] 16
 
  where
   doTest op8 bitIndex value result expectedBusEvent = do
@@ -918,7 +929,7 @@ jp = do
           pc1        <- readPC
           shouldJump <- isConditionTrue condition
           liftIO $ do
-            ev `shouldBe` noReadWrite
+            ev `shouldBe` (noReadWrite & expectClocks (if shouldJump then 16 else 12))
             pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
   describe "JR"
     $ forM_
@@ -938,7 +949,7 @@ jp = do
               pc1        <- readPC
               shouldJump <- isConditionTrue condition
               liftIO $ do
-                ev `shouldBe` noReadWrite
+                ev `shouldBe` (noReadWrite & expectClocks (if shouldJump then 12 else 8))
                 pc1 `shouldBe` (if shouldJump then pc0 + fromIntegral value else pc0)
   describe "JP (HL)" $ it "works for JP (HL)" $ withNewCPU $ withAllFlagCombos $ do
     writeR16 RegHL 0x3242
@@ -946,7 +957,7 @@ jp = do
       ev <- executeInstruction JPI
       pc <- readPC
       liftIO $ do
-        ev `shouldBe` noReadWrite
+        ev `shouldBe` (noReadWrite & expectClocks 4)
         pc `shouldBe` 0x3242
 
 call :: Spec
@@ -960,7 +971,11 @@ call = describe "CALL" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \
       sp1        <- readR16 RegSP
       shouldJump <- isConditionTrue condition
       liftIO $ do
-        ev `shouldBe` (if shouldJump then didWrite [0xBFFE, 0xBFFF] else noReadWrite)
+        ev
+          `shouldBe` (if shouldJump
+                       then didWrite [0xBFFE, 0xBFFF] & expectClocks 24
+                       else noReadWrite & expectClocks 12
+                     )
         pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
         sp1 `shouldBe` (if shouldJump then 0xBFFE else 0xC000)
 
@@ -972,7 +987,7 @@ rst = describe "RST" $ forM_ [0 .. 7] $ \op -> it ("works for RST " ++ show op) 
     pc1 <- readPC
     sp1 <- readR16 RegSP
     liftIO $ do
-      ev `shouldBe` didWrite [0xBFFE, 0xBFFF]
+      ev `shouldBe` (didWrite [0xBFFE, 0xBFFF] & expectClocks 16)
       pc1 `shouldBe` fromIntegral (op * 8)
       sp1 `shouldBe` 0xBFFE
 
@@ -989,7 +1004,12 @@ ret = do
         sp1        <- readR16 RegSP
         shouldJump <- isConditionTrue condition
         liftIO $ do
-          ev `shouldBe` (if shouldJump then didRead [0xC000, 0xC001] else noReadWrite)
+          ev
+            `shouldBe` (if shouldJump
+                         then didRead [0xC000, 0xC001]
+                           & expectClocks (if isNothing condition then 16 else 20)
+                         else noReadWrite & expectClocks 8
+                       )
           pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
           sp1 `shouldBe` (if shouldJump then 0xC002 else 0xC000)
   describe "RETI"
@@ -1008,7 +1028,7 @@ ret = do
         sp1 <- readR16 RegSP
         ime <- testIME
         liftIO $ do
-          ev `shouldBe` didRead [0xC000, 0xC001]
+          ev `shouldBe` (didRead [0xC000, 0xC001] & expectClocks 16)
           pc1 `shouldBe` 0x3242
           sp1 `shouldBe` 0xC002
           ime `shouldBe` True

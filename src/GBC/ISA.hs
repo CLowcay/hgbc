@@ -1,4 +1,15 @@
-module GBC.ISA where
+module GBC.ISA
+  ( Register8(..)
+  , Register16(..)
+  , Operand8(..)
+  , SmallOperand8(..)
+  , ConditionCode(..)
+  , Instruction(..)
+  , clocks
+  , formatOrLookup8
+  , formatOrLookup16
+  )
+where
 
 import           Data.Word
 import           Common
@@ -74,7 +85,7 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
                  | LDHLI_INC                           -- ^ LD (HL++) A
                  | LDHLI_DEC                           -- ^ LD (HL--) A
                  | LD16_I16 !Register16 !Word16        -- ^ LD r16 im16
-                 | LDSP                                -- ^ LD HL SP
+                 | LDSP                                -- ^ LD SP HL
                  | PUSH !Register16                    -- ^ PUSH r16
                  | POP !Register16                     -- ^ POP r16
                  | LDHL !Int8                          -- ^ LDHL SP im8
@@ -132,10 +143,108 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
                  | EI                                  -- ^ EI
                  deriving (Eq, Ord, Show)
 
+-- | Calculate the number of clock cycles taken by an instruction.
+clocks
+  :: Instruction -- ^ The instruction to check.
+  -> Bool        -- ^ True if the conditional branch is taken, otherwise False.
+  -> Int
+clocks (LD_R8 _ (R8 _))        _          = 4
+clocks (LD_R8 _ (I8 _))        _          = 8
+clocks (LD_R8 _ HLI   )        _          = 8
+clocks (LDHLI_R8 _    )        _          = 8
+clocks (LDHLI_I8 _    )        _          = 12
+clocks LDA_BCI                 _          = 8
+clocks LDA_DEI                 _          = 8
+clocks LDA_CI                  _          = 8
+clocks LDCI_A                  _          = 8
+clocks (LDA_I8I  _)            _          = 12
+clocks (LDI8I_A  _)            _          = 12
+clocks (LDA_I16I _)            _          = 16
+clocks (LDI16I_A _)            _          = 16
+clocks LDA_INC                 _          = 8
+clocks LDA_DEC                 _          = 8
+clocks LDBCI_A                 _          = 8
+clocks LDDEI_A                 _          = 8
+clocks LDHLI_INC               _          = 8
+clocks LDHLI_DEC               _          = 8
+clocks (LD16_I16 _ _)          _          = 12
+clocks LDSP                    _          = 8
+clocks (PUSH      _          ) _          = 16
+clocks (POP       _          ) _          = 12
+clocks (LDHL      _          ) _          = 12
+clocks (LDI16I_SP _          ) _          = 20
+clocks (ADD       (R8 _)     ) _          = 4
+clocks (ADD       _          ) _          = 8
+clocks (ADC       (R8 _)     ) _          = 4
+clocks (ADC       _          ) _          = 8
+clocks (SUB       (R8 _)     ) _          = 4
+clocks (SUB       _          ) _          = 8
+clocks (SBC       (R8 _)     ) _          = 4
+clocks (SBC       _          ) _          = 8
+clocks (AND       (R8 _)     ) _          = 4
+clocks (AND       _          ) _          = 8
+clocks (OR        (R8 _)     ) _          = 4
+clocks (OR        _          ) _          = 8
+clocks (XOR       (R8 _)     ) _          = 4
+clocks (XOR       _          ) _          = 8
+clocks (CP        (R8 _)     ) _          = 4
+clocks (CP        _          ) _          = 8
+clocks (INC       (SmallR8 _)) _          = 4
+clocks (INC       SmallHLI   ) _          = 12
+clocks (DEC       (SmallR8 _)) _          = 4
+clocks (DEC       SmallHLI   ) _          = 12
+clocks (ADDHL     _          ) _          = 8
+clocks (ADDSP     _          ) _          = 16
+clocks (INC16     _          ) _          = 8
+clocks (DEC16     _          ) _          = 8
+clocks RLCA                    _          = 4
+clocks RLA                     _          = 4
+clocks RRCA                    _          = 4
+clocks RRA                     _          = 4
+clocks (RLC  (SmallR8 _) )     _          = 8
+clocks (RLC  SmallHLI    )     _          = 16
+clocks (RL   (SmallR8 _) )     _          = 8
+clocks (RL   SmallHLI    )     _          = 16
+clocks (RRC  (SmallR8 _) )     _          = 8
+clocks (RRC  SmallHLI    )     _          = 16
+clocks (RR   (SmallR8 _) )     _          = 8
+clocks (RR   SmallHLI    )     _          = 16
+clocks (SLA  (SmallR8 _) )     _          = 8
+clocks (SLA  SmallHLI    )     _          = 16
+clocks (SRA  (SmallR8 _) )     _          = 8
+clocks (SRA  SmallHLI    )     _          = 16
+clocks (SRL  (SmallR8 _) )     _          = 8
+clocks (SRL  SmallHLI    )     _          = 16
+clocks (SWAP (SmallR8 _) )     _          = 8
+clocks (SWAP SmallHLI    )     _          = 16
+clocks (BIT _ (SmallR8 _))     _          = 8
+clocks (BIT _ SmallHLI   )     _          = 12
+clocks (SET _ (SmallR8 _))     _          = 8
+clocks (SET _ SmallHLI   )     _          = 16
+clocks (RES _ (SmallR8 _))     _          = 8
+clocks (RES _ SmallHLI   )     _          = 16
+clocks (JP  _ _          )     takeBranch = if takeBranch then 16 else 12
+clocks (JR  _ _          )     takeBranch = if takeBranch then 12 else 8
+clocks JPI                     _          = 4
+clocks (CALL _ _)              takeBranch = if takeBranch then 24 else 12
+clocks RETI                    _          = 16
+clocks (RET Nothing)           _          = 16
+clocks (RET _      )           takeBranch = if takeBranch then 20 else 8
+clocks (RST _      )           _          = 16
+clocks DAA                     _          = 4
+clocks CPL                     _          = 4
+clocks NOP                     _          = 4
+clocks HALT                    _          = 4
+clocks STOP                    _          = 4
+clocks CCF                     _          = 4
+clocks SCF                     _          = 4
+clocks DI                      _          = 4
+clocks EI                      _          = 4
+
 formatOrLookup16 :: SymbolTable -> Word16 -> String
 formatOrLookup16 table value =
   let SymbolTable reverseMap _ = table
-  in maybe (formatHex value) (\l -> formatHex value ++ "#" ++ l) $ HM.lookup value reverseMap
+  in  maybe (formatHex value) (\l -> formatHex value ++ "#" ++ l) $ HM.lookup value reverseMap
 
 formatOrLookup8 :: SymbolTable -> Word8 -> String
 formatOrLookup8 table value = formatOrLookup16 table $ 0xFF00 .|. fromIntegral value
@@ -160,7 +269,7 @@ instance Format Instruction where
   formatWithSymbolTable _     LDHLI_DEC      = "LD (HLD), A"
   formatWithSymbolTable table (LD16_I16 r16 w16) =
     "LD " ++ format r16 ++ " " ++ formatOrLookup16 table w16
-  formatWithSymbolTable _     LDSP              = "LD HL, SP"
+  formatWithSymbolTable _     LDSP              = "LD SP, HL"
   formatWithSymbolTable _     (PUSH      RegSP) = "PUSH AF"
   formatWithSymbolTable _     (PUSH      r16  ) = "PUSH " ++ format r16
   formatWithSymbolTable _     (POP       RegSP) = "POP AF"
