@@ -244,7 +244,7 @@ clocks EI                      _          = 4
 formatOrLookup16 :: SymbolTable -> Word16 -> String
 formatOrLookup16 table value =
   let SymbolTable reverseMap _ = table
-  in  maybe (formatHex value) (\l -> formatHex value ++ "#" ++ l) $ HM.lookup value reverseMap
+  in  maybe (formatHex value) (\l -> formatHex value ++ "@" ++ l) $ HM.lookup value reverseMap
 
 formatOrLookup8 :: SymbolTable -> Word8 -> String
 formatOrLookup8 table value = formatOrLookup16 table $ 0xFF00 .|. fromIntegral value

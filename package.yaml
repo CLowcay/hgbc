@@ -22,17 +22,20 @@ description:         Please see the README on GitHub at <https://github.com/CLow
 dependencies:
 - array
 - base >= 4.7 && < 5
-- filepath
 - binary
-- directory
 - bytestring
-- unordered-containers
+- containers
+- directory
+- filepath
+- lens
 - hashable
 - hashtables
 - megaparsec
 - monad-loops
 - mtl
+- sdl2
 - text
+- unordered-containers
 
 library:
   source-dirs: src

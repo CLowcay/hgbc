@@ -9,11 +9,13 @@ module Debug.Breakpoints
   )
 where
 
-import           Prelude                 hiding ( lookup )
+import           Control.Lens
+import           Control.Monad.IO.Class
 import           Data.HashTable.IO
 import           Data.Word
+import           GBC.Bus
 import           GBC.CPU
-import           Control.Monad.IO.Class
+import           Prelude                 hiding ( lookup )
 
 type BreakpointTable = BasicHashTable Word16 Bool
 
@@ -26,8 +28,8 @@ setBreakpoint = insert
 getBreakpoint :: BreakpointTable -> Word16 -> IO (Maybe Bool)
 getBreakpoint = lookup
 
-shouldBreak :: BreakpointTable -> CPU Bool
-shouldBreak table = do
+shouldBreak :: BreakpointTable -> Bus Bool
+shouldBreak table = zoom cpu $ do
   pc <- readPC
   liftIO $ (== Just True) <$> lookup table pc
 
