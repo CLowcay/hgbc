@@ -16,17 +16,20 @@ import           Common
 import           Control.Lens
 import           Control.Monad.Loops
 import           Control.Monad.Reader
-import           GBC.Graphics
-import           GBC.Bus
 import           Control.Monad.State.Strict
 import           Data.IORef
 import           Data.Word
+import           Data.Foldable
 import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
+import           Debug.TileViewer
+import           GBC.Bus
+import           GBC.Bus.Synchronizer
 import           GBC.CPU
-import           GBC.ISA
 import           GBC.Decode
+import           GBC.Graphics
+import           GBC.ISA
 import           GBC.Memory
 
 data MemAddress = ConstAddress Word16 | LabelAddress String deriving (Eq, Ord, Show)
@@ -51,6 +54,7 @@ data Command = ShowHeader
              | AddSymbol String Word16
              | DeleteSymbol String
              | ListSymbols
+             | ViewTiles
              deriving (Eq, Ord, Show)
 
 -- | The current state of the debugger.
@@ -67,7 +71,7 @@ makeLenses ''DebugState
 initDebug :: FilePath -> CPUState -> IO DebugState
 initDebug thisROMFile cpuState = do
   thisCodeMap <- initMap thisROMFile
-  DebugState (BusState cpuState initGraphics) thisROMFile thisCodeMap <$> initBreakpointTable
+  DebugState (BusState cpuState initGraphics []) thisROMFile thisCodeMap <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a
@@ -224,7 +228,7 @@ doCommand ListBreakpoints = do
   liftIO $ do
     allBreakpoints <- listBreakpoints table
     when (null allBreakpoints) $ putStrLn "No breakpoints set"
-    forM_ allBreakpoints
+    for_ allBreakpoints
       $ \(addr, enabled) -> putStrLn $ formatHex addr ++ if not enabled then " (disabled)" else ""
 doCommand (AddSymbol symbol value) = do
   debug <- get
@@ -238,4 +242,9 @@ doCommand (DeleteSymbol symbol) = do
   liftIO $ saveMap (mapFileName $ debug ^. romFile) codeMap'
 doCommand ListSymbols = do
   symbols <- listSymbols <$> use codeMap
-  forM_ symbols $ \(label, value) -> liftIO $ putStrLn $ label ++ ": " ++ formatHex value
+  for_ symbols $ \(label, value) -> liftIO $ putStrLn $ label ++ ": " ++ formatHex value
+doCommand ViewTiles = do
+  synchronizer <- liftIO newSynchronizer
+  zoom bus (registerGraphicsSynchronizer synchronizer)
+  mem <- ask
+  liftIO $ startTileViewer synchronizer mem

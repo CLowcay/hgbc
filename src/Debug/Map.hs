@@ -10,13 +10,13 @@ module Debug.Map
 where
 
 import           Common
-import           Control.Monad
 import           Data.List
 import           Data.Word
 import           System.FilePath
 import           System.IO
 import           System.Directory
 import qualified Data.HashMap.Strict           as HM
+import           Data.Foldable
 
 -- | Add a symbol to the code map.
 addToMap :: SymbolTable -> (String, Word16) -> SymbolTable
@@ -42,7 +42,7 @@ mapFileName romPath = romPath <.> ".map"
 -- | Save the map file.
 saveMap :: FilePath -> SymbolTable -> IO ()
 saveMap filePath codeMap = withFile filePath WriteMode $ \hFile ->
-  forM_ (listSymbols codeMap) $ \(label, value) -> hPutStrLn hFile $ label ++ "," ++ show value
+  for_ (listSymbols codeMap) $ \(label, value) -> hPutStrLn hFile $ label ++ "," ++ show value
 
 -- | Load the map file.
 loadMap :: FilePath -> IO SymbolTable

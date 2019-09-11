@@ -10,9 +10,11 @@ import           GBC.ROM
 import           System.Environment
 import           System.Exit
 import qualified Data.ByteString               as B
+import qualified SDL                           as SDL
 
 main :: IO ()
 main = do
+  SDL.initializeAll
   [romFile] <- getArgs
   romData   <- B.readFile romFile
   case validateROM romData of

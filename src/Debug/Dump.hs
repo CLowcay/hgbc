@@ -18,6 +18,7 @@ import           GBC.Memory
 import           GBC.ROM
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
+import           Data.Foldable
 
 dumpRegisters :: RegisterFile -> IO ()
 dumpRegisters RegisterFile {..} = do
@@ -85,7 +86,7 @@ formatByteCount b | b < 1024        = show b
 dumpDisassembly :: (Word16 -> IO String) -> SymbolTable -> Memory -> Word16 -> Int -> IO ()
 dumpDisassembly decorator symbolTable mem base n = do
   instructions <- decodeN mem base n
-  forM_ instructions $ \(addr, instruction) -> do
+  for_ instructions $ \(addr, instruction) -> do
     decoration <- decorator addr
     case lookupByAddress symbolTable addr of
       Nothing    -> pure ()
@@ -101,7 +102,7 @@ dumpDisassembly decorator symbolTable mem base n = do
   extraInfo _    _        = ""
 
 dumpMem :: Memory -> Word16 -> IO ()
-dumpMem mem base = forM_ [0 .. 15]
+dumpMem mem base = for_ [0 .. 15]
   $ \line -> let offset = base + line * 16 in hexDump offset =<< readChunk mem offset 16
 
 hexDump :: Word16 -> B.ByteString -> IO ()

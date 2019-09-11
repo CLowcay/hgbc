@@ -8,21 +8,22 @@ module GBC.Graphics
   , GraphicsState(..)
   , Mode(..)
   , Update(..)
-  , Synchronizer(..)
   , initGraphics
   , graphicsStep
+  , decodeVRAM
   )
 where
 
-import qualified Data.IntSet                   as S
-import           Control.Concurrent.MVar
-import           Control.Monad.State.Strict
 import           Control.Monad.Reader
-import           GBC.Memory
-import           GBC.CPU
-import           Data.Word
+import           Control.Monad.State.Strict
 import           Data.Bits
-import           Data.Maybe
+import           Data.Word
+import           GBC.CPU
+import           GBC.Memory
+import qualified Data.ByteString               as B
+import qualified Data.ByteString.Builder       as LB
+import qualified Data.ByteString.Lazy          as LB
+import           Data.Traversable
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
@@ -30,37 +31,24 @@ data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounde
 -- | The graphics state.
 data GraphicsState = GraphicsState {
     lcdTime :: !Int
-  , writes :: ![Word16]
+  , vramDirty :: !Bool
 } deriving (Eq, Ord, Show)
 
 -- | The initial graphics state.
 initGraphics :: GraphicsState
-initGraphics = GraphicsState 0 []
+initGraphics = GraphicsState 0 False
 
 -- | Notification that the graphics state has changed.
 data Update = Update {
-    updateCharacters :: !S.IntSet
+    updateVRAM :: !Bool
   , updateMode :: !Mode
 } deriving (Eq, Ord, Show)
 
--- | Construct an 'Update'.
-makeUpdate :: Mode -> [Word16] -> Update
-makeUpdate mode writeAddrs = Update chars mode
- where
-  chars = S.fromList . catMaybes $ getCharNumber <$> writeAddrs
-  getCharNumber addr = if addr >= 0x8000 && addr < 0x9800
-    then Just . fromIntegral $ (addr - 0x8000) `div` 16
-    else Nothing
-
--- | An object to synchronize the actual display windows with the rest of the
--- simulation.
-data Synchronizer = Synchronizer {
-    updateInfo :: !(MVar Update)   -- ^ Write an 'Update' here to send the update to the window.
-  , updateAck :: !(MVar ())        -- ^ Wait for an acknowledgement to show up here.
-}
-
 -- | The Graphics monad.
 type Graphics a = ReaderT Memory (StateT GraphicsState IO) a
+
+isInVRAM :: Word16 -> Bool
+isInVRAM addr = addr >= 0x8000 && addr < 0x9800
 
 totalLines, oamClocks, readClocks, hblankClocks, totalClocks :: Int
 totalLines = 144
@@ -118,25 +106,42 @@ setMode VBlank   = writeMem regSTAT =<< (setBits maskMode 1 <$> readByte regSTAT
 setMode ScanOAM  = writeMem regSTAT =<< (setBits maskMode 2 <$> readByte regSTAT)
 setMode ReadVRAM = writeMem regSTAT =<< (setBits maskMode 3 <$> readByte regSTAT)
 
+decodeVRAM :: (MonadReader Memory m, MonadIO m) => m B.ByteString
+decodeVRAM =
+  fmap (LB.toStrict . LB.toLazyByteString . mconcat)
+    $ for [ (x, y, yi) | yi <- [0..23], y <- [0 .. 7], x <- [0 .. 15] ]
+    $ \(x, y, yi) -> do
+        (l, h) <- readWord $ x * 16 + y * 2 + yi * 256
+        pure . LB.byteString . B.pack . concatMap (replicate 3) $ zipWith combine
+                                                                          (decodeByte l)
+                                                                          (decodeByte h)
+ where
+  decodeByte :: Word8 -> [Word8]
+  decodeByte byte = (\t -> if byte `testBit` t then 1 else 0) <$> [7, 6 .. 0]
+  combine byteL byteH = 64 * (byteL .|. (byteH `shiftL` 1))
+  readWord offset = (,) <$> readByte (0x8000 + offset) <*> readByte (0x8001 + offset)
+
 graphicsStep :: BusEvent -> Graphics (Maybe Update)
 graphicsStep (BusEvent _ newWrites clocks) = do
   GraphicsState {..} <- get
+
   lcdEnabled         <- testGraphicsFlag regLCDC flagLCDEnable
-  if not lcdEnabled
-    then pure Nothing
-    else do
-      let lcdTime'       = (lcdTime + clocks) `mod` totalClocks
-      let (mode, line)   = modeAt lcdTime
-      let (mode', line') = modeAt lcdTime'
-      let writes'        = newWrites ++ writes
+  let lcdTime'       = (lcdTime + clocks) `mod` totalClocks
+  let (mode, line)   = modeAt lcdTime
+  let (mode', line') = modeAt lcdTime'
+  let vramDirty'     = (vramDirty || any isInVRAM newWrites)
 
+  if lcdEnabled
+    then do
       when (line /= line') $ writeMem regLY line'
-
       if mode /= mode'
         then do
-          put $ GraphicsState lcdTime' []
+          put $ GraphicsState lcdTime' False
           setMode mode'
-          pure . Just $ makeUpdate mode' writes'
+          pure . Just $ Update vramDirty' mode'
         else do
-          put $ GraphicsState lcdTime' writes'
+          put $ GraphicsState lcdTime' vramDirty'
           pure Nothing
+    else do
+      put $ GraphicsState lcdTime vramDirty'
+      pure Nothing
