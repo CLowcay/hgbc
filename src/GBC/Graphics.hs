@@ -109,7 +109,7 @@ setMode ReadVRAM = writeMem regSTAT =<< (setBits maskMode 3 <$> readByte regSTAT
 decodeVRAM :: (MonadReader Memory m, MonadIO m) => m B.ByteString
 decodeVRAM =
   fmap (LB.toStrict . LB.toLazyByteString . mconcat)
-    $ for [ (x, y, yi) | yi <- [0..23], y <- [0 .. 7], x <- [0 .. 15] ]
+    $ for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
     $ \(x, y, yi) -> do
         (l, h) <- readWord $ x * 16 + y * 2 + yi * 256
         pure . LB.byteString . B.pack . concatMap (replicate 3) $ zipWith combine
@@ -136,9 +136,9 @@ graphicsStep (BusEvent _ newWrites clocks) = do
       when (line /= line') $ writeMem regLY line'
       if mode /= mode'
         then do
-          put $ GraphicsState lcdTime' False
+          put $ GraphicsState lcdTime' (not $ mode' == ReadVRAM && vramDirty')
           setMode mode'
-          pure . Just $ Update vramDirty' mode'
+          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode'
         else do
           put $ GraphicsState lcdTime' vramDirty'
           pure Nothing

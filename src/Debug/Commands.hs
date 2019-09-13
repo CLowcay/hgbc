@@ -6,6 +6,7 @@ module Debug.Commands
   ( Command(..)
   , MemAddress(..)
   , DebugState
+  , bus
   , initDebug
   , runDebug
   , doCommand
@@ -25,7 +26,6 @@ import           Debug.Dump
 import           Debug.Map
 import           Debug.TileViewer
 import           GBC.Bus
-import           GBC.Bus.Synchronizer
 import           GBC.CPU
 import           GBC.Decode
 import           GBC.Graphics
@@ -71,7 +71,8 @@ makeLenses ''DebugState
 initDebug :: FilePath -> CPUState -> IO DebugState
 initDebug thisROMFile cpuState = do
   thisCodeMap <- initMap thisROMFile
-  DebugState (BusState cpuState initGraphics []) thisROMFile thisCodeMap <$> initBreakpointTable
+  output      <- initOutput
+  DebugState (BusState cpuState initGraphics output) thisROMFile thisCodeMap <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a
@@ -244,7 +245,6 @@ doCommand ListSymbols = do
   symbols <- listSymbols <$> use codeMap
   for_ symbols $ \(label, value) -> liftIO $ putStrLn $ label ++ ": " ++ formatHex value
 doCommand ViewTiles = do
-  synchronizer <- liftIO newSynchronizer
-  zoom bus (registerGraphicsSynchronizer synchronizer)
-  mem <- ask
-  liftIO $ startTileViewer synchronizer mem
+  mem            <- ask
+  (sync, window) <- liftIO $ startTileViewer mem
+  zoom bus $ registerWindow window sync
