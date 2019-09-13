@@ -28,7 +28,6 @@ import           Debug.TileViewer
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Memory
 
@@ -71,8 +70,8 @@ makeLenses ''DebugState
 initDebug :: FilePath -> CPUState -> IO DebugState
 initDebug thisROMFile cpuState = do
   thisCodeMap <- initMap thisROMFile
-  output      <- initOutput
-  DebugState (BusState cpuState initGraphics output) thisROMFile thisCodeMap <$> initBreakpointTable
+  busState <- initBusState cpuState
+  DebugState busState thisROMFile thisCodeMap <$> initBreakpointTable
 
 -- | The debugger monad.
 type Debug a = ReaderT Memory (StateT DebugState IO) a

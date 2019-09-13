@@ -4,8 +4,7 @@ module GBC.Bus
   ( BusState(..)
   , Bus
   , cpu
-  , graphics
-  , initOutput
+  , initBusState
   , registerWindow
   , busStep
   , handleEvents
@@ -13,6 +12,7 @@ module GBC.Bus
 where
 
 import           GBC.CPU
+import qualified GBC.Keypad                    as Keypad
 import           GBC.Graphics
 import           Control.Lens
 import           Control.Monad.State.Strict
@@ -27,9 +27,15 @@ import           SDL.Orphans                    ( )
 data BusState = BusState {
     _cpu :: !CPUState
   , _graphics :: !GraphicsState
-  , _graphicsOutput :: H.BasicHashTable Window (MVar (Maybe Update))
+  , _graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
+  , _keypadState :: !Keypad.KeypadState
 }
 makeLenses ''BusState
+
+initBusState :: CPUState -> IO BusState
+initBusState cpuState = do
+  output <- initOutput
+  pure $ BusState cpuState initGraphics output Keypad.initKeypadState
 
 initOutput :: IO (H.BasicHashTable Window (MVar (Maybe Update)))
 initOutput = H.new
@@ -54,7 +60,8 @@ killWindow window = do
 
 handleEvents :: Bus ()
 handleEvents = do
-  events   <- pollEvents
+  events <- pollEvents
+  zoom keypadState $ Keypad.processEvents events
   for_ (eventPayload <$> events) $ \case
     (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
     _                     -> pure ()
@@ -62,6 +69,8 @@ handleEvents = do
 busStep :: Bus (BusEvent, Maybe Update)
 busStep = do
   busEvent <- zoom cpu cpuStep
+  zoom keypadState $ Keypad.processBusEvent busEvent
+
   handleEvents
 
   graphicsUpdate <- zoom graphics $ graphicsStep busEvent
