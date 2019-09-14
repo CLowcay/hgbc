@@ -6,6 +6,8 @@ module Debug.TileViewer
 where
 
 import           Control.Concurrent
+import           Foreign.Marshal.Array
+import           Foreign.Ptr
 import           Control.Monad
 import           Control.Monad.Reader
 import           GBC.Graphics
@@ -45,14 +47,15 @@ eventLoop = do
     Just Update {..} -> do
       when updateVRAM $ do
         textureData <- decodeVRAM
-        void $ updateTexture tileSurface Nothing textureData 384
+        (ptx, _)    <- lockTexture tileSurface Nothing
+        liftIO $ pokeArray (castPtr ptx) (concatMap (replicate 3) $ concat textureData)
+        unlockTexture tileSurface
         render
       eventLoop
 
  where
   render = do
     WindowContext {..} <- ask
-    rendererDrawColor renderer $= V4 0xFF 0xFF 0xFF 0xFF
     clear renderer
     copy renderer tileSurface Nothing Nothing
     present renderer

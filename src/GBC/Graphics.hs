@@ -23,9 +23,6 @@ import           Data.Traversable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Memory
-import qualified Data.ByteString               as B
-import qualified Data.ByteString.Builder       as LB
-import qualified Data.ByteString.Lazy          as LB
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
@@ -98,30 +95,26 @@ maskMode = 0x03
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 
-{-# INLINEABLE testGraphicsFlag #-}
+{-# INLINABLE testGraphicsFlag #-}
 testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
 testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
 
 setBits :: Word8 -> Word8 -> Word8 -> Word8
 setBits mask value source = value .|. (source .&. complement mask)
 
-{-# INLINEABLE setMode #-}
+{-# INLINABLE setMode #-}
 setMode :: UsesMemory env m => Mode -> ReaderT env m ()
 setMode HBlank   = writeMem regSTAT =<< (setBits maskMode 0 <$> readByte regSTAT)
 setMode VBlank   = writeMem regSTAT =<< (setBits maskMode 1 <$> readByte regSTAT)
 setMode ScanOAM  = writeMem regSTAT =<< (setBits maskMode 2 <$> readByte regSTAT)
 setMode ReadVRAM = writeMem regSTAT =<< (setBits maskMode 3 <$> readByte regSTAT)
 
-{-# INLINEABLE decodeVRAM #-}
-decodeVRAM :: UsesMemory env m => ReaderT env m B.ByteString
-decodeVRAM =
-  fmap (LB.toStrict . LB.toLazyByteString . mconcat)
-    $ for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
-    $ \(x, y, yi) -> do
-        (l, h) <- readWord $ x * 16 + y * 2 + yi * 256
-        pure . LB.byteString . B.pack . concatMap (replicate 3) $ zipWith combine
-                                                                          (decodeByte l)
-                                                                          (decodeByte h)
+{-# INLINABLE decodeVRAM #-}
+decodeVRAM :: UsesMemory env m => ReaderT env m [[Word8]]
+decodeVRAM = for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ] $ \(x, y, yi) ->
+  do
+    (l, h) <- readWord $ x * 16 + y * 2 + yi * 256
+    pure $ zipWith combine (decodeByte l) (decodeByte h)
  where
   decodeByte :: Word8 -> [Word8]
   decodeByte byte = (\t -> if byte `testBit` t then 1 else 0) <$> [7, 6 .. 0]
