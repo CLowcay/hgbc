@@ -10,22 +10,22 @@ module Debug.Map
 where
 
 import           Common
+import           Data.Foldable
 import           Data.List
 import           Data.Word
+import           System.Directory
 import           System.FilePath
 import           System.IO
-import           System.Directory
 import qualified Data.HashMap.Strict           as HM
-import           Data.Foldable
 
 -- | Add a symbol to the code map.
-addToMap :: SymbolTable -> (String, Word16) -> SymbolTable
-addToMap (SymbolTable to from) (label, value) =
+addToMap :: (String, Word16) -> SymbolTable -> SymbolTable
+addToMap (label, value) (SymbolTable to from) =
   SymbolTable (HM.insert value label to) (HM.insert label value from)
 
 -- | Remove a symbol from the code map.
-removeFromMap :: SymbolTable -> String -> SymbolTable
-removeFromMap (SymbolTable to from) label = case HM.lookup label from of
+removeFromMap :: String -> SymbolTable -> SymbolTable
+removeFromMap label (SymbolTable to from) = case HM.lookup label from of
   Nothing    -> SymbolTable to (HM.delete label from)
   Just value -> SymbolTable (HM.delete value to) (HM.delete label from)
 

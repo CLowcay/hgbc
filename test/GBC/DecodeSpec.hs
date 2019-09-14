@@ -2,11 +2,12 @@
 {-# LANGUAGE NumericUnderscores #-}
 module GBC.DecodeSpec where
 
+import           Control.Monad.Reader
 import           Data.Word
+import           GBC.Decode
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM
-import           GBC.Decode
 import           Test.Hspec
 import qualified Data.ByteString               as B
 
@@ -16,7 +17,7 @@ makeROM d = ROM $ B.take (32 * 1024 * 1024) $ B.pack (0xFF : d) <> B.replicate (
 decodesTo :: [Word8] -> Maybe Instruction -> IO ()
 decodesTo encoding expectedDecoding = do
   memory               <- initMemory $ makeROM encoding
-  (instruction, addr1) <- runDecode memory 1 decode
+  (instruction, addr1) <- runReaderT (runDecode 1 decode) memory
   instruction `shouldBe` expectedDecoding
   addr1 `shouldBe` 1 + fromIntegral (length encoding)
 

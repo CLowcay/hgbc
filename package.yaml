@@ -28,7 +28,6 @@ dependencies:
 - containers
 - directory
 - filepath
-- lens
 - hashable
 - hashtables
 - megaparsec

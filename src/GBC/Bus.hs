@@ -1,9 +1,13 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MonoLocalBinds #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module GBC.Bus
   ( BusState(..)
-  , Bus
-  , cpu
+  , HasBusState(..)
+  , UsesBus
   , initBusState
   , registerWindow
   , busStep
@@ -11,45 +15,56 @@ module GBC.Bus
   )
 where
 
-import           GBC.CPU
-import qualified GBC.Keypad                    as Keypad
-import           GBC.Graphics
-import           Control.Lens
-import           Control.Monad.State.Strict
-import           GBC.Memory
-import           Control.Monad.Reader
 import           Control.Concurrent.MVar
-import           SDL
-import qualified Data.HashTable.IO             as H
+import           Control.Monad.Reader
 import           Data.Foldable
+import           Data.IORef
+import           Data.Word
+import           GBC.CPU
+import           GBC.Graphics
+import           GBC.Keypad
+import           GBC.Memory
+import           SDL
 import           SDL.Orphans                    ( )
+import qualified Data.HashTable.IO             as H
 
 data BusState = BusState {
-    _cpu :: !CPUState
-  , _graphics :: !GraphicsState
-  , _graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
-  , _keypadState :: !Keypad.KeypadState
+    cpu :: !CPUState
+  , memory :: !Memory
+  , graphics :: !(IORef GraphicsState)
+  , graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
+  , keypadState :: !(IORef Word8)
 }
-makeLenses ''BusState
 
-initBusState :: CPUState -> IO BusState
-initBusState cpuState = do
-  output <- initOutput
-  pure $ BusState cpuState initGraphics output Keypad.initKeypadState
+class HasBusState env where
+  forBusState :: env -> BusState
 
-initOutput :: IO (H.BasicHashTable Window (MVar (Maybe Update)))
-initOutput = H.new
+instance HasBusState env => HasMemory env where
+  forMemory = memory . forBusState
 
-type Bus a = ReaderT Memory (StateT BusState IO) a
+instance HasBusState env => HasCPUState env where
+  forCPUState = cpu . forBusState
 
-registerWindow :: Window -> MVar (Maybe Update) -> Bus ()
+instance HasBusState env => HasGraphicsState env where
+  forGraphicsState = graphics . forBusState
+
+instance HasBusState env => HasKeypadState env where
+  forKeypadState = keypadState . forBusState
+
+type UsesBus env m = (HasBusState env, UsesCPU env m, UsesKeypad env m)
+
+initBusState :: CPUState -> Memory -> IO BusState
+initBusState cpuState mem =
+  BusState cpuState mem <$> newIORef initGraphics <*> H.new <*> initKeypadState
+
+registerWindow :: UsesBus env m => Window -> MVar (Maybe Update) -> ReaderT env m ()
 registerWindow window queue = do
-  windows <- use graphicsOutput
+  windows <- graphicsOutput <$> asks forBusState
   liftIO $ H.insert windows window queue
 
-killWindow :: Window -> Bus ()
+killWindow :: UsesBus env m => Window -> ReaderT env m ()
 killWindow window = do
-  windows <- use graphicsOutput
+  windows <- graphicsOutput <$> asks forBusState
   liftIO $ do
     mvar <- H.lookup windows window
     case mvar of
@@ -58,25 +73,25 @@ killWindow window = do
         putMVar var Nothing
         H.delete windows window
 
-handleEvents :: Bus ()
+handleEvents :: UsesBus env m => ReaderT env m ()
 handleEvents = do
   events <- pollEvents
-  zoom keypadState $ Keypad.processEvents events
+  keypadHandleUserEvents events
   for_ (eventPayload <$> events) $ \case
     (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
     _                     -> pure ()
 
-busStep :: Bus (BusEvent, Maybe Update)
+busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)
 busStep = do
-  busEvent <- zoom cpu cpuStep
-  zoom keypadState $ Keypad.processBusEvent busEvent
+  busEvent <- cpuStep
+  keypadHandleBusEvent busEvent
 
   handleEvents
 
-  graphicsUpdate <- zoom graphics $ graphicsStep busEvent
+  graphicsUpdate <- graphicsStep busEvent
   case graphicsUpdate of
     Nothing     -> pure ()
     Just update -> do
-      windows <- use graphicsOutput
+      windows <- graphicsOutput <$> asks forBusState
       liftIO $ traverse_ ((`putMVar` Just update) . snd) =<< H.toList windows
   pure (busEvent, graphicsUpdate)

@@ -1,29 +1,41 @@
+{-# LANGUAGE FlexibleContexts #-}
 module GBC.CPUSpec where
 
+import           Common
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.State.Class
+import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Function
 import           Data.Int
+import           Data.Maybe
 import           Data.Word
 import           GBC.CPU
-import           Common
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM
 import           Test.Hspec
 import qualified Data.ByteString               as B
-import           Data.Function
-import           Data.Maybe
 
 blankROM :: ROM
 blankROM = ROM $ B.replicate (32 * 1024 * 1024) 0
 
-withNewCPU :: CPU () -> IO ()
+data CPUTestState = CPUTestState {
+    testCPU :: !CPUState
+  , testMemory :: !Memory
+}
+
+instance HasCPUState CPUTestState where
+  forCPUState = testCPU
+
+instance HasMemory CPUTestState where
+  forMemory = testMemory
+
+withNewCPU :: ReaderT CPUTestState IO () -> IO ()
 withNewCPU computation = do
   mem <- initMemory blankROM
   cpu <- initCPU
-  void $ runCPU mem cpu computationWithVerification
+  void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where
   computationWithVerification = do
     reset
@@ -48,22 +60,22 @@ withNewCPU computation = do
       fromIntegral (de .&. 0x00FF) `shouldBe` e
       fromIntegral (hl .&. 0x00FF) `shouldBe` l
 
-withAllFlagCombos :: CPU () -> CPU ()
+withAllFlagCombos :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
 withAllFlagCombos computation = forM_ [0 .. 0xF] $ \flags -> do
   writeF $ (flags `unsafeShiftL` 4) .|. 0x0A
   computation
 
-withNoChangeToRegisters :: CPU () -> CPU ()
+withNoChangeToRegisters :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
 withNoChangeToRegisters computation = do
   registerFile0 <- getRegisterFile
   computation
   registerFile1 <- getRegisterFile
   liftIO $ registerFile1 `shouldBe` registerFile0
 
-withFlagsUpdate :: Word8 -> Word8 -> CPU () -> CPU ()
+withFlagsUpdate :: UsesCPU env m => Word8 -> Word8 -> ReaderT env m () -> ReaderT env m ()
 withFlagsUpdate mask expected = withFlagsUpdateC mask (expected, expected)
 
-withFlagsUpdateC :: Word8 -> (Word8, Word8) -> CPU () -> CPU ()
+withFlagsUpdateC :: UsesCPU env m => Word8 -> (Word8, Word8) -> ReaderT env m () -> ReaderT env m ()
 withFlagsUpdateC mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
   flags0        <- readF
@@ -76,7 +88,8 @@ withFlagsUpdateC mask (expected, expectedCarry) computation = do
     registerFile1 `shouldBe` registerFile0
     (flags1 .&. mask) `shouldBe` (if hasCarry then expectedCarry else expected)
 
-withFlagsUpdateZ :: Word8 -> (Word8, Word8) -> CPU Word8 -> CPU ()
+withFlagsUpdateZ
+  :: UsesCPU env m => Word8 -> (Word8, Word8) -> ReaderT env m Word8 -> ReaderT env m ()
 withFlagsUpdateZ mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
   flags0        <- readF
@@ -90,7 +103,7 @@ withFlagsUpdateZ mask (expected, expectedCarry) computation = do
     (flags1 .&. mask)
       `shouldBe` ((if hasCarry then expectedCarry else expected) .|. if a1 == 0 then flagZ else 0)
 
-withIMEUpdate :: CPU () -> CPU ()
+withIMEUpdate :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
 withIMEUpdate computation = do
   ime <- testIME
   setIME
@@ -99,14 +112,14 @@ withIMEUpdate computation = do
   computation
   if ime then setIME else clearIME
 
-preservingR8 :: Register8 -> CPU a -> CPU a
+preservingR8 :: UsesCPU env m => Register8 -> ReaderT env m a -> ReaderT env m a
 preservingR8 register computation = do
   v <- readR8 register
   r <- computation
   writeR8 register v
   pure r
 
-preservingR16 :: Register16 -> CPU a -> CPU a
+preservingR16 :: UsesCPU env m => Register16 -> ReaderT env m a -> ReaderT env m a
 preservingR16 register computation = do
   v <- readR16 register
   r <- computation
@@ -299,13 +312,13 @@ spec = do
         liftIO $ ev `shouldBe` noReadWrite
   describe "HALT" $ it "halts the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
     ev   <- executeInstruction HALT
-    mode <- gets cpuMode
+    mode <- getMode
     liftIO $ do
       ev `shouldBe` noReadWrite
       mode `shouldBe` ModeHalt
   describe "STOP" $ it "stops the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
     ev   <- executeInstruction STOP
-    mode <- gets cpuMode
+    mode <- getMode
     liftIO $ do
       ev `shouldBe` noReadWrite
       mode `shouldBe` ModeStop
@@ -901,14 +914,14 @@ setReset instruction doSet = do
   preserving SmallHLI    = id
   preserving (SmallR8 r) = preservingR8 r
 
-preservingPC :: CPU a -> CPU a
+preservingPC :: UsesCPU env m => ReaderT env m a -> ReaderT env m a
 preservingPC computation = do
   pc <- readPC
   r  <- computation
   writePC pc
   pure r
 
-isConditionTrue :: Maybe ConditionCode -> CPU Bool
+isConditionTrue :: UsesCPU env m => Maybe ConditionCode -> ReaderT env m Bool
 isConditionTrue Nothing       = pure True
 isConditionTrue (Just CondC ) = testFlag flagCY
 isConditionTrue (Just CondNC) = not <$> testFlag flagCY

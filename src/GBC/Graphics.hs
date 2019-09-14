@@ -2,10 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ConstraintKinds #-}
 
 module GBC.Graphics
-  ( Graphics
-  , GraphicsState(..)
+  ( GraphicsState(..)
+  , HasGraphicsState(..)
+  , UsesGraphics
   , Mode(..)
   , Update(..)
   , initGraphics
@@ -15,15 +17,15 @@ module GBC.Graphics
 where
 
 import           Control.Monad.Reader
-import           Control.Monad.State.Strict
 import           Data.Bits
+import           Data.IORef
+import           Data.Traversable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Memory
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as LB
 import qualified Data.ByteString.Lazy          as LB
-import           Data.Traversable
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
@@ -38,14 +40,16 @@ data GraphicsState = GraphicsState {
 initGraphics :: GraphicsState
 initGraphics = GraphicsState 0 False
 
+class HasGraphicsState env where
+  forGraphicsState :: env -> IORef GraphicsState
+
+type UsesGraphics env m = (UsesMemory env m, HasGraphicsState env)
+
 -- | Notification that the graphics state has changed.
 data Update = Update {
     updateVRAM :: !Bool
   , updateMode :: !Mode
 } deriving (Eq, Ord, Show)
-
--- | The Graphics monad.
-type Graphics a = ReaderT Memory (StateT GraphicsState IO) a
 
 isInVRAM :: Word16 -> Bool
 isInVRAM addr = addr >= 0x8000 && addr < 0x9800
@@ -94,19 +98,19 @@ maskMode = 0x03
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 
-testGraphicsFlag :: Word16 -> Word8 -> Graphics Bool
+testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
 testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
 
 setBits :: Word8 -> Word8 -> Word8 -> Word8
 setBits mask value source = value .|. (source .&. complement mask)
 
-setMode :: (MonadReader Memory m, MonadIO m) => Mode -> m ()
+setMode :: UsesMemory env m => Mode -> ReaderT env m ()
 setMode HBlank   = writeMem regSTAT =<< (setBits maskMode 0 <$> readByte regSTAT)
 setMode VBlank   = writeMem regSTAT =<< (setBits maskMode 1 <$> readByte regSTAT)
 setMode ScanOAM  = writeMem regSTAT =<< (setBits maskMode 2 <$> readByte regSTAT)
 setMode ReadVRAM = writeMem regSTAT =<< (setBits maskMode 3 <$> readByte regSTAT)
 
-decodeVRAM :: (MonadReader Memory m, MonadIO m) => m B.ByteString
+decodeVRAM :: UsesMemory env m => ReaderT env m B.ByteString
 decodeVRAM =
   fmap (LB.toStrict . LB.toLazyByteString . mconcat)
     $ for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
@@ -121,27 +125,30 @@ decodeVRAM =
   combine byteL byteH = 64 * (byteL .|. (byteH `shiftL` 1))
   readWord offset = (,) <$> readByte (0x8000 + offset) <*> readByte (0x8001 + offset)
 
-graphicsStep :: BusEvent -> Graphics (Maybe Update)
+graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
 graphicsStep (BusEvent _ newWrites clocks) = do
-  GraphicsState {..} <- get
+  graphicsState      <- asks forGraphicsState
+  GraphicsState {..} <- liftIO $ readIORef graphicsState
 
   lcdEnabled         <- testGraphicsFlag regLCDC flagLCDEnable
   let lcdTime'       = (lcdTime + clocks) `mod` totalClocks
   let (mode, line)   = modeAt lcdTime
   let (mode', line') = modeAt lcdTime'
-  let vramDirty'     = (vramDirty || any isInVRAM newWrites)
+  let vramDirty'     = vramDirty || any isInVRAM newWrites
 
   if lcdEnabled
     then do
       when (line /= line') $ writeMem regLY line'
       if mode /= mode'
         then do
-          put $ GraphicsState lcdTime' (not $ mode' == ReadVRAM && vramDirty')
+          liftIO . writeIORef graphicsState $ GraphicsState
+            lcdTime'
+            (not $ mode' == ReadVRAM && vramDirty')
           setMode mode'
           pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode'
         else do
-          put $ GraphicsState lcdTime' vramDirty'
+          liftIO . writeIORef graphicsState $ GraphicsState lcdTime' vramDirty'
           pure Nothing
     else do
-      put $ GraphicsState lcdTime vramDirty'
+      liftIO . writeIORef graphicsState $ GraphicsState lcdTime vramDirty'
       pure Nothing

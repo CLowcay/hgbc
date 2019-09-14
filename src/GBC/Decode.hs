@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module GBC.Decode
   ( Decode
@@ -8,20 +9,20 @@ module GBC.Decode
   )
 where
 
-import           GBC.Memory
-import           GBC.ISA
-import           Data.Bits
-import           Data.Array
-import           Control.Monad.State.Strict
 import           Control.Monad.Reader
+import           Control.Monad.State.Strict
+import           Data.Array
+import           Data.Bits
 import           Data.Word
+import           GBC.ISA
+import           GBC.Memory
 
-type Decode a = ReaderT Memory (StateT Word16 IO) a
+type Decode env m a = StateT Word16 (ReaderT env m) a
 
-runDecode :: Memory -> Word16 -> Decode a -> IO (a, Word16)
-runDecode memory addr computation = runStateT (runReaderT computation memory) addr
+runDecode :: Monad m => Word16 -> Decode env m a -> ReaderT env m (a, Word16)
+runDecode addr computation = runStateT computation addr
 
-table :: Array Word8 (Decode (Maybe Instruction))
+table :: UsesMemory env m => Array Word8 (Decode env m (Maybe Instruction))
 table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
  where
   doDecode x = (x, decodeBytes (x `shiftR` 6 .&. 0x03) (x `shiftR` 3 .&. 0x07) (x .&. 0x07))
@@ -155,10 +156,10 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   aluOp 7 = CP
   aluOp x = error $ "invalid ALU operation code " ++ show x
 
-decodeN :: Memory -> Word16 -> Int -> IO [(Word16, Instruction)]
-decodeN mem base len0 = evalStateT (runReaderT (doDecode len0) mem) base
+decodeN :: forall env m . UsesMemory env m => Word16 -> Int -> ReaderT env m [(Word16, Instruction)]
+decodeN base len0 = evalStateT (doDecode len0) base
  where
-  doDecode :: Int -> Decode [(Word16, Instruction)]
+  doDecode :: Int -> Decode env m [(Word16, Instruction)]
   doDecode 0   = pure []
   doDecode len = do
     location <- get
@@ -166,22 +167,22 @@ decodeN mem base len0 = evalStateT (runReaderT (doDecode len0) mem) base
       Nothing          -> pure []
       Just instruction -> ((location, instruction) :) <$> doDecode (len - 1)
 
-decode :: Decode (Maybe Instruction)
+decode :: UsesMemory env m => Decode env m (Maybe Instruction)
 decode = do
   b0 <- nextByte
   table ! b0
 
-nextByte :: Decode Word8
+nextByte :: UsesMemory env m => Decode env m Word8
 nextByte = do
   addr <- get
-  r    <- readByte addr
+  r    <- lift $ readByte addr
   modify (+ 1)
   pure r
 
-nextWord :: Decode Word16
+nextWord :: UsesMemory env m => Decode env m Word16
 nextWord = do
   addr <- get
-  l    <- fromIntegral <$> readByte addr
-  h    <- fromIntegral <$> readByte (addr + 1)
+  l    <- fromIntegral <$> lift (readByte addr)
+  h    <- fromIntegral <$> lift (readByte (addr + 1))
   modify (+ 2)
   pure $ (h `unsafeShiftL` 8) .|. l

@@ -9,7 +9,9 @@ where
 
 import           Common
 import           Control.Monad
+import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Decode
@@ -18,7 +20,6 @@ import           GBC.Memory
 import           GBC.ROM
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
-import           Data.Foldable
 
 dumpRegisters :: RegisterFile -> IO ()
 dumpRegisters RegisterFile {..} = do
@@ -83,15 +84,17 @@ formatByteCount b | b < 1024        = show b
                   | b < 1024 * 1024 = show (b `div` 1024) ++ "KiB"
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
-dumpDisassembly :: (Word16 -> IO String) -> SymbolTable -> Memory -> Word16 -> Int -> IO ()
-dumpDisassembly decorator symbolTable mem base n = do
-  instructions <- decodeN mem base n
+dumpDisassembly
+  :: UsesMemory env m => (Word16 -> IO String) -> SymbolTable -> Word16 -> Int -> ReaderT env m ()
+dumpDisassembly decorator symbolTable base n = do
+  instructions <- decodeN base n
   for_ instructions $ \(addr, instruction) -> do
-    decoration <- decorator addr
+    decoration <- liftIO $ decorator addr
     case lookupByAddress symbolTable addr of
       Nothing    -> pure ()
-      Just label -> putStrLn $ (' ' <$ decoration) ++ label ++ ":"
-    putStrLn
+      Just label -> liftIO $ putStrLn $ (' ' <$ decoration) ++ label ++ ":"
+    liftIO
+      $  putStrLn
       $  decoration
       ++ formatHex addr
       ++ ": "
@@ -101,9 +104,9 @@ dumpDisassembly decorator symbolTable mem base n = do
   extraInfo addr (JR _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
   extraInfo _    _        = ""
 
-dumpMem :: Memory -> Word16 -> IO ()
-dumpMem mem base = for_ [0 .. 15]
-  $ \line -> let offset = base + line * 16 in hexDump offset =<< readChunk mem offset 16
+dumpMem :: UsesMemory env m => Word16 -> ReaderT env m ()
+dumpMem base = for_ [0 .. 15]
+  $ \line -> let offset = base + line * 16 in liftIO . hexDump offset =<< readChunk offset 16
 
 hexDump :: Word16 -> B.ByteString -> IO ()
 hexDump base lineData = do
