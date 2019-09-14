@@ -98,18 +98,21 @@ maskMode = 0x03
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 
+{-# INLINEABLE testGraphicsFlag #-}
 testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
 testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
 
 setBits :: Word8 -> Word8 -> Word8 -> Word8
 setBits mask value source = value .|. (source .&. complement mask)
 
+{-# INLINEABLE setMode #-}
 setMode :: UsesMemory env m => Mode -> ReaderT env m ()
 setMode HBlank   = writeMem regSTAT =<< (setBits maskMode 0 <$> readByte regSTAT)
 setMode VBlank   = writeMem regSTAT =<< (setBits maskMode 1 <$> readByte regSTAT)
 setMode ScanOAM  = writeMem regSTAT =<< (setBits maskMode 2 <$> readByte regSTAT)
 setMode ReadVRAM = writeMem regSTAT =<< (setBits maskMode 3 <$> readByte regSTAT)
 
+{-# INLINEABLE decodeVRAM #-}
 decodeVRAM :: UsesMemory env m => ReaderT env m B.ByteString
 decodeVRAM =
   fmap (LB.toStrict . LB.toLazyByteString . mconcat)
@@ -125,6 +128,7 @@ decodeVRAM =
   combine byteL byteH = 64 * (byteL .|. (byteH `shiftL` 1))
   readWord offset = (,) <$> readByte (0x8000 + offset) <*> readByte (0x8001 + offset)
 
+{-# INLINEABLE graphicsStep #-}
 graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
 graphicsStep (BusEvent _ newWrites clocks) = do
   graphicsState      <- asks forGraphicsState

@@ -17,12 +17,15 @@ import           Data.Word
 import           GBC.ISA
 import           GBC.Memory
 
-type Decode env m a = StateT Word16 (ReaderT env m) a
+type Decode a = ReaderT Memory (StateT Word16 IO) a
 
-runDecode :: Monad m => Word16 -> Decode env m a -> ReaderT env m (a, Word16)
-runDecode addr computation = runStateT computation addr
+{-# INLINE runDecode #-}
+runDecode :: UsesMemory env m => Word16 -> Decode a -> ReaderT env m (a, Word16)
+runDecode addr computation = do
+  mem <- asks forMemory
+  liftIO $ runStateT (runReaderT computation mem) addr
 
-table :: UsesMemory env m => Array Word8 (Decode env m (Maybe Instruction))
+table :: Array Word8 (Decode (Maybe Instruction))
 table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
  where
   doDecode x = (x, decodeBytes (x `shiftR` 6 .&. 0x03) (x `shiftR` 3 .&. 0x07) (x .&. 0x07))
@@ -156,10 +159,11 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   aluOp 7 = CP
   aluOp x = error $ "invalid ALU operation code " ++ show x
 
+{-# INLINABLE decodeN #-}
 decodeN :: forall env m . UsesMemory env m => Word16 -> Int -> ReaderT env m [(Word16, Instruction)]
-decodeN base len0 = evalStateT (doDecode len0) base
+decodeN base = fmap fst . runDecode base . doDecode 
  where
-  doDecode :: Int -> Decode env m [(Word16, Instruction)]
+  doDecode :: Int -> Decode [(Word16, Instruction)]
   doDecode 0   = pure []
   doDecode len = do
     location <- get
@@ -167,22 +171,22 @@ decodeN base len0 = evalStateT (doDecode len0) base
       Nothing          -> pure []
       Just instruction -> ((location, instruction) :) <$> doDecode (len - 1)
 
-decode :: UsesMemory env m => Decode env m (Maybe Instruction)
+decode :: Decode (Maybe Instruction)
 decode = do
-  b0 <- nextByte
+  b0   <- nextByte
   table ! b0
 
-nextByte :: UsesMemory env m => Decode env m Word8
+nextByte :: Decode Word8
 nextByte = do
   addr <- get
-  r    <- lift $ readByte addr
+  r    <- readByte addr
   modify (+ 1)
   pure r
 
-nextWord :: UsesMemory env m => Decode env m Word16
+nextWord :: Decode Word16
 nextWord = do
   addr <- get
-  l    <- fromIntegral <$> lift (readByte addr)
-  h    <- fromIntegral <$> lift (readByte (addr + 1))
+  l    <- fromIntegral <$> readByte addr
+  h    <- fromIntegral <$> readByte (addr + 1)
   modify (+ 2)
   pure $ (h `unsafeShiftL` 8) .|. l

@@ -32,6 +32,7 @@ class HasMemory env where
   forMemory :: env -> Memory
 
 instance HasMemory Memory where
+  {-# INLINE forMemory #-}
   forMemory = id
 
 -- | Constraints for monads that can access memory.
@@ -46,6 +47,7 @@ getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
 
 -- | Read a byte from memory.
+{-# INLINE readByte #-}
 readByte :: UsesMemory env m => Word16 -> ReaderT env m Word8
 readByte addr = do
   Memory {..} <- asks forMemory
@@ -54,6 +56,7 @@ readByte addr = do
     else liftIO $ withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
 
 -- | Write to memory.
+{-# INLINE writeMem #-}
 writeMem :: (Storable a, UsesMemory env m) => Word16 -> a -> ReaderT env m ()
 writeMem addr value = do
   Memory {..} <- asks forMemory
@@ -62,6 +65,7 @@ writeMem addr value = do
     else liftIO $ withForeignPtr memRam $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
 
 -- | Read a chunk of memory.
+{-# INLINEABLE readChunk #-}
 readChunk :: (UsesMemory env m) => Word16 -> Int -> ReaderT env m B.ByteString
 readChunk base len = do
   Memory {..} <- asks forMemory

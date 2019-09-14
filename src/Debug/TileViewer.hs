@@ -20,6 +20,7 @@ data WindowContext = WindowContext {
 }
 
 instance HasMemory WindowContext where
+  {-# INLINE forMemory #-}
   forMemory = memory
 
 startTileViewer :: UsesMemory env m => ReaderT env m (MVar (Maybe Update), Window)

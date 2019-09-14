@@ -64,6 +64,7 @@ updateKeyboardState (KeyboardEvent d) keypadState =
 updateKeyboardState _ keypadState = keypadState
 
 -- | Update the 'regKeypad' register.
+{-# INLINE refreshKeypad #-}
 refreshKeypad :: UsesKeypad env m => ReaderT env m ()
 refreshKeypad = do
   keypad <- liftIO . readIORef =<< asks forKeypadState
@@ -75,6 +76,7 @@ refreshKeypad = do
   writeMem regKeypad p1'
 
 -- | Update the keypad state from a list of SDL events.
+{-# INLINE keypadHandleUserEvents #-}
 keypadHandleUserEvents :: UsesKeypad env m => [Event] -> ReaderT env m ()
 keypadHandleUserEvents events = do
   keypad  <- asks forKeypadState
@@ -84,5 +86,6 @@ keypadHandleUserEvents events = do
   when (keypad0 /= keypad1) refreshKeypad
 
 -- | Watch for bus events that might require us to refresh the 'regKeypad' register.
+{-# INLINE keypadHandleBusEvent #-}
 keypadHandleBusEvent :: UsesKeypad env m => BusEvent -> ReaderT env m ()
 keypadHandleBusEvent BusEvent {..} = when (regKeypad `elem` writeAddress) refreshKeypad

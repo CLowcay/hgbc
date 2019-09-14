@@ -64,9 +64,11 @@ data DebugState = DebugState {
 }
 
 instance HasBusState DebugState where
+  {-# INLINE forBusState #-}
   forBusState = bus
 
 instance HasDebugState DebugState where
+  {-# INLINE forDebugState #-}
   forDebugState = id
 
 class HasDebugState env where
@@ -75,18 +77,23 @@ class HasDebugState env where
 type UsesDebug env m = (UsesBus env m, HasDebugState env)
 
 -- | Initialise the debugger.
+{-# INLINEABLE initDebug #-}
 initDebug :: FilePath -> CPUState -> Memory -> IO DebugState
 initDebug thisROMFile cpuState mem = do
   busState <- initBusState cpuState mem
   DebugState busState thisROMFile <$> (newIORef =<< initMap thisROMFile) <*> initBreakpointTable
 
+{-# INLINEABLE getCodeMap #-}
 getCodeMap :: UsesDebug env m => ReaderT env m SymbolTable
 getCodeMap = liftIO . readIORef =<< codeMap <$> asks forDebugState
+
+{-# INLINEABLE setCodeMap #-}
 setCodeMap :: UsesDebug env m => SymbolTable -> ReaderT env m ()
 setCodeMap value = liftIO . (`writeIORef` value) =<< codeMap <$> asks forDebugState
 
 -- | Create a function to decorate disassembly dumps. Adds symbols to indicate
 -- breakpoints, PC and other information.
+{-# INLINEABLE makeDecorator #-}
 makeDecorator :: UsesDebug env m => ReaderT env m (Word16 -> IO String)
 makeDecorator = do
   DebugState {..} <- asks forDebugState
@@ -107,6 +114,7 @@ type BreakPreCondition env m = ReaderT env m Bool
 type BreakPostCondition env m = BusEvent -> ReaderT env m Bool
 
 -- | Break after a certain number of instructions have been executed.
+{-# INLINEABLE breakOnCountOf #-}
 breakOnCountOf :: MonadIO m => Int -> ReaderT env m (BreakPreCondition env m)
 breakOnCountOf n0 = do
   counter <- liftIO $ newIORef n0
@@ -119,16 +127,19 @@ breakOnCountOf n0 = do
         pure False
 
 -- | Break when breakpoints are triggered.
+{-# INLINEABLE breakOnBreakpoints #-}
 breakOnBreakpoints :: UsesDebug env m => ReaderT env m (BreakPostCondition env m)
 breakOnBreakpoints = do
   DebugState {..} <- asks forDebugState
   pure . const $ shouldBreak breakpoints
 
 -- | Break when the PC equals a certain value.
+{-# INLINEABLE breakOnPC #-}
 breakOnPC :: UsesCPU env m => Word16 -> (BreakPostCondition env m)
 breakOnPC pc = const $ (pc ==) <$> readPC
 
 -- | Break when a RET instruction is executed with the current stack pointer.
+{-# INLINEABLE breakOnRet #-}
 breakOnRet :: UsesCPU env m => Word16 -> (BreakPreCondition env m)
 breakOnRet originalSP = do
   sp          <- readR16 RegSP
@@ -141,6 +152,7 @@ breakOnRet originalSP = do
     _         -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.
+{-# INLINEABLE doRun #-}
 doRun
   :: UsesBus env m => [BreakPreCondition env m] -> [BreakPostCondition env m] -> ReaderT env m ()
 doRun preConditions postConditions = go
@@ -155,6 +167,7 @@ doRun preConditions postConditions = go
         if doPostBreak then pure () else go
 
 -- | Disassemble the next 4 instructions at the current PC.
+{-# INLINEABLE disassembleAtPC #-}
 disassembleAtPC :: UsesDebug env m => ReaderT env m ()
 disassembleAtPC = do
   symbols   <- getCodeMap
@@ -162,6 +175,7 @@ disassembleAtPC = do
   pc        <- readPC
   dumpDisassembly decorator symbols pc 4
 
+{-# INLINEABLE withAddress #-}
 withAddress :: UsesDebug env m => MemAddress -> (Word16 -> ReaderT env m ()) -> ReaderT env m ()
 withAddress (ConstAddress addr ) action = action addr
 withAddress (LabelAddress label) action = do
@@ -171,6 +185,7 @@ withAddress (LabelAddress label) action = do
     Nothing   -> liftIO $ putStrLn $ "Unknown symbol " ++ label
 
 -- | Execute a debugger command.
+{-# SPECIALIZE doCommand :: Command -> ReaderT DebugState IO () #-}
 doCommand :: UsesDebug env m => Command -> ReaderT env m ()
 doCommand ShowHeader = do
   mem <- asks forMemory

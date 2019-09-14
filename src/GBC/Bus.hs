@@ -40,15 +40,19 @@ class HasBusState env where
   forBusState :: env -> BusState
 
 instance HasBusState env => HasMemory env where
+  {-# INLINE forMemory #-}
   forMemory = memory . forBusState
 
 instance HasBusState env => HasCPUState env where
+  {-# INLINE forCPUState #-}
   forCPUState = cpu . forBusState
 
 instance HasBusState env => HasGraphicsState env where
+  {-# INLINE forGraphicsState #-}
   forGraphicsState = graphics . forBusState
 
 instance HasBusState env => HasKeypadState env where
+  {-# INLINE forKeypadState #-}
   forKeypadState = keypadState . forBusState
 
 type UsesBus env m = (HasBusState env, UsesCPU env m, UsesKeypad env m)
@@ -62,6 +66,7 @@ registerWindow window queue = do
   windows <- graphicsOutput <$> asks forBusState
   liftIO $ H.insert windows window queue
 
+{-# INLINABLE killWindow #-}
 killWindow :: UsesBus env m => Window -> ReaderT env m ()
 killWindow window = do
   windows <- graphicsOutput <$> asks forBusState
@@ -73,6 +78,7 @@ killWindow window = do
         putMVar var Nothing
         H.delete windows window
 
+{-# INLINE handleEvents #-}
 handleEvents :: UsesBus env m => ReaderT env m ()
 handleEvents = do
   events <- pollEvents
@@ -81,6 +87,7 @@ handleEvents = do
     (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
     _                     -> pure ()
 
+{-# INLINABLE busStep #-}
 busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)
 busStep = do
   busEvent <- cpuStep
