@@ -383,6 +383,7 @@ reset = do
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Perform an arithmetic operation and adjust the flags.
+{-# INLINE adder8 #-}
 adder8 :: ArithmeticOp -> Word8 -> Word8 -> Bool -> (Word8, Word8)
 adder8 op a1 a2 carry =
   let (wa1, wa2) = (fromIntegral a1 :: Word16, fromIntegral a2)
@@ -400,6 +401,7 @@ adder8 op a1 a2 carry =
   in  (r, flags)
 
 -- | Perform an increment operation and adjust the flags.
+{-# INLINE inc8 #-}
 inc8 :: ArithmeticOp -> Word8 -> (Word8, Word8)
 inc8 op value =
   let r = case op of

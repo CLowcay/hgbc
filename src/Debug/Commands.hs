@@ -26,9 +26,13 @@ import           Debug.Map
 import           Debug.TileViewer
 import           GBC.Bus
 import           GBC.CPU
+import           GBC.Graphics
 import           GBC.Decode
 import           GBC.ISA
 import           GBC.Memory
+
+{-# SPECIALIZE readPC :: ReaderT DebugState IO Word16 #-}
+{-# SPECIALIZE busStep :: ReaderT DebugState IO (BusEvent, Maybe Update) #-}
 
 data MemAddress = ConstAddress Word16 | LabelAddress String deriving (Eq, Ord, Show)
 
@@ -135,12 +139,12 @@ breakOnBreakpoints = do
 
 -- | Break when the PC equals a certain value.
 {-# INLINEABLE breakOnPC #-}
-breakOnPC :: UsesCPU env m => Word16 -> (BreakPostCondition env m)
+breakOnPC :: UsesCPU env m => Word16 -> BreakPostCondition env m
 breakOnPC pc = const $ (pc ==) <$> readPC
 
 -- | Break when a RET instruction is executed with the current stack pointer.
 {-# INLINEABLE breakOnRet #-}
-breakOnRet :: UsesCPU env m => Word16 -> (BreakPreCondition env m)
+breakOnRet :: UsesCPU env m => Word16 -> BreakPreCondition env m
 breakOnRet originalSP = do
   sp          <- readR16 RegSP
   instruction <- decodeOnly decode
