@@ -937,8 +937,10 @@ jp = do
       $ withNoChangeToRegisters
       $ preservingPC
       $ do
-          pc0        <- readPC
-          ev         <- executeInstruction $ JP condition 0x3242
+          pc0 <- readPC
+          ev  <- executeInstruction $ case condition of
+            Nothing -> JP 0x3242
+            Just cc -> JPCC cc 0x3242
           pc1        <- readPC
           shouldJump <- isConditionTrue condition
           liftIO $ do
@@ -957,8 +959,10 @@ jp = do
           $ withNoChangeToRegisters
           $ preservingPC
           $ do
-              pc0        <- readPC
-              ev         <- executeInstruction $ JR condition value
+              pc0 <- readPC
+              ev  <- executeInstruction $ case condition of
+                Nothing -> JR value
+                Just cc -> JRCC cc value
               pc1        <- readPC
               shouldJump <- isConditionTrue condition
               liftIO $ do
@@ -978,8 +982,10 @@ call = describe "CALL" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \
   it ("works for CALL " ++ show condition ++ " 0x3242") $ withNewCPU $ do
     writeR16 RegSP 0xC000
     withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
-      pc0        <- readPC
-      ev         <- executeInstruction $ CALL condition 0x3242
+      pc0 <- readPC
+      ev  <- executeInstruction $ case condition of
+        Nothing -> CALL 0x3242
+        Just cc -> CALLCC cc 0x3242
       pc1        <- readPC
       sp1        <- readR16 RegSP
       shouldJump <- isConditionTrue condition
@@ -1011,8 +1017,10 @@ ret = do
       writeR16 RegSP 0xC000
       writeMem 0xC000 (0x3242 :: Word16)
       withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
-        pc0        <- readPC
-        ev         <- executeInstruction $ RET condition
+        pc0 <- readPC
+        ev  <- executeInstruction $ case condition of
+          Nothing -> RET
+          Just cc -> RETCC cc
         pc1        <- readPC
         sp1        <- readR16 RegSP
         shouldJump <- isConditionTrue condition

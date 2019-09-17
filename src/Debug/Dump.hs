@@ -101,7 +101,8 @@ dumpDisassembly decorator symbolTable base n = do
       ++ formatWithSymbolTable symbolTable instruction
       ++ extraInfo addr instruction
  where
-  extraInfo addr (JR _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo addr (JR e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo addr (JRCC _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
   extraInfo _    _        = ""
 
 dumpMem :: UsesMemory env m => Word16 -> ReaderT env m ()

@@ -123,12 +123,16 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
                  | SET !Word8 !SmallOperand8           -- ^ SET b \<r8|(HL)\>
                  | RES !Word8 !SmallOperand8           -- ^ RES b \<r8|(HL)\>
 
-                 | JP !(Maybe ConditionCode) !Word16   -- ^ JP cc im16
-                 | JR !(Maybe ConditionCode) !Int8     -- ^ JR cc im8
+                 | JP !Word16                          -- ^ JP im16
+                 | JPCC !ConditionCode !Word16         -- ^ JP cc im16
+                 | JR !Int8                            -- ^ JR im8
+                 | JRCC !ConditionCode !Int8           -- ^ JR cc im8
                  | JPI                                 -- ^ JP (HL)
-                 | CALL !(Maybe ConditionCode) !Word16 -- ^ CALL cc im16
+                 | CALL !Word16                        -- ^ CALL im16
+                 | CALLCC !ConditionCode !Word16       -- ^ CALL cc im16
                  | RETI                                -- ^ RETI
-                 | RET !(Maybe ConditionCode)          -- ^ RET cc
+                 | RET                                 -- ^ RET
+                 | RETCC !ConditionCode                -- ^ RET cc
                  | RST !Word8                          -- ^ RST t
 
                  | DAA                                 -- ^ DAA
@@ -223,14 +227,17 @@ clocks (SET _ (SmallR8 _))     _          = 8
 clocks (SET _ SmallHLI   )     _          = 16
 clocks (RES _ (SmallR8 _))     _          = 8
 clocks (RES _ SmallHLI   )     _          = 16
-clocks (JP  _ _          )     takeBranch = if takeBranch then 16 else 12
-clocks (JR  _ _          )     takeBranch = if takeBranch then 12 else 8
+clocks (JP _             )     _          = 16
+clocks (JPCC _ _         )     takeBranch = if takeBranch then 16 else 12
+clocks (JR _             )     _          = 12
+clocks (JRCC _ _         )     takeBranch = if takeBranch then 12 else 8
 clocks JPI                     _          = 4
-clocks (CALL _ _)              takeBranch = if takeBranch then 24 else 12
+clocks (CALL _    )            _          = 24
+clocks (CALLCC _ _)            takeBranch = if takeBranch then 24 else 12
 clocks RETI                    _          = 16
-clocks (RET Nothing)           _          = 16
-clocks (RET _      )           takeBranch = if takeBranch then 20 else 8
-clocks (RST _      )           _          = 16
+clocks RET                     _          = 16
+clocks (RETCC _)               takeBranch = if takeBranch then 20 else 8
+clocks (RST   _)               _          = 16
 clocks DAA                     _          = 4
 clocks CPL                     _          = 4
 clocks NOP                     _          = 4
@@ -294,36 +301,36 @@ instance Format Instruction where
   formatWithSymbolTable _     RLA               = "RLA"
   formatWithSymbolTable _     RRCA              = "RRCA"
   formatWithSymbolTable _     RRA               = "RRA"
-  formatWithSymbolTable _     (RLC  so8       ) = "RLC " ++ format so8
-  formatWithSymbolTable _     (RL   so8       ) = "RL " ++ format so8
-  formatWithSymbolTable _     (RRC  so8       ) = "RRC " ++ format so8
-  formatWithSymbolTable _     (RR   so8       ) = "RR " ++ format so8
-  formatWithSymbolTable _     (SLA  so8       ) = "SLA " ++ format so8
-  formatWithSymbolTable _     (SRA  so8       ) = "SRA " ++ format so8
-  formatWithSymbolTable _     (SRL  so8       ) = "SRL " ++ format so8
-  formatWithSymbolTable _     (SWAP so8       ) = "SWAP " ++ format so8
-  formatWithSymbolTable _     (BIT w8      so8) = "BIT " ++ formatHex w8 ++ ", " ++ format so8
-  formatWithSymbolTable _     (SET w8      so8) = "SET " ++ formatHex w8 ++ ", " ++ format so8
-  formatWithSymbolTable _     (RES w8      so8) = "RES " ++ formatHex w8 ++ ", " ++ format so8
-  formatWithSymbolTable table (JP  Nothing w16) = "JP " ++ formatOrLookup16 table w16
-  formatWithSymbolTable table (JP (Just cc) w16) =
+  formatWithSymbolTable _     (RLC  so8  )      = "RLC " ++ format so8
+  formatWithSymbolTable _     (RL   so8  )      = "RL " ++ format so8
+  formatWithSymbolTable _     (RRC  so8  )      = "RRC " ++ format so8
+  formatWithSymbolTable _     (RR   so8  )      = "RR " ++ format so8
+  formatWithSymbolTable _     (SLA  so8  )      = "SLA " ++ format so8
+  formatWithSymbolTable _     (SRA  so8  )      = "SRA " ++ format so8
+  formatWithSymbolTable _     (SRL  so8  )      = "SRL " ++ format so8
+  formatWithSymbolTable _     (SWAP so8  )      = "SWAP " ++ format so8
+  formatWithSymbolTable _     (BIT w8 so8)      = "BIT " ++ formatHex w8 ++ ", " ++ format so8
+  formatWithSymbolTable _     (SET w8 so8)      = "SET " ++ formatHex w8 ++ ", " ++ format so8
+  formatWithSymbolTable _     (RES w8 so8)      = "RES " ++ formatHex w8 ++ ", " ++ format so8
+  formatWithSymbolTable table (JP w16    )      = "JP " ++ formatOrLookup16 table w16
+  formatWithSymbolTable table (JPCC cc w16) =
     "JP " ++ format cc ++ ", " ++ formatOrLookup16 table w16
-  formatWithSymbolTable _     (JR Nothing   i8)  = "JR " ++ show i8
-  formatWithSymbolTable _     (JR (Just cc) i8)  = "JR " ++ format cc ++ ", " ++ show i8
-  formatWithSymbolTable _     JPI                = "JP (HL)"
-  formatWithSymbolTable table (CALL Nothing w16) = "CALL " ++ formatOrLookup16 table w16
-  formatWithSymbolTable table (CALL (Just cc) w16) =
+  formatWithSymbolTable _     (JR i8     ) = "JR " ++ show i8
+  formatWithSymbolTable _     (JRCC cc i8) = "JR " ++ format cc ++ ", " ++ show i8
+  formatWithSymbolTable _     JPI          = "JP (HL)"
+  formatWithSymbolTable table (CALL w16)   = "CALL " ++ formatOrLookup16 table w16
+  formatWithSymbolTable table (CALLCC cc w16) =
     "CALL " ++ format cc ++ ", " ++ formatOrLookup16 table w16
-  formatWithSymbolTable _ RETI            = "RETI"
-  formatWithSymbolTable _ (RET Nothing  ) = "RET"
-  formatWithSymbolTable _ (RET (Just cc)) = "RET " ++ format cc
-  formatWithSymbolTable _ (RST t        ) = "RST" ++ formatHex t
-  formatWithSymbolTable _ DAA             = "DAA"
-  formatWithSymbolTable _ CPL             = "CPL"
-  formatWithSymbolTable _ NOP             = "NOP"
-  formatWithSymbolTable _ HALT            = "HALT"
-  formatWithSymbolTable _ STOP            = "STOP"
-  formatWithSymbolTable _ DI              = "DI"
-  formatWithSymbolTable _ EI              = "EI"
-  formatWithSymbolTable _ CCF             = "CCF"
-  formatWithSymbolTable _ SCF             = "SCF"
+  formatWithSymbolTable _ RETI       = "RETI"
+  formatWithSymbolTable _ RET        = "RET"
+  formatWithSymbolTable _ (RETCC cc) = "RET " ++ format cc
+  formatWithSymbolTable _ (RST   t ) = "RST" ++ formatHex t
+  formatWithSymbolTable _ DAA        = "DAA"
+  formatWithSymbolTable _ CPL        = "CPL"
+  formatWithSymbolTable _ NOP        = "NOP"
+  formatWithSymbolTable _ HALT       = "HALT"
+  formatWithSymbolTable _ STOP       = "STOP"
+  formatWithSymbolTable _ DI         = "DI"
+  formatWithSymbolTable _ EI         = "EI"
+  formatWithSymbolTable _ CCF        = "CCF"
+  formatWithSymbolTable _ SCF        = "SCF"

@@ -34,8 +34,8 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 0 2 0 = do
     b1 <- nextByte
     pure $ if b1 == 0 then Just STOP else Nothing
-  decodeBytes 0 3  0 = Just . JR Nothing . fromIntegral <$> nextByte
-  decodeBytes 0 cc 0 = Just . JR (conditionCode $ cc .&. 0x03) . fromIntegral <$> nextByte
+  decodeBytes 0 3  0 = Just . JR . fromIntegral <$> nextByte
+  decodeBytes 0 cc 0 = Just . JRCC (conditionCode $ cc .&. 0x03) . fromIntegral <$> nextByte
   decodeBytes 0 dd 1 = if dd .&. 0x01 == 0
     then Just . LD16_I16 (registerPair dd) <$> nextWord
     else pure $ Just $ ADDHL (registerPair $ dd .&. 0x06)
@@ -77,8 +77,8 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 3 5  0  = Just . ADDSP . fromIntegral <$> nextByte
   decodeBytes 3 6  0  = Just . LDA_I8I <$> nextByte
   decodeBytes 3 7  0  = Just . LDHL . fromIntegral <$> nextByte
-  decodeBytes 3 cc 0  = pure . Just . RET $ conditionCode cc
-  decodeBytes 3 1  1  = pure . Just $ RET Nothing
+  decodeBytes 3 cc 0  = pure . Just . RETCC $ conditionCode cc
+  decodeBytes 3 1  1  = pure . Just $ RET
   decodeBytes 3 3  1  = pure . Just $ RETI
   decodeBytes 3 5  1  = pure . Just $ JPI
   decodeBytes 3 7  1  = pure . Just $ LDSP
@@ -87,13 +87,13 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 3 5  2  = Just . LDI16I_A <$> nextWord
   decodeBytes 3 6  2  = pure $ Just LDA_CI
   decodeBytes 3 7  2  = Just . LDA_I16I <$> nextWord
-  decodeBytes 3 cc 2  = Just . JP (conditionCode cc) <$> nextWord
-  decodeBytes 3 0  3  = Just . JP Nothing <$> nextWord
+  decodeBytes 3 cc 2  = Just . JPCC (conditionCode cc) <$> nextWord
+  decodeBytes 3 0  3  = Just . JP <$> nextWord
   decodeBytes 3 6  3  = pure . Just $ DI
   decodeBytes 3 7  3  = pure . Just $ EI
   decodeBytes 3 cc 4 =
-    if cc .&. 0x04 /= 0 then pure Nothing else Just . CALL (conditionCode cc) <$> nextWord
-  decodeBytes 3 1  5 = Just . CALL Nothing <$> nextWord
+    if cc .&. 0x04 /= 0 then pure Nothing else Just . CALLCC (conditionCode cc) <$> nextWord
+  decodeBytes 3 1  5 = Just . CALL <$> nextWord
   decodeBytes 3 3  5 = pure Nothing
   decodeBytes 3 5  5 = pure Nothing
   decodeBytes 3 7  5 = pure Nothing
@@ -144,10 +144,10 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   registerPair 4 = RegHL
   registerPair 6 = RegSP
   registerPair x = error $ "invalid register pair code " ++ show x
-  conditionCode 0 = Just CondNZ
-  conditionCode 1 = Just CondZ
-  conditionCode 2 = Just CondNC
-  conditionCode 3 = Just CondC
+  conditionCode 0 = CondNZ
+  conditionCode 1 = CondZ
+  conditionCode 2 = CondNC
+  conditionCode 3 = CondC
   conditionCode x = error $ "invalid condition code " ++ show x
   aluOp 0 = ADD
   aluOp 1 = ADC
@@ -161,7 +161,7 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
 
 {-# INLINABLE decodeN #-}
 decodeN :: forall env m . UsesMemory env m => Word16 -> Int -> ReaderT env m [(Word16, Instruction)]
-decodeN base = fmap fst . runDecode base . doDecode 
+decodeN base = fmap fst . runDecode base . doDecode
  where
   doDecode :: Int -> Decode [(Word16, Instruction)]
   doDecode 0   = pure []
@@ -173,7 +173,7 @@ decodeN base = fmap fst . runDecode base . doDecode
 
 decode :: Decode (Maybe Instruction)
 decode = do
-  b0   <- nextByte
+  b0 <- nextByte
   table ! b0
 
 nextByte :: Decode Word8

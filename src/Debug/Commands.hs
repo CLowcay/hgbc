@@ -149,7 +149,8 @@ breakOnRet originalSP = do
   sp          <- readR16 RegSP
   instruction <- decodeOnly decode
   case instruction of
-    Just (RET condition) -> do
+    Just RET -> pure $ originalSP == sp
+    Just (RETCC condition) -> do
       shouldRet <- testCondition condition
       pure $ shouldRet && originalSP == sp
     Just RETI -> pure $ originalSP == sp

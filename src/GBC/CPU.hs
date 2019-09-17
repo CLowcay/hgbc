@@ -276,12 +276,11 @@ testFlag flag = do
 
 -- | Check if a condition code is true.
 {-# INLINABLE testCondition #-}
-testCondition :: UsesCPU env m => Maybe ConditionCode -> ReaderT env m Bool
-testCondition Nothing       = pure True
-testCondition (Just CondNZ) = not <$> testFlag flagZ
-testCondition (Just CondZ ) = testFlag flagZ
-testCondition (Just CondNC) = not <$> testFlag flagCY
-testCondition (Just CondC ) = testFlag flagCY
+testCondition :: UsesCPU env m => ConditionCode -> ReaderT env m Bool
+testCondition CondNZ = not <$> testFlag flagZ
+testCondition CondZ  = testFlag flagZ
+testCondition CondNC = not <$> testFlag flagCY
+testCondition CondC  = testFlag flagCY
 
 -- | Read the F register.
 {-# INLINABLE readF #-}
@@ -656,15 +655,15 @@ executeInstruction instruction = case instruction of
   -- INC \<r8|(HL)\>
   INC so8 -> do
     (value, readAddr) <- readSmallOperand8 so8
-    let (r, flags)                 = inc8 OpAdd value
-    wroteAddr         <- writeSmallOperand8 so8 r
+    let (r, flags) = inc8 OpAdd value
+    wroteAddr <- writeSmallOperand8 so8 r
     setFlags flags
     pure $ BusEvent readAddr wroteAddr $ clocks instruction True
   -- DEC \<r8|(HL)\>
   DEC so8 -> do
     (value, readAddr) <- readSmallOperand8 so8
-    let (r, flags)                 = inc8 OpSub value
-    wroteAddr         <- writeSmallOperand8 so8 r
+    let (r, flags) = inc8 OpSub value
+    wroteAddr <- writeSmallOperand8 so8 r
     setFlags flags
     pure $ BusEvent readAddr wroteAddr $ clocks instruction True
   -- ADD HL r16
@@ -799,13 +798,22 @@ executeInstruction instruction = case instruction of
     (value, readAddr) <- readSmallOperand8 so8
     writeAddr         <- writeSmallOperand8 so8 (value `clearBit` fromIntegral w8)
     pure $ BusEvent readAddr writeAddr $ clocks instruction True
+  -- JP im16
+  JP w16 -> do
+    writePC w16
+    pure $ BusEvent [] [] $ clocks instruction True
   -- JP cc im16
-  JP cc w16 -> do
+  JPCC cc w16 -> do
     shouldJump <- testCondition cc
     when shouldJump $ writePC w16
     pure $ BusEvent [] [] $ clocks instruction shouldJump
   -- JR cc im8
-  JR cc i8 -> do
+  JR i8 -> do
+    pc <- readPC
+    writePC $ pc + fromIntegral i8
+    pure $ BusEvent [] [] $ clocks instruction True
+  -- JR cc im8
+  JRCC cc i8 -> do
     shouldJump <- testCondition cc
     when shouldJump $ do
       pc <- readPC
@@ -815,22 +823,16 @@ executeInstruction instruction = case instruction of
   JPI -> do
     writePC =<< readR16 RegHL
     pure $ BusEvent [] [] $ clocks instruction True
+  -- CALL im16
+  CALL w16      -> doCall w16 $ clocks instruction True
   -- CALL cc im16
-  CALL cc w16 -> do
+  CALLCC cc w16 -> do
     shouldCall <- testCondition cc
-    if not shouldCall
-      then pure $ BusEvent [] [] $ clocks instruction False
-      else do
-        sp <- readR16 RegSP
-        let sp' = sp - 2
-        pc <- readPC
-        writeMem sp' pc
-        writePC w16
-        writeR16 RegSP sp'
-        pure $ BusEvent [] [sp', sp' + 1] $ clocks instruction True
+    if shouldCall
+      then doCall w16 $ clocks instruction True
+      else pure $ BusEvent [] [] $ clocks instruction False
   -- RETI
   RETI -> do
-    -- TODO: Revisit this.
     sp  <- readR16 RegSP
     pcL <- fromIntegral <$> readByte sp
     pcH <- fromIntegral <$> readByte (sp + 1)
@@ -839,17 +841,13 @@ executeInstruction instruction = case instruction of
     setIME
     pure $ BusEvent [sp, sp + 1] [] $ clocks instruction True
   -- RET cc
-  RET cc -> do
+  RET      -> doRet $ clocks instruction True
+  -- RET cc
+  RETCC cc -> do
     shouldCall <- testCondition cc
     if not shouldCall
       then pure $ BusEvent [] [] $ clocks instruction False
-      else do
-        sp  <- readR16 RegSP
-        pcL <- fromIntegral <$> readByte sp
-        pcH <- fromIntegral <$> readByte (sp + 1)
-        writePC $ (pcH `unsafeShiftL` 8) .|. pcL
-        writeR16 RegSP $ sp + 2
-        pure $ BusEvent [sp, sp + 1] [] $ clocks instruction True
+      else doRet $ clocks instruction True
   -- RST t
   RST w8 -> do
     sp <- readR16 RegSP
@@ -893,3 +891,24 @@ executeInstruction instruction = case instruction of
   SCF -> do
     setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
     pure $ BusEvent [] [] $ clocks instruction True
+
+{-# INLINE doCall #-}
+doCall :: UsesCPU env m => Word16 -> Int -> ReaderT env m BusEvent
+doCall w16 numberOfClocks = do
+  sp <- readR16 RegSP
+  let sp' = sp - 2
+  pc <- readPC
+  writeMem sp' pc
+  writePC w16
+  writeR16 RegSP sp'
+  pure $ BusEvent [] [sp', sp' + 1] numberOfClocks
+
+{-# INLINE doRet #-}
+doRet :: UsesCPU env m => Int -> ReaderT env m BusEvent
+doRet numberOfClocks = do
+  sp  <- readR16 RegSP
+  pcL <- fromIntegral <$> readByte sp
+  pcH <- fromIntegral <$> readByte (sp + 1)
+  writePC $ (pcH `unsafeShiftL` 8) .|. pcL
+  writeR16 RegSP $ sp + 2
+  pure $ BusEvent [sp, sp + 1] [] numberOfClocks
