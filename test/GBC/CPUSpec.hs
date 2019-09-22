@@ -360,6 +360,7 @@ spec = do
     $ do
         ev <- executeInstruction CCF
         liftIO $ ev `shouldBe` noWrite
+  describe "Interrupt" interrupt
 
 didRead :: BusEvent
 didRead = BusEvent [] 8
@@ -1049,3 +1050,71 @@ ret = do
           pc1 `shouldBe` 0x3242
           sp1 `shouldBe` 0xC002
           ime `shouldBe` True
+
+interrupt :: Spec
+interrupt = do
+  it "triggers interrupt 0x40" $ testInterrupt 0x01 0x01 0x0040
+  it "triggers interrupt 0x48" $ testInterrupt 0x02 0x02 0x0048
+  it "triggers interrupt 0x50" $ testInterrupt 0x04 0x04 0x0050
+  it "triggers interrupt 0x58" $ testInterrupt 0x08 0x08 0x0058
+  it "triggers interrupt 0x60" $ testInterrupt 0x10 0x10 0x0060
+  it "triggers priority interrupt 0x40" $ testInterrupt 0x1F 0x1F 0x0040
+  it "triggers priority interrupt 0x48" $ testInterrupt 0x1E 0x1F 0x0048
+  it "triggers priority interrupt 0x50" $ testInterrupt 0x1C 0x1F 0x0050
+  it "triggers priority interrupt 0x58" $ testInterrupt 0x18 0x1F 0x0058
+  it "does not trigger disabled interrupt 0x40" $ testNoInterrupt True 0x01 0x1E
+  it "does not trigger disabled interrupt 0x48" $ testNoInterrupt True 0x02 0x1D
+  it "does not trigger disabled interrupt 0x50" $ testNoInterrupt True 0x04 0x1B
+  it "does not trigger disabled interrupt 0x58" $ testNoInterrupt True 0x08 0x17
+  it "does not trigger disabled interrupt 0x60" $ testNoInterrupt True 0x10 0x0F
+  it "does not trigger interrupt 0x40 when interrupts are disabled"
+    $ testNoInterrupt False 0x01 0x1F
+  it "does not trigger interrupt 0x48 when interrupts are disabled"
+    $ testNoInterrupt False 0x02 0x1F
+  it "does not trigger interrupt 0x50 when interrupts are disabled"
+    $ testNoInterrupt False 0x04 0x1F
+  it "does not trigger interrupt 0x58 when interrupts are disabled"
+    $ testNoInterrupt False 0x08 0x1F
+  it "does not trigger interrupt 0x60 when interrupts are disabled"
+    $ testNoInterrupt False 0x10 0x1F
+ where
+  testNoInterrupt :: Bool -> Word8 -> Word8 -> IO ()
+  testNoInterrupt ime fif fie = withNewCPU $ withAllFlagCombos $ do
+    if ime then setIME else clearIME
+    withNoChangeToRegisters $ preservingPC $ do
+      pc <- readPC
+      writeMem 0xFFFF fif
+      writeMem 0xFF0F fie
+      ev  <- cpuStep
+      pc1 <- readPC
+      liftIO $ do
+        ev `shouldBe` BusEvent [] 4
+        pc1 `shouldBe` (pc + 1)
+  testInterrupt :: Word8 -> Word8 -> Word16 -> IO ()
+  testInterrupt fif fie vector =
+    withNewCPU
+      $ withAllFlagCombos
+      $ withNoChangeToRegisters
+      $ preservingPC
+      $ preservingR16 RegSP
+      $ withIMEUpdate
+      $ expectInterrupt fif fie vector
+  expectInterrupt fif fie vector = do
+    setIME
+    pc0 <- readPC
+    writeR16 RegSP 0xC000
+    writeMem 0xFFFF fif
+    writeMem 0xFF0F fie
+    ev  <- cpuStep
+    pc1 <- readPC
+    sp1 <- readR16 RegSP
+    sl  <- readByte 0xBFFE
+    sh  <- readByte 0xBFFF
+    ime <- testIME
+    liftIO $ do
+      ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28
+      pc1 `shouldBe` vector
+      sp1 `shouldBe` 0xBFFE
+      fromIntegral sl .|. (fromIntegral sh `shiftL` 8) `shouldBe` pc0
+      ime `shouldBe` False
+

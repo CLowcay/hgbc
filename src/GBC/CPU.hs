@@ -372,7 +372,8 @@ reset = do
   writeMem 0xFF49 (0xFF :: Word8)   -- OBP1
   writeMem 0xFF4A (0x00 :: Word8)   -- WY
   writeMem 0xFF4B (0x00 :: Word8)   -- WX
-  writeMem 0xFFFF (0x00 :: Word8)   -- IE
+  writeMem regIE (0x00 :: Word8)    -- IE
+  writeMem regIF (0x00 :: Word8)    -- IF
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -426,10 +427,57 @@ decodeOnly action = do
   (r, _) <- runDecode pc action
   pure r
 
+-- | IE register
+regIE :: Word16
+regIE = 0xFFFF
+
+-- | IF register
+regIF :: Word16
+regIF = 0xFF0F
+
+interruptVector :: Int -> Word16
+interruptVector 0 = 0x40
+interruptVector 1 = 0x48
+interruptVector 2 = 0x50
+interruptVector 3 = 0x58
+interruptVector 4 = 0x60
+interruptVector n = error $ "Invalid interrupt vector " ++ show n
+
+-- | Get all of the pending interrupts that are ready to service.
+{-# INLINE pendingEnabledInterrupts #-}
+pendingEnabledInterrupts :: UsesCPU env m => ReaderT env m Word8
+pendingEnabledInterrupts = do
+  interrupt <- readByte regIF
+  enabled   <- readByte regIE
+  pure $ interrupt .&. enabled .&. 0x1F
+
+-- | Get the next interrupt to service.
+{-# INLINE getNextInterrupt #-}
+getNextInterrupt :: Word8 -> Int
+getNextInterrupt = countTrailingZeros
+
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
 cpuStep :: UsesCPU env m => ReaderT env m BusEvent
-cpuStep = executeInstruction =<< decodeAndAdvancePC decode
+cpuStep = do
+  -- Check if we have an interrupt
+  interrupts <- pendingEnabledInterrupts
+  ime <- testIME
+
+  if interrupts == 0 || not ime
+    then executeInstruction =<< decodeAndAdvancePC decode
+    else do
+      -- Handle an interrupt
+      let nextInterrupt = getNextInterrupt interrupts
+      pc <- readPC
+      sp <- readR16 RegSP
+      let sp' = sp - 2
+      writeMem sp' pc
+      writeR16 RegSP sp'
+      writePC $ interruptVector nextInterrupt
+      clearIME
+      writeMem regIF $ clearBit interrupts nextInterrupt
+      pure $ BusEvent [sp', sp' + 1] 28 -- TODO: Number of clocks here is just a guess
 
 -- | Execute a single instruction.
 {-# INLINABLE executeInstruction #-}
@@ -850,7 +898,9 @@ executeInstruction instruction = case instruction of
     writePC $ 8 * fromIntegral w8
     pure $ BusEvent [sp', sp' + 1] $ clocks instruction True
   -- DAA
-  DAA -> error "DAA not implemented"
+  DAA -> do
+    pc <- readPC
+    error $ "DAA not implemented at " ++ formatHex pc
   -- CPL
   CPL -> do
     writeR8 RegA =<< complement <$> readR8 RegA
@@ -886,7 +936,7 @@ executeInstruction instruction = case instruction of
   -- INVALID instruction
   INVALID w8 -> do
     pc <- readPC
-    error $ "Invalid instruction " ++ formatHex w8 ++ " at " ++ show (pc - 1)
+    error $ "Invalid instruction " ++ formatHex w8 ++ " at " ++ formatHex (pc - 1)
 
 {-# INLINE doCall #-}
 doCall :: UsesCPU env m => Word16 -> Int -> ReaderT env m BusEvent
