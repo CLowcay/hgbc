@@ -1,6 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module GBC.CPU
@@ -52,6 +51,7 @@ import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.Decode
 import           GBC.ISA
+import           Common
 import           GBC.Memory
 
 -- | The register file.
@@ -433,11 +433,7 @@ decodeOnly action = do
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
 cpuStep :: UsesCPU env m => ReaderT env m BusEvent
-cpuStep = do
-  pc0 <- readPC
-  decodeAndAdvancePC decode >>= \case
-    Nothing          -> error $ "Invalid instruction at " ++ show pc0
-    Just instruction -> executeInstruction instruction
+cpuStep = executeInstruction =<< decodeAndAdvancePC decode
 
 -- | Execute a single instruction.
 {-# INLINABLE executeInstruction #-}
@@ -891,6 +887,10 @@ executeInstruction instruction = case instruction of
   SCF -> do
     setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
     pure $ BusEvent [] [] $ clocks instruction True
+  -- INVALID instruction
+  INVALID w8          -> do
+    pc <- readPC
+    error $ "Invalid instruction " ++ formatHex w8 ++ " at " ++ show (pc - 1)
 
 {-# INLINE doCall #-}
 doCall :: UsesCPU env m => Word16 -> Int -> ReaderT env m BusEvent

@@ -149,11 +149,11 @@ breakOnRet originalSP = do
   sp          <- readR16 RegSP
   instruction <- decodeOnly decode
   case instruction of
-    Just RET -> pure $ originalSP == sp
-    Just (RETCC condition) -> do
+    RET -> pure $ originalSP == sp
+    (RETCC condition) -> do
       shouldRet <- testCondition condition
       pure $ shouldRet && originalSP == sp
-    Just RETI -> pure $ originalSP == sp
+    RETI -> pure $ originalSP == sp
     _         -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.

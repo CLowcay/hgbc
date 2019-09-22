@@ -145,6 +145,8 @@ data Instruction = LD_R8 !Register8 !Operand8          -- ^ LD r8 \<r8|im8|(HL)\
                  | SCF                                 -- ^ SCF
                  | DI                                  -- ^ DI
                  | EI                                  -- ^ EI
+
+                 | INVALID !Word8                      -- ^ INVALID (any invalid instruction)
                  deriving (Eq, Ord, Show)
 
 -- | Calculate the number of clock cycles taken by an instruction.
@@ -247,6 +249,7 @@ clocks CCF                     _          = 4
 clocks SCF                     _          = 4
 clocks DI                      _          = 4
 clocks EI                      _          = 4
+clocks (INVALID _)             _          = 0
 
 formatOrLookup16 :: SymbolTable -> Word16 -> String
 formatOrLookup16 table value =
@@ -321,16 +324,17 @@ instance Format Instruction where
   formatWithSymbolTable table (CALL w16)   = "CALL " ++ formatOrLookup16 table w16
   formatWithSymbolTable table (CALLCC cc w16) =
     "CALL " ++ format cc ++ ", " ++ formatOrLookup16 table w16
-  formatWithSymbolTable _ RETI       = "RETI"
-  formatWithSymbolTable _ RET        = "RET"
-  formatWithSymbolTable _ (RETCC cc) = "RET " ++ format cc
-  formatWithSymbolTable _ (RST   t ) = "RST" ++ formatHex t
-  formatWithSymbolTable _ DAA        = "DAA"
-  formatWithSymbolTable _ CPL        = "CPL"
-  formatWithSymbolTable _ NOP        = "NOP"
-  formatWithSymbolTable _ HALT       = "HALT"
-  formatWithSymbolTable _ STOP       = "STOP"
-  formatWithSymbolTable _ DI         = "DI"
-  formatWithSymbolTable _ EI         = "EI"
-  formatWithSymbolTable _ CCF        = "CCF"
-  formatWithSymbolTable _ SCF        = "SCF"
+  formatWithSymbolTable _ RETI         = "RETI"
+  formatWithSymbolTable _ RET          = "RET"
+  formatWithSymbolTable _ (RETCC cc)   = "RET " ++ format cc
+  formatWithSymbolTable _ (RST   t )   = "RST" ++ formatHex t
+  formatWithSymbolTable _ DAA          = "DAA"
+  formatWithSymbolTable _ CPL          = "CPL"
+  formatWithSymbolTable _ NOP          = "NOP"
+  formatWithSymbolTable _ HALT         = "HALT"
+  formatWithSymbolTable _ STOP         = "STOP"
+  formatWithSymbolTable _ DI           = "DI"
+  formatWithSymbolTable _ EI           = "EI"
+  formatWithSymbolTable _ CCF          = "CCF"
+  formatWithSymbolTable _ SCF          = "SCF"
+  formatWithSymbolTable _ (INVALID w8) = ".data " ++ formatHex w8
