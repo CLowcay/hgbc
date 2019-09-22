@@ -74,6 +74,7 @@ refreshKeypad = do
         (False, True ) -> (p1 .&. 0xF0) .|. (complement (keypad `shiftR` 4) .&. 0x0F)
         _              -> p1
   writeMem regKeypad p1'
+  when (0 /= 0x0F .&. p1 .&. complement p1') $ raiseInterrupt 4
 
 -- | Update the keypad state from a list of SDL events.
 {-# INLINE keypadHandleUserEvents #-}
