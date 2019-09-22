@@ -41,6 +41,11 @@ library:
   source-dirs: src
   ghc-options:
     - -Wall
+    - -Wincomplete-uni-patterns
+    - -Wincomplete-record-updates
+    - -Wredundant-constraints
+    - -Wpartial-fields
+    # - -Wall-missed-specialisations
 
 executables:
   hgbc:
