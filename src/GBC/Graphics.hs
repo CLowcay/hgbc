@@ -29,13 +29,16 @@ data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounde
 
 -- | The graphics state.
 data GraphicsState = GraphicsState {
-    lcdTime :: !Int
+    lcdMode :: !Mode
+  , clocksRemaining :: !Int
+  , currentLine :: !Int
+  , lineClocksRemaining :: !Int
   , vramDirty :: !Bool
 } deriving (Eq, Ord, Show)
 
 -- | The initial graphics state.
 initGraphics :: GraphicsState
-initGraphics = GraphicsState 0 False
+initGraphics = GraphicsState VBlank 153 0 0 False
 
 class HasGraphicsState env where
   forGraphicsState :: env -> IORef GraphicsState
@@ -51,23 +54,41 @@ data Update = Update {
 isInVRAM :: Word16 -> Bool
 isInVRAM addr = addr >= 0x8000 && addr < 0x9800
 
-totalLines, oamClocks, readClocks, hblankClocks, totalClocks :: Int
-totalLines = 144
+totalLines, visibleLines, oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
+totalLines = 154
+visibleLines = 144
 oamClocks = 80
-readClocks = 172 + oamClocks
-hblankClocks = 204 + readClocks
-totalClocks = 70224
+readClocks = 172
+hblankClocks = 204
+vblankClocks = 69768
+lineClocks = oamClocks + readClocks + hblankClocks
 
--- | Get the mode after a given number of clock cycles.
-modeAt :: Int -> (Mode, Word8)
-modeAt x =
-  let (line, inLine) = x `divMod` hblankClocks
-  in  (, fromIntegral line) $ if x < totalLines * hblankClocks
-        then if
-          | inLine < oamClocks  -> ScanOAM
-          | inLine < readClocks -> ReadVRAM
-          | otherwise           -> HBlank
-        else VBlank
+-- | Given a mode, the number of clocks remaining, and the number of elapsed
+-- clocks, return the new mode and the new number of clocks remaining.
+{-# INLINE nextMode #-}
+nextMode :: Mode -> Int -> Int -> Int -> (Mode, Int)
+nextMode mode remaining clocks line =
+  let remaining' = remaining - clocks
+  in  if remaining' > 0
+        then (mode, remaining')
+        else case mode of
+          ScanOAM  -> (ReadVRAM, remaining' + readClocks)
+          ReadVRAM -> (HBlank, remaining' + hblankClocks)
+          HBlank   -> if line >= visibleLines
+            then (VBlank, remaining' + vblankClocks)
+            else (ScanOAM, remaining' + oamClocks)
+          VBlank -> (ScanOAM, remaining' + oamClocks)
+
+-- | Get the next LCD line given the current line, the clocks until the next
+-- line, and the number of elapsed clocks.
+{-# INLINE nextLine #-}
+nextLine :: Int -> Int -> Int -> (Int, Int)
+nextLine line remaining clocks =
+  let remaining' = remaining - clocks
+      line'      = line + 1
+  in  if remaining' > 0
+        then (line, remaining')
+        else (if line' >= totalLines then 0 else line', remaining' + lineClocks)
 
 regLCDC :: Word16
 regLCDC = 0xFF40
@@ -121,31 +142,34 @@ decodeVRAM = for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
   combine byteL byteH = 64 * (byteL .|. (byteH `shiftL` 1))
   readWord offset = (,) <$> readByte (0x8000 + offset) <*> readByte (0x8001 + offset)
 
-{-# INLINEABLE graphicsStep #-}
+{-# INLINABLE graphicsStep #-}
 graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
 graphicsStep (BusEvent _ newWrites clocks) = do
-  graphicsState      <- asks forGraphicsState
-  GraphicsState {..} <- liftIO $ readIORef graphicsState
+  graphicsState               <- asks forGraphicsState
+  graphics@GraphicsState {..} <- liftIO $ readIORef graphicsState
 
-  lcdEnabled         <- testGraphicsFlag regLCDC flagLCDEnable
-  let lcdTime'       = (lcdTime + clocks) `mod` totalClocks
-  let (mode, line)   = modeAt lcdTime
-  let (mode', line') = modeAt lcdTime'
-  let vramDirty'     = vramDirty || any isInVRAM newWrites
+  lcdEnabled                  <- testGraphicsFlag regLCDC flagLCDEnable
+  let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks currentLine
+  let (line', lineClocksRemaining') = nextLine currentLine lineClocksRemaining clocks
+  let vramDirty'                    = vramDirty || any isInVRAM newWrites
 
   if lcdEnabled
     then do
-      when (line /= line') $ writeMem regLY line'
-      if mode /= mode'
+      when (currentLine /= line') $ writeMem regLY line'
+
+      liftIO . writeIORef graphicsState $ GraphicsState
+        { lcdMode             = mode'
+        , clocksRemaining     = remaining'
+        , currentLine         = line'
+        , lineClocksRemaining = lineClocksRemaining'
+        , vramDirty           = not $ mode' == ReadVRAM && vramDirty'
+        }
+
+      if lcdMode /= mode'
         then do
-          liftIO . writeIORef graphicsState $ GraphicsState
-            lcdTime'
-            (not $ mode' == ReadVRAM && vramDirty')
           setMode mode'
           pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode'
-        else do
-          liftIO . writeIORef graphicsState $ GraphicsState lcdTime' vramDirty'
-          pure Nothing
+        else pure Nothing
     else do
-      liftIO . writeIORef graphicsState $ GraphicsState lcdTime vramDirty'
+      liftIO . writeIORef graphicsState $ graphics { vramDirty = vramDirty' }
       pure Nothing
