@@ -144,7 +144,7 @@ decodeVRAM = for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
 
 {-# INLINABLE graphicsStep #-}
 graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
-graphicsStep (BusEvent _ newWrites clocks) = do
+graphicsStep (BusEvent newWrites clocks) = do
   graphicsState               <- asks forGraphicsState
   graphics@GraphicsState {..} <- liftIO $ readIORef graphicsState
 
