@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -34,6 +35,7 @@ data BusState = BusState {
   , graphics :: !(IORef GraphicsState)
   , graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
   , keypadState :: !(IORef Word8)
+  , lastEventPollAt :: !(IORef Word32)
 }
 
 class HasBusState env where
@@ -57,9 +59,12 @@ instance HasBusState env => HasKeypadState env where
 
 type UsesBus env m = (HasBusState env, UsesCPU env m, UsesKeypad env m)
 
+pollDelay :: Word32
+pollDelay = 10
+
 initBusState :: CPUState -> Memory -> IO BusState
 initBusState cpuState mem =
-  BusState cpuState mem <$> newIORef initGraphics <*> H.new <*> initKeypadState
+  BusState cpuState mem <$> newIORef initGraphics <*> H.new <*> initKeypadState <*> newIORef 0
 
 registerWindow :: UsesBus env m => Window -> MVar (Maybe Update) -> ReaderT env m ()
 registerWindow window queue = do
@@ -93,12 +98,15 @@ busStep = do
   busEvent <- cpuStep
   keypadHandleBusEvent busEvent
 
-  handleEvents
+  BusState {..} <- asks forBusState
+  now <- ticks
+  lastPoll <- liftIO $ readIORef lastEventPollAt
+  when (now - lastPoll > pollDelay) $ do
+    handleEvents
+    liftIO $ writeIORef lastEventPollAt =<< ticks
 
   graphicsUpdate <- graphicsStep busEvent
   case graphicsUpdate of
     Nothing     -> pure ()
-    Just update -> do
-      windows <- graphicsOutput <$> asks forBusState
-      liftIO $ traverse_ ((`putMVar` Just update) . snd) =<< H.toList windows
+    Just update -> liftIO $ traverse_ ((`putMVar` Just update) . snd) =<< H.toList graphicsOutput
   pure (busEvent, graphicsUpdate)
