@@ -37,6 +37,7 @@ module GBC.CPU
   , readOperand8
   , readSmallOperand8
   , writeSmallOperand8
+  , raiseInterrupt
   , executeInstruction
   , cpuStep
   )
@@ -455,6 +456,10 @@ pendingEnabledInterrupts = do
 {-# INLINE getNextInterrupt #-}
 getNextInterrupt :: Word8 -> Int
 getNextInterrupt = countTrailingZeros
+
+-- | Raise an interrupt.
+raiseInterrupt ::  UsesMemory env m => Int -> ReaderT env m ()
+raiseInterrupt interrupt = writeMem regIF =<< (`setBit` interrupt) <$> readByte regIF
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
