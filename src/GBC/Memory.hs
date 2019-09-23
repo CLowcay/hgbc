@@ -9,15 +9,18 @@ module GBC.Memory
   , UsesMemory
   , initMemory
   , getROMHeader
+  , dma
   , readByte
   , writeMem
   , readChunk
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Word
 import           Foreign.ForeignPtr
+import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.ROM
@@ -46,6 +49,20 @@ initMemory (ROM rom) = Memory rom <$> mallocForeignPtrArray 0x7FFF
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
 
+-- | Perform a direct memory transfer.
+dma :: UsesMemory env m => Word16 -> Word16 -> Int -> ReaderT env m ()
+dma source destination size =
+  if source < 0x8000 || destination < 0x8000 || size > fromIntegral (0xFFFF - destination)
+    then error $ "DMA out of bounds " ++ formatHex source ++ " " ++ formatHex destination
+    else do
+      Memory {..} <- asks forMemory
+      let sourceOffset      = (fromIntegral source) - 0x8000
+      let destinationOffset = (fromIntegral destination) - 0x8000
+      liftIO $ withForeignPtr memRam $ \ram -> moveArray
+        (ram `plusPtr` sourceOffset :: Ptr Word8)
+        (ram `plusPtr` destinationOffset :: Ptr Word8)
+        size
+
 -- | Read a byte from memory.
 {-# INLINE readByte #-}
 readByte :: UsesMemory env m => Word16 -> ReaderT env m Word8
@@ -65,7 +82,7 @@ writeMem addr value = do
     else liftIO $ withForeignPtr memRam $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
 
 -- | Read a chunk of memory.
-{-# INLINEABLE readChunk #-}
+{-# INLINABLE readChunk #-}
 readChunk :: (UsesMemory env m) => Word16 -> Int -> ReaderT env m B.ByteString
 readChunk base len = do
   Memory {..} <- asks forMemory

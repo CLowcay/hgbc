@@ -29,6 +29,7 @@ import           GBC.Memory
 import           SDL
 import           SDL.Orphans                    ( )
 import qualified Data.HashTable.IO             as H
+import           Data.Bits
 
 data BusState = BusState {
     cpu :: !CPUState
@@ -103,11 +104,21 @@ handleEvents = do
     (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
     _                     -> pure ()
 
+regDMA :: Word16
+regDMA = 0xFF46
+
+{-# INLINABLE doDMA #-}
+doDMA :: UsesMemory env m => BusEvent -> ReaderT env m ()
+doDMA busEvent = when (regDMA `elem` writeAddress busEvent) $ do
+  address <- fromIntegral <$> readByte regDMA
+  dma (address `shiftL` 8) 0xFE00 160
+
 {-# INLINABLE busStep #-}
 busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)
 busStep = do
   busEvent <- cpuStep
   keypadHandleBusEvent busEvent
+  doDMA busEvent
 
   BusState {..} <- asks forBusState
   now           <- ticks
