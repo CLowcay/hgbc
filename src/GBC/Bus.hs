@@ -23,6 +23,7 @@ import           Data.IORef
 import           Data.Word
 import           GBC.CPU
 import           GBC.Graphics
+import           GBC.Timer
 import           GBC.Keypad
 import           GBC.Memory
 import           SDL
@@ -36,6 +37,7 @@ data BusState = BusState {
   , graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
   , keypadState :: !(IORef Word8)
   , lastEventPollAt :: !(IORef Word32)
+  , timerState :: !TimerState
 }
 
 class HasBusState env where
@@ -57,6 +59,10 @@ instance HasBusState env => HasKeypadState env where
   {-# INLINE forKeypadState #-}
   forKeypadState = keypadState . forBusState
 
+instance HasBusState env => HasTimerState env where
+  {-# INLINE forTimerState #-}
+  forTimerState = timerState . forBusState
+
 type UsesBus env m = (HasBusState env, UsesCPU env m, UsesKeypad env m)
 
 pollDelay :: Word32
@@ -64,7 +70,12 @@ pollDelay = 10
 
 initBusState :: CPUState -> Memory -> IO BusState
 initBusState cpuState mem =
-  BusState cpuState mem <$> newIORef initGraphics <*> H.new <*> initKeypadState <*> newIORef 0
+  BusState cpuState mem
+    <$> newIORef initGraphics
+    <*> H.new
+    <*> initKeypadState
+    <*> newIORef 0
+    <*> newIORef 0
 
 registerWindow :: UsesBus env m => Window -> MVar (Maybe Update) -> ReaderT env m ()
 registerWindow window queue = do
@@ -99,8 +110,8 @@ busStep = do
   keypadHandleBusEvent busEvent
 
   BusState {..} <- asks forBusState
-  now <- ticks
-  lastPoll <- liftIO $ readIORef lastEventPollAt
+  now           <- ticks
+  lastPoll      <- liftIO $ readIORef lastEventPollAt
   when (now - lastPoll > pollDelay) $ do
     handleEvents
     liftIO $ writeIORef lastEventPollAt =<< ticks
