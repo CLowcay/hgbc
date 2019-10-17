@@ -49,6 +49,7 @@ type UsesGraphics env m = (UsesMemory env m, HasGraphicsState env)
 data Update = Update {
     updateVRAM :: !Bool
   , updateMode :: !Mode
+  , updateLine :: !Word8
 } deriving (Eq, Ord, Show)
 
 isInVRAM :: Word16 -> Bool
@@ -58,7 +59,7 @@ oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
 readClocks = 172
 hblankClocks = 204
-vblankClocks = 69768
+vblankClocks = 4560
 lineClocks = oamClocks + readClocks + hblankClocks
 
 totalLines, visibleLines :: Word8
@@ -203,7 +204,7 @@ graphicsStep (BusEvent newWrites clocks) = do
           when (stat `testBit` interruptOAM && mode' == ScanOAM) $ raiseInterrupt 1
           when (mode' == VBlank) $ raiseInterrupt 0
 
-          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode'
+          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode' line'
         else pure Nothing
     else do
       liftIO . writeIORef graphicsState $ graphics { vramDirty = vramDirty' }

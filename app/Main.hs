@@ -9,6 +9,7 @@ import           Debug.CLI
 import           Debug.Commands
 import           GBC.Bus
 import           GBC.CPU
+import           GBC.GraphicsOutput
 import           GBC.Memory
 import           GBC.ROM
 import           System.Environment
@@ -49,6 +50,8 @@ runDebugger debugState = do
               hFlush stdout
               putMVar commandDone ()
         commandRunner
-  void . forkIO $ runReaderT commandRunner debugState
+  void . forkIO $ flip runReaderT debugState $ do
+    (sync, window) <- startOutput
+    registerWindow window sync
+    commandRunner
   whileJust_ nextCommand $ \cmd -> putMVar channel cmd >> takeMVar commandDone
-

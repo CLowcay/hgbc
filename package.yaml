@@ -20,13 +20,15 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
+- OpenGL
 - array
+- async
 - base >= 4.7 && < 5
 - binary
-- async
 - bytestring
 - containers
 - directory
+- file-embed
 - filepath
 - hashable
 - hashtables
