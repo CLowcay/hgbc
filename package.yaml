@@ -21,6 +21,7 @@ description:         Please see the README on GitHub at <https://github.com/CLow
 
 dependencies:
 - OpenGL
+- OpenGLRaw
 - array
 - async
 - base >= 4.7 && < 5

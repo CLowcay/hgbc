@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -13,9 +12,18 @@ module GBC.Graphics
   , initGraphics
   , graphicsStep
   , decodeVRAM
+  , flagLCDEnable
+  , flagWindowTileMap
+  , flagWindowEnable
+  , flagTileDataSelect
+  , flagBackgroundTileMap
+  , flagOBJSize
+  , flagOBJEnable
+  , flagBackgroundEnable
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
@@ -50,10 +58,11 @@ data Update = Update {
     updateVRAM :: !Bool
   , updateMode :: !Mode
   , updateLine :: !Word8
+  , updateLCDC :: !(Maybe Word8)
 } deriving (Eq, Ord, Show)
 
 isInVRAM :: Word16 -> Bool
-isInVRAM addr = addr >= 0x8000 && addr < 0x9800
+isInVRAM addr = addr >= 0x8000 && addr < 0xA000
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -126,9 +135,6 @@ interruptHBlank = 3
 maskMode :: Word8
 maskMode = 0x03
 
-isFlagSet :: Word8 -> Word8 -> Bool
-isFlagSet flag v = v .&. flag /= 0
-
 {-# INLINABLE testGraphicsFlag #-}
 testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
 testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
@@ -192,7 +198,7 @@ graphicsStep (BusEvent newWrites clocks) = do
           stat <- readByte regSTAT
 
           -- Update STAT register
-          lyc <- readByte regLYC
+          lyc  <- readByte regLYC
           let matchFlag = if lyc == line' then bit matchBit else 0
           writeMem regSTAT
             $ modifyBits (bit matchBit .&. maskMode) (modeBits mode' .|. matchFlag) stat
@@ -204,7 +210,10 @@ graphicsStep (BusEvent newWrites clocks) = do
           when (stat `testBit` interruptOAM && mode' == ScanOAM) $ raiseInterrupt 1
           when (mode' == VBlank) $ raiseInterrupt 0
 
-          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode' line'
+          -- Check LCDC register
+          lcdc <- if regLCDC `elem` newWrites then Just <$> readByte regLCDC else pure Nothing
+
+          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode' line' lcdc
         else pure Nothing
     else do
       liftIO . writeIORef graphicsState $ graphics { vramDirty = vramDirty' }

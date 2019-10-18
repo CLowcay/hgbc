@@ -6,6 +6,7 @@ module GLUtils
   , Attribute(..)
   , linkUniform
   , linkAttribute
+  , linkTextureBuffer
   , setAttribConst
   , newVertexArrayObject
   , loadVertexData
@@ -18,6 +19,8 @@ import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           Graphics.Rendering.OpenGL      ( ($=) )
+import           Graphics.GL.Core44
+import           Foreign.Marshal.Alloc
 import qualified Data.ByteString               as B
 import qualified Graphics.Rendering.OpenGL     as GL
 
@@ -32,6 +35,14 @@ data Attribute a = Attribute !String !GL.NumComponents !GL.DataType !GL.IntegerH
 linkUniform :: GL.Uniform a => GL.Program -> Uniform a -> IO (GL.StateVar a)
 linkUniform program (Uniform uniform) = GL.uniform <$> GL.uniformLocation program uniform
 
+-- | Link the currently bound texture buffer to the currently buffer texture.
+linkTextureBuffer :: IO ()
+linkTextureBuffer = do
+  buffer <- alloca $ \ptr -> do
+    glGetIntegerv GL_TEXTURE_BUFFER_BINDING ptr
+    peek (castPtr ptr)
+  glTexBuffer GL_TEXTURE_BUFFER GL_R8UI buffer
+
 -- | Create a new vertex array object.
 newVertexArrayObject :: IO GL.VertexArrayObject
 newVertexArrayObject = do
@@ -41,14 +52,13 @@ newVertexArrayObject = do
 
 -- | Set the offset and stride of an 'Attribute' in the current buffer.
 linkAttribute :: GL.Program -> Attribute a -> Int -> GL.Stride -> IO ()
-linkAttribute program (Attribute name numComponents dataType integerHandling) offset stride
-  = do
-    attribute <- GL.get $ GL.attribLocation program name
-    GL.vertexAttribArray attribute $= GL.Enabled
-    GL.vertexAttribPointer attribute
-      $= ( integerHandling
-         , GL.VertexArrayDescriptor numComponents dataType stride (nullPtr `plusPtr` offset)
-         )
+linkAttribute program (Attribute name numComponents dataType integerHandling) offset stride = do
+  attribute <- GL.get $ GL.attribLocation program name
+  GL.vertexAttribArray attribute $= GL.Enabled
+  GL.vertexAttribPointer attribute
+    $= ( integerHandling
+       , GL.VertexArrayDescriptor numComponents dataType stride (nullPtr `plusPtr` offset)
+       )
 
 -- | Set an attribute to a constant value.
 setAttribConst :: GL.VertexAttrib a => GL.Program -> Attribute a -> a -> IO ()

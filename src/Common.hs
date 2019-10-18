@@ -1,5 +1,6 @@
 module Common
-  ( SymbolTable(..)
+  ( isFlagSet
+  , SymbolTable(..)
   , lookupByAddress
   , lookupBySymbol
   , Format(..)
@@ -10,6 +11,9 @@ where
 import           Data.Bits
 import           Data.Word
 import qualified Data.HashMap.Strict           as HM
+
+isFlagSet :: Word8 -> Word8 -> Bool
+isFlagSet flag v = v .&. flag /= 0
 
 data SymbolTable = SymbolTable !(HM.HashMap Word16 String) !(HM.HashMap String Word16)
 

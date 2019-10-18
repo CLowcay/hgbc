@@ -10,6 +10,7 @@ import           Data.Word
 import           Foreign.Ptr
 import           GBC.Graphics
 import           GBC.Memory
+import           Common
 import           GLUtils
 import           SDL                            ( ($=) )
 import qualified Data.ByteString               as B
@@ -33,6 +34,12 @@ data GLState = GLState {
   , bgProjection :: !(GL.StateVar (GL.GLmatrix Float))
   , bgLine :: !(GL.StateVar GL.GLint)
   , bgVAO :: !GL.VertexArrayObject
+  , bgCharacterBuffer :: !GL.BufferObject
+  , bgBackground :: !GL.BufferObject
+  , bgSCX :: !(GL.StateVar GL.GLint)
+  , bgSCY :: !(GL.StateVar GL.GLint)
+  , bgBackgroundDataOffset :: !(GL.StateVar GL.GLint)
+  , bgCharacterDataOffset :: !(GL.StateVar GL.GLint)
 }
 
 startOutput :: UsesMemory env m => ReaderT env m (MVar (Maybe Update), SDL.Window)
@@ -50,15 +57,20 @@ startOutput = do
   void $ liftIO $ forkOS $ do
     glContext <- SDL.glCreateContext window
     SDL.swapInterval $= SDL.SynchronizedUpdates
-    glState <- liftIO setUpOpenGL
+    glState <- liftIO (setUpOpenGL memory)
 
     fence0  <- liftIO GL.syncGpuCommandsComplete
     runReaderT (eventLoop fence0) WindowContext { .. }
     SDL.destroyWindow window
   pure (queue, window)
 
-{-# SPECIALIZE readByte :: Word16 -> ReaderT WindowContext IO Word8 #-}
+regSCX :: Word16
+regSCX = 0xFF43
 
+regSCY :: Word16
+regSCY = 0xFF42
+
+{-# SPECIALIZE readByte :: Word16 -> ReaderT WindowContext IO Word8 #-}
 eventLoop :: GL.SyncObject -> ReaderT WindowContext IO ()
 eventLoop fence = do
   WindowContext {..} <- ask
@@ -79,11 +91,30 @@ eventLoop fence = do
         ReadVRAM -> do
           -- Wait for previous commands to finish
           liftIO $ do
-            syncResult <- GL.clientWaitSync fence [] 5000000
+            syncResult <- GL.clientWaitSync fence [GL.SyncFlushCommands] 5000000000
             unless (syncResult == GL.AlreadySignaled || syncResult == GL.ConditionSatisfied)
               $ print syncResult
+            GL.deleteObjectName fence
 
           bgLine glState $= fromIntegral updateLine
+          scxValue <- readByte regSCX
+          scyValue <- readByte regSCY
+          bgSCX glState $= fromIntegral scxValue
+          bgSCY glState $= fromIntegral scyValue
+
+          case updateLCDC of
+            Nothing   -> pure ()
+            Just lcdc -> do
+              bgCharacterDataOffset glState
+                $= if isFlagSet flagTileDataSelect lcdc then 0 else 0x800
+              bgBackgroundDataOffset glState
+                $= if isFlagSet flagBackgroundTileMap lcdc then 0x400 else 0
+
+          when updateVRAM $ do
+            GL.bindBuffer GL.TextureBuffer $= Just (bgCharacterBuffer glState)
+            withVRAMPointer (GL.bufferSubData GL.TextureBuffer GL.WriteToBuffer 0 0x1800)
+            GL.bindBuffer GL.TextureBuffer $= Just (bgBackground glState)
+            withBGPointer (GL.bufferSubData GL.TextureBuffer GL.WriteToBuffer 0 0x400)
 
           -- Signal that we're done updating VRAM.
           doneReadingVRAM
@@ -104,21 +135,61 @@ projection = Uniform "projection"
 lineNumber :: Uniform GL.GLint
 lineNumber = Uniform "line"
 
+-- | The SCX register.
+scx :: Uniform GL.GLint
+scx = Uniform "scx"
+
+-- | The SCY register.
+scy :: Uniform GL.GLint
+scy = Uniform "scy"
+
+-- | Offset to the background tile numbers.
+backgroundDataOffset :: Uniform GL.GLint
+backgroundDataOffset = Uniform "backgroundDataOffset"
+
+-- | Offset the the character data for background tiles.
+characterDataOffset :: Uniform GL.GLint
+characterDataOffset = Uniform "characterDataOffset"
+
+-- | The character data.
+texCharacterData :: Uniform GL.TextureUnit
+texCharacterData = Uniform "texCharacterData"
+
+-- | The background tile data.
+texBackgroundData :: Uniform GL.TextureUnit
+texBackgroundData = Uniform "texBackgroundData"
+
 -- | Position of the scanline.
 position :: Attribute (GL.Vector2 GL.GLint)
 position = Attribute "position" 2 GL.Int GL.KeepIntegral
 
 -- | Configure OpenGL.
-setUpOpenGL :: IO GLState
-setUpOpenGL = do
-  bgProgram    <- loadShaders
-  bgProjection <- linkUniform bgProgram projection
-  bgLine       <- linkUniform bgProgram lineNumber
+setUpOpenGL :: Memory -> IO GLState
+setUpOpenGL mem = do
+  GL.debugOutput $= GL.Enabled
+  GL.debugMessageCallback $= Just print
 
-  bgVAO        <- newVertexArrayObject
+  bgProgram              <- loadShaders
+  bgProjection           <- linkUniform bgProgram projection
+  bgLine                 <- linkUniform bgProgram lineNumber
+  bgSCX                  <- linkUniform bgProgram scx
+  bgSCY                  <- linkUniform bgProgram scy
+  bgBackgroundDataOffset <- linkUniform bgProgram backgroundDataOffset
+  bgCharacterDataOffset  <- linkUniform bgProgram characterDataOffset
+
+  bgVAO                  <- newVertexArrayObject
   void $ loadVertexData (join [[0, 0 :: Int32], [160, 0], [160, 1], [0, 1]])
   linkAttribute bgProgram position 0 8
   void $ loadElementData (join [[0, 1, 2], [2, 3, 0]])
+
+  samplerCharacterData <- linkUniform bgProgram texCharacterData
+  bgCharacterBuffer    <- setUpTextureBuffer (GL.TextureUnit 0)
+                                             samplerCharacterData
+                                             withVRAMPointer
+                                             0x1800
+
+  samplerBackgroundData <- linkUniform bgProgram texBackgroundData
+  bgBackground <- setUpTextureBuffer (GL.TextureUnit 1) samplerBackgroundData withBGPointer 0x400
 
   GL.viewport $= (GL.Position 0 0, GL.Size 160 144)
 
@@ -129,6 +200,25 @@ setUpOpenGL = do
   bgProjection $= projectionMatrix
 
   pure GLState { .. }
+
+ where
+  setUpTextureBuffer
+    :: GL.TextureUnit
+    -> GL.StateVar GL.TextureUnit
+    -> ((Ptr a -> IO ()) -> ReaderT Memory IO ())
+    -> GL.GLsizeiptr
+    -> IO GL.BufferObject
+  setUpTextureBuffer textureUnit sampler withData size = do
+    GL.activeTexture $= textureUnit
+    sampler $= textureUnit
+    texture <- GL.genObjectName
+    GL.textureBinding GL.TextureBuffer' $= Just texture
+    textureBuffer <- GL.genObjectName
+    GL.bindBuffer GL.TextureBuffer $= Just textureBuffer
+    flip runReaderT mem $ withData $ \ptr ->
+      GL.bufferData GL.TextureBuffer $= (size, ptr, GL.StreamDraw)
+    linkTextureBuffer
+    pure textureBuffer
 
 loadShaders :: IO GL.Program
 loadShaders = do

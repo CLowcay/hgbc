@@ -13,6 +13,9 @@ module GBC.Memory
   , readByte
   , writeMem
   , readChunk
+  , withVRAMPointer
+  , withBGPointer
+  , withOAMPointer
   )
 where
 
@@ -48,6 +51,24 @@ initMemory (ROM rom) = Memory rom <$> mallocForeignPtrArray 0x7FFF
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
+
+-- | Perform an action that requires a pointer to VRAM (0x8000).
+withVRAMPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
+withVRAMPointer action = do
+  memory <- asks forMemory
+  liftIO (withForeignPtr (memRam memory) action)
+
+-- | Perform an action that requires a pointer to BG memory (0x9800).
+withBGPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
+withBGPointer action = do
+  memory <- asks forMemory
+  liftIO (withForeignPtr (memRam memory) $ \ptr -> action (ptr `plusPtr` 0x1800))
+
+-- | Perform an action that requires a pointer to OAM memory (0xFE00).
+withOAMPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
+withOAMPointer action = do
+  memory <- asks forMemory
+  liftIO (withForeignPtr (memRam memory) $ \ptr -> action (ptr `plusPtr` 0x7E00))
 
 -- | Perform a direct memory transfer.
 dma :: UsesMemory env m => Word16 -> Word16 -> Int -> ReaderT env m ()
