@@ -9,6 +9,14 @@ module GBC.Graphics
   , UsesGraphics
   , Mode(..)
   , Update(..)
+  , regSCX
+  , regSCY
+  , regWX
+  , regWY
+  , regLCDC
+  , regBGP
+  , regOBP0
+  , regOBP1
   , initGraphics
   , graphicsStep
   , decodeVRAM
@@ -42,11 +50,12 @@ data GraphicsState = GraphicsState {
   , lcdLine :: !Word8
   , lineClocksRemaining :: !Int
   , vramDirty :: !Bool
-} deriving (Eq, Ord, Show)
+  , registerDirty :: !Bool
+} deriving Eq
 
 -- | The initial graphics state.
 initGraphics :: GraphicsState
-initGraphics = GraphicsState VBlank 153 0 0 False
+initGraphics = GraphicsState VBlank 153 0 0 False False
 
 class HasGraphicsState env where
   forGraphicsState :: env -> IORef GraphicsState
@@ -58,11 +67,14 @@ data Update = Update {
     updateVRAM :: !Bool
   , updateMode :: !Mode
   , updateLine :: !Word8
-  , updateLCDC :: !(Maybe Word8)
+  , updateRegisters :: !Bool
 } deriving (Eq, Ord, Show)
 
 isInVRAM :: Word16 -> Bool
 isInVRAM addr = addr >= 0x8000 && addr < 0xA000
+
+isRegister :: Word16 -> Bool
+isRegister addr = addr `elem` [regSCX, regSCY, regWX, regWY, regLCDC, regBGP, regOBP0, regOBP1]
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -113,6 +125,27 @@ regLY = 0xFF44
 
 regLYC :: Word16
 regLYC = 0xFF45
+
+regSCX :: Word16
+regSCX = 0xFF43
+
+regSCY :: Word16
+regSCY = 0xFF42
+
+regWX :: Word16
+regWX = 0xFF4B
+
+regWY :: Word16
+regWY = 0xFF4A
+
+regBGP :: Word16
+regBGP = 0xFF47
+
+regOBP0 :: Word16
+regOBP0 = 0xFF48
+
+regOBP1 :: Word16
+regOBP1 = 0xFF48
 
 flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
   :: Word8
@@ -176,6 +209,7 @@ graphicsStep (BusEvent newWrites clocks) = do
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
   let vramDirty'                    = vramDirty || any isInVRAM newWrites
+  let registerDirty'                = registerDirty || any isRegister newWrites
 
   when (regSTAT `elem` newWrites) $ do
     stat <- readByte regSTAT
@@ -191,6 +225,7 @@ graphicsStep (BusEvent newWrites clocks) = do
         , lcdLine             = line'
         , lineClocksRemaining = lineClocksRemaining'
         , vramDirty           = not $ mode' == ReadVRAM && vramDirty'
+        , registerDirty       = not $ mode' == ReadVRAM && registerDirty'
         }
 
       if lcdMode /= mode'
@@ -210,10 +245,10 @@ graphicsStep (BusEvent newWrites clocks) = do
           when (stat `testBit` interruptOAM && mode' == ScanOAM) $ raiseInterrupt 1
           when (mode' == VBlank) $ raiseInterrupt 0
 
-          -- Check LCDC register
-          lcdc <- if regLCDC `elem` newWrites then Just <$> readByte regLCDC else pure Nothing
-
-          pure . Just $ Update (mode' == ReadVRAM && vramDirty') mode' line' lcdc
+          pure . Just $ Update (mode' == ReadVRAM && vramDirty')
+                               mode'
+                               line'
+                               (mode' == ReadVRAM && registerDirty')
         else pure Nothing
     else do
       liftIO . writeIORef graphicsState $ graphics { vramDirty = vramDirty' }

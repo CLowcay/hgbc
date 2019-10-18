@@ -38,6 +38,7 @@ data GLState = GLState {
   , bgBackground :: !GL.BufferObject
   , bgSCX :: !(GL.StateVar GL.GLint)
   , bgSCY :: !(GL.StateVar GL.GLint)
+  , bgBGP :: !(GL.StateVar GL.GLint)
   , bgBackgroundDataOffset :: !(GL.StateVar GL.GLint)
   , bgCharacterDataOffset :: !(GL.StateVar GL.GLint)
 }
@@ -63,12 +64,6 @@ startOutput = do
     runReaderT (eventLoop fence0) WindowContext { .. }
     SDL.destroyWindow window
   pure (queue, window)
-
-regSCX :: Word16
-regSCX = 0xFF43
-
-regSCY :: Word16
-regSCY = 0xFF42
 
 {-# SPECIALIZE readByte :: Word16 -> ReaderT WindowContext IO Word8 #-}
 eventLoop :: GL.SyncObject -> ReaderT WindowContext IO ()
@@ -97,18 +92,20 @@ eventLoop fence = do
             GL.deleteObjectName fence
 
           bgLine glState $= fromIntegral updateLine
-          scxValue <- readByte regSCX
-          scyValue <- readByte regSCY
-          bgSCX glState $= fromIntegral scxValue
-          bgSCY glState $= fromIntegral scyValue
 
-          case updateLCDC of
-            Nothing   -> pure ()
-            Just lcdc -> do
-              bgCharacterDataOffset glState
-                $= if isFlagSet flagTileDataSelect lcdc then 0 else 0x800
-              bgBackgroundDataOffset glState
-                $= if isFlagSet flagBackgroundTileMap lcdc then 0x400 else 0
+          when updateRegisters $ do
+            lcdc <- readByte regLCDC
+            bgCharacterDataOffset glState $= if isFlagSet flagTileDataSelect lcdc then 0 else 0x800
+            bgBackgroundDataOffset glState
+              $= if isFlagSet flagBackgroundTileMap lcdc then 0x400 else 0
+
+            scxValue <- readByte regSCX
+            scyValue <- readByte regSCY
+            bgSCX glState $= fromIntegral scxValue
+            bgSCY glState $= fromIntegral scyValue
+
+            bgpValue <- readByte regBGP
+            bgBGP glState $= fromIntegral bgpValue
 
           when updateVRAM $ do
             GL.bindBuffer GL.TextureBuffer $= Just (bgCharacterBuffer glState)
@@ -143,6 +140,10 @@ scx = Uniform "scx"
 scy :: Uniform GL.GLint
 scy = Uniform "scy"
 
+-- | The BGP register.
+bgp :: Uniform GL.GLint
+bgp = Uniform "bgp"
+
 -- | Offset to the background tile numbers.
 backgroundDataOffset :: Uniform GL.GLint
 backgroundDataOffset = Uniform "backgroundDataOffset"
@@ -174,6 +175,7 @@ setUpOpenGL mem = do
   bgLine                 <- linkUniform bgProgram lineNumber
   bgSCX                  <- linkUniform bgProgram scx
   bgSCY                  <- linkUniform bgProgram scy
+  bgBGP                  <- linkUniform bgProgram bgp
   bgBackgroundDataOffset <- linkUniform bgProgram backgroundDataOffset
   bgCharacterDataOffset  <- linkUniform bgProgram characterDataOffset
 

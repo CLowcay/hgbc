@@ -7,6 +7,7 @@ uniform int scx;
 uniform int scy;
 uniform int backgroundDataOffset;
 uniform int characterDataOffset;
+uniform int bgp;
 in vec2 pixelPos;
 
 void main( )
@@ -22,7 +23,8 @@ void main( )
 
   int b0 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2)).r);
   int b1 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2) + 1).r);
-  float pixel = float(((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1)) / 3;
-
+  int pixelIndex = ((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1);
+  int internalPaletteIndex = bgp >> (pixelIndex * 2) & 3;
+  float pixel = float(3 - internalPaletteIndex) / 3.0;
   outColor = vec4(pixel, pixel, pixel, 1);
 }
