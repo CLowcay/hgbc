@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module GBC.CPU
   ( RegisterFile(..)
@@ -373,8 +374,8 @@ reset = do
   writeMem 0xFF49 (0xFF :: Word8)   -- OBP1
   writeMem 0xFF4A (0x00 :: Word8)   -- WY
   writeMem 0xFF4B (0x00 :: Word8)   -- WX
-  writeMem regIE (0x00 :: Word8)    -- IE
-  writeMem regIF (0x00 :: Word8)    -- IF
+  writeMem IE (0x00 :: Word8)       -- IE
+  writeMem IF (0x00 :: Word8)       -- IF
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -429,12 +430,12 @@ decodeOnly action = do
   pure r
 
 -- | IE register
-regIE :: Word16
-regIE = 0xFFFF
+pattern IE :: Word16
+pattern IE = 0xFFFF
 
 -- | IF register
-regIF :: Word16
-regIF = 0xFF0F
+pattern IF :: Word16
+pattern IF = 0xFF0F
 
 interruptVector :: Int -> Word16
 interruptVector 0 = 0x40
@@ -448,8 +449,8 @@ interruptVector n = error $ "Invalid interrupt vector " ++ show n
 {-# INLINE pendingEnabledInterrupts #-}
 pendingEnabledInterrupts :: UsesCPU env m => ReaderT env m Word8
 pendingEnabledInterrupts = do
-  interrupt <- readByte regIF
-  enabled   <- readByte regIE
+  interrupt <- readByte IF
+  enabled   <- readByte IE
   pure $ interrupt .&. enabled .&. 0x1F
 
 -- | Get the next interrupt to service.
@@ -459,7 +460,7 @@ getNextInterrupt = countTrailingZeros
 
 -- | Raise an interrupt.
 raiseInterrupt ::  UsesMemory env m => Int -> ReaderT env m ()
-raiseInterrupt interrupt = writeMem regIF =<< (`setBit` interrupt) <$> readByte regIF
+raiseInterrupt interrupt = writeMem IF =<< (`setBit` interrupt) <$> readByte IF
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
@@ -481,7 +482,7 @@ cpuStep = do
       writeR16 RegSP sp'
       writePC $ interruptVector nextInterrupt
       clearIME
-      writeMem regIF $ clearBit interrupts nextInterrupt
+      writeMem IF $ clearBit interrupts nextInterrupt
       pure $ BusEvent [sp', sp' + 1] 28 -- TODO: Number of clocks here is just a guess
 
 -- | Execute a single instruction.

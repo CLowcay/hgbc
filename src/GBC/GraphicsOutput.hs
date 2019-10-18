@@ -94,17 +94,17 @@ eventLoop fence = do
           bgLine glState $= fromIntegral updateLine
 
           when updateRegisters $ do
-            lcdc <- readByte regLCDC
+            lcdc <- readByte LCDC
             bgCharacterDataOffset glState $= if isFlagSet flagTileDataSelect lcdc then 0 else 0x800
             bgBackgroundDataOffset glState
               $= if isFlagSet flagBackgroundTileMap lcdc then 0x400 else 0
 
-            scxValue <- readByte regSCX
-            scyValue <- readByte regSCY
+            scxValue <- readByte SCX
+            scyValue <- readByte SCY
             bgSCX glState $= fromIntegral scxValue
             bgSCY glState $= fromIntegral scyValue
 
-            bgpValue <- readByte regBGP
+            bgpValue <- readByte BGP
             bgBGP glState $= fromIntegral bgpValue
 
           when updateVRAM $ do

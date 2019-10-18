@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module GBC.Timer
   ( TimerState
@@ -30,11 +31,17 @@ class HasTimerState env where
 
 type UsesTimer env m = (HasTimerState env, UsesMemory env m)
 
-regDIV, regTIMA, regTMA, regTAC :: Word16
-regDIV = 0xFF04
-regTIMA = 0xFF05
-regTMA = 0xFF06
-regTAC = 0xFF07
+pattern DIV :: Word16
+pattern DIV = 0xFF04
+
+pattern TIMA :: Word16
+pattern TIMA = 0xFF05
+
+pattern TMA :: Word16
+pattern TMA = 0xFF06
+
+pattern TAC :: Word16
+pattern TAC = 0xFF07
 
 -- | Select the relevant bits from the timer state given the low 2 bits of the
 -- TAC register.
@@ -60,11 +67,11 @@ updateTimer advance = do
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
-    $ writeMem regDIV (fromIntegral (clocks' `shiftR` 8) :: Word8)
+    $ writeMem DIV (fromIntegral (clocks' `shiftR` 8) :: Word8)
 
   -- Update the TIMA register
   when (clocks .&. 0xFFF0 /= clocks' .&. 0xFFF0) $ do
-    tac <- readByte regTAC
+    tac <- readByte TAC
     let mask = clockControlMask $ tac .&. 0x03
 
     -- Update required
@@ -73,11 +80,11 @@ updateTimer advance = do
         (abs (fromIntegral (clocks .&. mask) - fromIntegral (clocks' .&. mask)) == (1 :: Int))
         (pure ())
 
-      tima <- readByte regTIMA
+      tima <- readByte TIMA
       if tima < 0xFF
-        then writeMem regTIMA $ tima + 1
+        then writeMem TIMA $ tima + 1
         else do
           -- Handle overflow by loading from TMA
-          tma <- readByte regTMA
-          writeMem regTIMA tma
+          tma <- readByte TMA
+          writeMem TIMA tma
           raiseInterrupt 2

@@ -1,9 +1,10 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module GBC.Bus
   ( BusState(..)
@@ -104,13 +105,13 @@ handleEvents = do
     (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
     _                     -> pure ()
 
-regDMA :: Word16
-regDMA = 0xFF46
+pattern DMA :: Word16
+pattern DMA = 0xFF46
 
 {-# INLINABLE doDMA #-}
 doDMA :: UsesMemory env m => BusEvent -> ReaderT env m ()
-doDMA busEvent = when (regDMA `elem` writeAddress busEvent) $ do
-  address <- fromIntegral <$> readByte regDMA
+doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
+  address <- fromIntegral <$> readByte DMA
   dma (address `shiftL` 8) 0xFE00 160
 
 {-# INLINABLE busStep #-}

@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ConstraintKinds #-}
 
@@ -9,17 +10,20 @@ module GBC.Graphics
   , UsesGraphics
   , Mode(..)
   , Update(..)
-  , regSCX
-  , regSCY
-  , regWX
-  , regWY
-  , regLCDC
-  , regBGP
-  , regOBP0
-  , regOBP1
   , initGraphics
   , graphicsStep
   , decodeVRAM
+  , pattern LCDC
+  , pattern STAT
+  , pattern LY
+  , pattern LYC
+  , pattern SCX
+  , pattern SCY
+  , pattern WX
+  , pattern WY
+  , pattern BGP
+  , pattern OBP0
+  , pattern OBP1
   , flagLCDEnable
   , flagWindowTileMap
   , flagWindowEnable
@@ -74,7 +78,7 @@ isInVRAM :: Word16 -> Bool
 isInVRAM addr = addr >= 0x8000 && addr < 0xA000
 
 isRegister :: Word16 -> Bool
-isRegister addr = addr `elem` [regSCX, regSCY, regWX, regWY, regLCDC, regBGP, regOBP0, regOBP1]
+isRegister addr = addr `elem` [SCX, SCY, WX, WY, LCDC, BGP, OBP0, OBP1]
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -114,38 +118,38 @@ nextLine line remaining clocks =
         then (line, remaining')
         else (if line' >= totalLines then 0 else line', remaining' + lineClocks)
 
-regLCDC :: Word16
-regLCDC = 0xFF40
+pattern LCDC :: Word16
+pattern LCDC = 0xFF40
 
-regSTAT :: Word16
-regSTAT = 0xFF41
+pattern STAT :: Word16
+pattern STAT = 0xFF41
 
-regLY :: Word16
-regLY = 0xFF44
+pattern LY :: Word16
+pattern LY = 0xFF44
 
-regLYC :: Word16
-regLYC = 0xFF45
+pattern LYC :: Word16
+pattern LYC = 0xFF45
 
-regSCX :: Word16
-regSCX = 0xFF43
+pattern SCX :: Word16
+pattern SCX = 0xFF43
 
-regSCY :: Word16
-regSCY = 0xFF42
+pattern SCY :: Word16
+pattern SCY = 0xFF42
 
-regWX :: Word16
-regWX = 0xFF4B
+pattern WX :: Word16
+pattern WX = 0xFF4B
 
-regWY :: Word16
-regWY = 0xFF4A
+pattern WY :: Word16
+pattern WY = 0xFF4A
 
-regBGP :: Word16
-regBGP = 0xFF47
+pattern BGP :: Word16
+pattern BGP = 0xFF47
 
-regOBP0 :: Word16
-regOBP0 = 0xFF48
+pattern OBP0 :: Word16
+pattern OBP0 = 0xFF48
 
-regOBP1 :: Word16
-regOBP1 = 0xFF48
+pattern OBP1 :: Word16
+pattern OBP1 = 0xFF48
 
 flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
   :: Word8
@@ -205,19 +209,19 @@ graphicsStep (BusEvent newWrites clocks) = do
   graphicsState               <- asks forGraphicsState
   graphics@GraphicsState {..} <- liftIO $ readIORef graphicsState
 
-  lcdEnabled                  <- testGraphicsFlag regLCDC flagLCDEnable
+  lcdEnabled                  <- testGraphicsFlag LCDC flagLCDEnable
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
   let vramDirty'                    = vramDirty || any isInVRAM newWrites
   let registerDirty'                = registerDirty || any isRegister newWrites
 
-  when (regSTAT `elem` newWrites) $ do
-    stat <- readByte regSTAT
-    writeMem regSTAT $ setMode stat $ if lcdEnabled then mode' else lcdMode
+  when (STAT `elem` newWrites) $ do
+    stat <- readByte STAT
+    writeMem STAT $ setMode stat $ if lcdEnabled then mode' else lcdMode
 
   if lcdEnabled
     then do
-      when (lcdLine /= line') $ writeMem regLY line'
+      when (lcdLine /= line') $ writeMem LY line'
 
       liftIO . writeIORef graphicsState $ GraphicsState
         { lcdMode             = mode'
@@ -230,12 +234,12 @@ graphicsStep (BusEvent newWrites clocks) = do
 
       if lcdMode /= mode'
         then do
-          stat <- readByte regSTAT
+          stat <- readByte STAT
 
           -- Update STAT register
-          lyc  <- readByte regLYC
+          lyc  <- readByte LYC
           let matchFlag = if lyc == line' then bit matchBit else 0
-          writeMem regSTAT
+          writeMem STAT
             $ modifyBits (bit matchBit .&. maskMode) (modeBits mode' .|. matchFlag) stat
 
           -- Raise interrupts
