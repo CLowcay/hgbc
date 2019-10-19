@@ -20,10 +20,11 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
-- OpenGL
 - OpenGLRaw
 - array
 - async
+- resourcet
+- StateVar
 - base >= 4.7 && < 5
 - binary
 - bytestring
