@@ -77,8 +77,8 @@ data Update = Update {
 isInVRAM :: Word16 -> Bool
 isInVRAM addr = addr >= 0x8000 && addr < 0xA000
 
-isRegister :: Word16 -> Bool
-isRegister addr = addr `elem` [SCX, SCY, WX, WY, LCDC, BGP, OBP0, OBP1]
+isGraphicsRegister :: Word16 -> Bool
+isGraphicsRegister addr = addr >= 0xFF40 && addr <= 0xFF4B
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -213,7 +213,7 @@ graphicsStep (BusEvent newWrites clocks) = do
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
   let vramDirty'                    = vramDirty || any isInVRAM newWrites
-  let registerDirty'                = registerDirty || any isRegister newWrites
+  let registerDirty'                = registerDirty || any isGraphicsRegister newWrites
 
   when (STAT `elem` newWrites) $ do
     stat <- readByte STAT

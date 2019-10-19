@@ -30,11 +30,14 @@ module GLUtils
   -- * Buffers
   , BufferObject(..)
   , BufferTarget(..)
+  , BufferUpdateStrategy(..)
   , genBuffer
   , bindBuffer
   , makeVertexBuffer
   , makeElementBuffer
+  , makeWritablePersistentBuffer
   , linkTextureBuffer
+  , linkUniformBuffer
 
   -- * Textures
   , Texture(..)
@@ -59,16 +62,17 @@ module GLUtils
   )
 where
 
+import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Resource
+import           Data.Bits
 import           Data.Foldable
 import           Data.StateVar
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
-import           Control.Monad.Trans.Resource
-import           Control.Exception
 import           Foreign.Storable
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
@@ -177,6 +181,7 @@ type Offset = IntPtr
 type Stride = GLsizei
 
 -- | Set the offset and stride of an 'Attribute' in the current vertex buffer.
+{-# INLINABLE linkAttribute #-}
 linkAttribute :: Program -> Attribute -> Offset -> Stride -> IO ()
 linkAttribute (Program program) (Attribute name numComponents elementType integerHandling) offset stride
   = do
@@ -226,25 +231,56 @@ bindBuffer :: MonadIO m => BufferTarget -> BufferObject -> m ()
 bindBuffer target (BufferObject bo) = glBindBuffer (toOpenGLEnum target) bo
 
 -- | Create and initialize a vertex buffer.
-{-# INLINE makeVertexBuffer #-}
-makeVertexBuffer :: forall a . Storable a => [a] -> IO BufferObject
-makeVertexBuffer = makeBuffer GL_ARRAY_BUFFER
+{-# INLINABLE makeVertexBuffer #-}
+makeVertexBuffer :: MonadIO m => forall a . Storable a => [a] -> m BufferObject
+makeVertexBuffer = makeBuffer ArrayBuffer
 
 -- | Create and initialize an element buffer.
-{-# INLINE makeElementBuffer #-}
-makeElementBuffer :: [GLuint] -> IO BufferObject
-makeElementBuffer = makeBuffer GL_ELEMENT_ARRAY_BUFFER
+{-# INLINABLE makeElementBuffer #-}
+makeElementBuffer :: MonadIO m => [GLuint] -> m BufferObject
+makeElementBuffer = makeBuffer ElementArrayBuffer
 
 -- | Make a static buffer.
 {-# INLINE makeBuffer #-}
-makeBuffer :: forall a . Storable a => GLenum -> [a] -> IO BufferObject
+makeBuffer :: forall m a . (MonadIO m, Storable a) => BufferTarget -> [a] -> m BufferObject
 makeBuffer bufferTarget vdata = do
   bo <- capture (glGenBuffers 1)
-  glBindBuffer bufferTarget bo
-  withArray vdata $ \pData -> do
+  glBindBuffer target bo
+  liftIO . withArray vdata $ \pData -> do
     let bufferSize = fromIntegral (length vdata * sizeOf (undefined :: a))
-    glBufferData bufferTarget bufferSize pData GL_STATIC_DRAW
+    glBufferData target bufferSize pData GL_STATIC_DRAW
     pure (BufferObject bo)
+  where target = toOpenGLEnum bufferTarget
+
+-- | The strategy for propagating changes to a persistent buffer back to OpenGL.
+data BufferUpdateStrategy = Coherent       -- ^ Writes are propagated immediately.
+                          | ExplicitFlush  -- ^ Writes are never propagated until glFlush is executed.
+                          deriving (Eq, Ord, Show, Bounded, Enum)
+
+-- | Allocate and bind a coherent writeable persistent buffer.
+{-# INLINABLE makeWritablePersistentBuffer #-}
+makeWritablePersistentBuffer
+  :: MonadIO m => BufferUpdateStrategy -> BufferTarget -> GLsizeiptr -> m (BufferObject, Ptr a)
+makeWritablePersistentBuffer updateStrategy bufferTarget size = do
+  bo <- capture (glGenBuffers 1)
+  glBindBuffer target bo
+  glBufferStorage target size nullPtr storageFlags
+  ptr <- glMapBufferRange target 0 size mapFlags
+  pure (BufferObject bo, ptr)
+ where
+  target                   = toOpenGLEnum bufferTarget
+  baseFlags                = GL_MAP_WRITE_BIT .|. GL_MAP_PERSISTENT_BIT
+  (storageFlags, mapFlags) = case updateStrategy of
+    Coherent      -> (baseFlags .|. GL_MAP_COHERENT_BIT, baseFlags .|. GL_MAP_COHERENT_BIT)
+    ExplicitFlush -> (baseFlags, baseFlags .|. GL_MAP_FLUSH_EXPLICIT_BIT)
+
+-- | Bind a buffer to a buffer-backed uniform.
+{-# INLINABLE linkUniformBuffer #-}
+linkUniformBuffer :: MonadIO m => Program -> B.ByteString -> BufferObject -> GLuint -> m ()
+linkUniformBuffer (Program program) uniform (BufferObject buffer) bindingLocation = do
+  glBindBufferBase GL_UNIFORM_BUFFER bindingLocation buffer
+  uniformBlockIndex <- liftIO (B.useAsCString uniform (glGetUniformBlockIndex program))
+  glUniformBlockBinding program uniformBlockIndex bindingLocation
 
 -- | An OpenGL texture unit.
 newtype TextureUnit = TextureUnit GLint deriving (Eq, Show)
@@ -335,6 +371,7 @@ useProgram :: MonadIO m => Program -> m ()
 useProgram (Program program) = glUseProgram program
 
 -- | Compile and link a set of shaders.
+{-# INLINABLE compileShaders #-}
 compileShaders :: MonadUnliftIO m => [(ShaderType, B.ByteString)] -> m Program
 compileShaders shaders = runResourceT $ do
   (programKey, program) <- allocate glCreateProgram glDeleteProgram
