@@ -116,8 +116,8 @@ setUpOpenGL :: IO GLState
 setUpOpenGL = do
   glViewport 0 0 160 144
 
-  gbVert    <- B.readFile "shaders/gb.vert"
-  gbFrag    <- B.readFile "shaders/gb.frag"
+  gbVert    <- B.readFile "shaders/bg.vert"
+  gbFrag    <- B.readFile "shaders/bg.frag"
   bgProgram <- compileShaders [(VertexShader, gbVert), (FragmentShader, gbFrag)]
   useProgram bgProgram
 
