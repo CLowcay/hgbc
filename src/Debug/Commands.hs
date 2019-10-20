@@ -228,7 +228,7 @@ doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
   doRun [] postConditions
   disassembleAtPC
 doCommand Reset                = reset
-doCommand (Poke8   addr value) = withAddress addr $ \actualAddr -> writeMem actualAddr value
+doCommand (Poke8   addr value) = withAddress addr $ \actualAddr -> writeByte actualAddr value
 doCommand (PokeR8  reg  value) = writeR8 reg value
 doCommand (PokeR16 reg  value) = writeR16 reg value
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do

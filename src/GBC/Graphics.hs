@@ -202,12 +202,12 @@ graphicsStep (BusEvent newWrites clocks) = do
 
   when (STAT `elem` newWrites) $ do
     stat <- readByte STAT
-    writeMem STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
+    writeByte STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
 
   if not lcdEnabled
     then pure Nothing
     else do
-      when (lcdLine /= line') $ writeMem LY line'
+      when (lcdLine /= line') $ writeByte LY line'
 
       liftIO . writeIORef graphicsState $ GraphicsState
         { lcdMode             = mode'
@@ -222,7 +222,7 @@ graphicsStep (BusEvent newWrites clocks) = do
           -- Update STAT register
           lyc  <- readByte LYC
           let matchFlag = if lyc == line' then bit matchBit else 0
-          writeMem STAT
+          writeByte STAT
             $ modifyBits (bit matchBit .&. maskMode) (modeBits mode' .|. matchFlag) stat
 
           -- Raise interrupts

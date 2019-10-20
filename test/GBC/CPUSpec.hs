@@ -10,7 +10,7 @@ import           Data.Function
 import           Data.Int
 import           Data.Maybe
 import           Data.Word
-import           Foreign.Ptr
+import           Foreign.Marshal.Array
 import           GBC.CPU
 import           GBC.ISA
 import           GBC.Memory
@@ -33,10 +33,11 @@ instance HasMemory CPUTestState where
   forMemory = testMemory
 
 withNewCPU :: ReaderT CPUTestState IO () -> IO ()
-withNewCPU computation = do
-  mem <- initMemory blankROM (VideoBuffers nullPtr nullPtr nullPtr)
-  cpu <- initCPU
-  void $ runReaderT computationWithVerification $ CPUTestState cpu mem
+withNewCPU computation = allocaArray 0x2000 $ \pVRAM -> allocaArray 160 $ \pOAM ->
+  allocaArray 12 $ \pRegisters -> do
+    mem <- initMemory blankROM (VideoBuffers pVRAM pOAM pRegisters)
+    cpu <- initCPU
+    void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where
   computationWithVerification = do
     reset
@@ -397,7 +398,7 @@ ld_r8 = do
     it ("works for LD " ++ show dest ++ ", (HL)") $ withNewCPU $ do
       writeR16 RegHL 0xC000
       withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
-        writeMem 0xC000 (0x42 :: Word8)
+        writeByte 0xC000 (0x42 :: Word8)
         ev <- executeInstruction $ LD_R8 dest HLI
         r  <- readR8 dest
         liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 8)
@@ -428,21 +429,21 @@ simpleLoads :: Spec
 simpleLoads = do
   describe "LDA_BCI" $ it "works for LD A, (BC)" $ withNewCPU $ do
     writeR16 RegBC 0xC000
-    writeMem 0xC000 (0x42 :: Word8)
+    writeByte 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_BCI
       r  <- readR8 RegA
       liftIO $ verifyLoad r 0x42 ev didRead
   describe "LDA_DEI" $ it "works for LD A, (DE)" $ withNewCPU $ do
     writeR16 RegDE 0xC000
-    writeMem 0xC000 (0x42 :: Word8)
+    writeByte 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_DEI
       r  <- readR8 RegA
       liftIO $ verifyLoad r 0x42 ev didRead
   describe "LDA_CI" $ it "works for LD A, (C)" $ withNewCPU $ do
     writeR8 RegC 0x44
-    writeMem 0xFF44 (0x42 :: Word8)
+    writeByte 0xFF44 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_CI
       r  <- readR8 RegA
@@ -455,7 +456,7 @@ simpleLoads = do
       r  <- readByte 0xFF44
       liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44])
   describe "LDA_I8I" $ it "works for LD A, (i8)" $ withNewCPU $ do
-    writeMem 0xFF44 (0x42 :: Word8)
+    writeByte 0xFF44 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDA_I8I 0x44
       r  <- readR8 RegA
@@ -467,7 +468,7 @@ simpleLoads = do
       r  <- readByte 0xFF44
       liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44] & expectClocks 12)
   describe "LDA_I16I" $ it "works for LD A, (i16)" $ withNewCPU $ do
-    writeMem 0xC000 (0x42 :: Word8)
+    writeByte 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction $ LDA_I16I 0xC000
       r  <- readR8 RegA
@@ -480,7 +481,7 @@ simpleLoads = do
       liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000] & expectClocks 16)
   describe "LDA_INC" $ it "works for LD A, (HL++)" $ withNewCPU $ do
     writeR16 RegHL 0xC000
-    writeMem 0xC000 (0x42 :: Word8)
+    writeByte 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_INC
       r  <- readR8 RegA
@@ -491,7 +492,7 @@ simpleLoads = do
         hl `shouldBe` 0xC001
   describe "LDA_DEC" $ it "works for LD A, (HL--)" $ withNewCPU $ do
     writeR16 RegHL 0xC000
-    writeMem 0xC000 (0x42 :: Word8)
+    writeByte 0xC000 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_DEC
       r  <- readR8 RegA
@@ -574,7 +575,7 @@ push = forM_ [minBound .. maxBound] $ \source ->
 pop :: Spec
 pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest) $ withNewCPU $ do
   writeR16 RegSP 0xFFF0
-  writeMem 0xFFF0 (0x0102 :: Word16)
+  writeWord 0xFFF0 0x0102
   withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ specialPreserving16 dest $ do
     ev  <- executeInstruction $ POP dest
     sp' <- readR16 RegSP
@@ -662,7 +663,7 @@ arithmeticOp instruction (a, r) (expected, expectedWithCarry) expectedFlags = do
   it ("works for " ++ format (instruction HLI) ++ " " ++ show (a, r)) $ withNewCPU $ do
     writeR8 RegA a
     writeR16 RegHL 0xC000
-    writeMem 0xC000 r
+    writeByte 0xC000 r
     withAllFlagCombos
       $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
       $ preservingR8 RegA
@@ -693,7 +694,7 @@ cp (a, r) expectedFlags = do
     writeR8 RegA a
     writeR16 RegHL 0xC000
     withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
-      writeMem 0xC000 r
+      writeByte 0xC000 r
       ev <- executeInstruction $ CP HLI
       liftIO $ ev `shouldBe` didRead
 
@@ -739,7 +740,7 @@ incdec instruction value expected expectedFlags = do
   it ("works for " ++ format (instruction SmallHLI) ++ " (" ++ show value ++ ")") $ withNewCPU $ do
     writeR16 RegHL 0xC000
     withAllFlagCombos $ withFlagsUpdate (flagH .|. flagN .|. flagZ) expectedFlags $ do
-      writeMem 0xC000 value
+      writeByte 0xC000 value
       ev <- executeInstruction $ instruction SmallHLI
       r  <- readByte 0xC000
       liftIO $ do
@@ -841,7 +842,7 @@ shiftRotate instruction (carry, value) (expectedCarry, expected) = do
     $ withAllFlagCombos
     $ do
         writeR16 RegHL 0xC000
-        writeMem 0xC000 value
+        writeByte 0xC000 value
         setFlagsMask flagCY $ if carry then flagCY else 0
         withFlagsUpdateZ allFlags (dup $ if expectedCarry then flagCY else 0) $ do
           ev <- executeInstruction $ instruction SmallHLI
@@ -1014,7 +1015,7 @@ ret = do
   describe "RET" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
     it ("works for RET " ++ show condition) $ withNewCPU $ do
       writeR16 RegSP 0xC000
-      writeMem 0xC000 (0x3242 :: Word16)
+      writeWord 0xC000 0x3242
       withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
         pc0 <- readPC
         ev  <- executeInstruction $ case condition of
@@ -1041,7 +1042,7 @@ ret = do
     $ withIMEUpdate
     $ do
         writeR16 RegSP 0xC000
-        writeMem 0xC000 (0x3242 :: Word16)
+        writeWord 0xC000 0x3242
         ev  <- executeInstruction RETI
         pc1 <- readPC
         sp1 <- readR16 RegSP
@@ -1084,8 +1085,8 @@ interrupt = do
     if ime then setIME else clearIME
     withNoChangeToRegisters $ preservingPC $ do
       pc <- readPC
-      writeMem 0xFFFF fif
-      writeMem 0xFF0F fie
+      writeByte 0xFFFF fif
+      writeByte 0xFF0F fie
       ev  <- cpuStep
       pc1 <- readPC
       liftIO $ do
@@ -1104,8 +1105,8 @@ interrupt = do
     setIME
     pc0 <- readPC
     writeR16 RegSP 0xC000
-    writeMem 0xFFFF fif
-    writeMem 0xFF0F fie
+    writeByte 0xFFFF fif
+    writeByte 0xFF0F fie
     ev  <- cpuStep
     pc1 <- readPC
     sp1 <- readR16 RegSP

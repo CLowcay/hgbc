@@ -250,7 +250,7 @@ writeSmallOperand8 :: UsesCPU env m => SmallOperand8 -> Word8 -> ReaderT env m [
 writeSmallOperand8 (SmallR8 register) value = [] <$ writeR8 register value
 writeSmallOperand8 SmallHLI           value = do
   hl <- readR16 RegHL
-  writeMem hl value
+  writeByte hl value
   pure [hl]
 
 type Flag = Word8
@@ -344,38 +344,38 @@ reset = do
   setIME
   writePC 0x150
 
-  writeMem 0xFF05 (0x00 :: Word8)   -- TIMA
-  writeMem 0xFF06 (0x00 :: Word8)   -- TMA
-  writeMem 0xFF07 (0x00 :: Word8)   -- TAC
-  writeMem 0xFF10 (0x80 :: Word8)   -- NR10
-  writeMem 0xFF11 (0xBF :: Word8)   -- NR11
-  writeMem 0xFF12 (0xF3 :: Word8)   -- NR12
-  writeMem 0xFF14 (0xBF :: Word8)   -- NR14
-  writeMem 0xFF16 (0x3F :: Word8)   -- NR21
-  writeMem 0xFF17 (0x00 :: Word8)   -- NR22
-  writeMem 0xFF19 (0xBF :: Word8)   -- NR24
-  writeMem 0xFF1A (0x7F :: Word8)   -- NR30
-  writeMem 0xFF1B (0xFF :: Word8)   -- NR31
-  writeMem 0xFF1C (0x9F :: Word8)   -- NR32
-  writeMem 0xFF1E (0xBF :: Word8)   -- NR33
-  writeMem 0xFF20 (0xFF :: Word8)   -- NR41
-  writeMem 0xFF21 (0x00 :: Word8)   -- NR42
-  writeMem 0xFF22 (0x00 :: Word8)   -- NR43
-  writeMem 0xFF23 (0xBF :: Word8)   -- NR30
-  writeMem 0xFF24 (0x77 :: Word8)   -- NR50
-  writeMem 0xFF25 (0xF3 :: Word8)   -- NR51
-  writeMem 0xFF26 (0xF1 :: Word8)   -- NR52
-  writeMem 0xFF40 (0x91 :: Word8)   -- LCDC
-  writeMem 0xFF42 (0x00 :: Word8)   -- SCY
-  writeMem 0xFF43 (0x00 :: Word8)   -- SCX
-  writeMem 0xFF45 (0x00 :: Word8)   -- LYC
-  writeMem 0xFF47 (0xFC :: Word8)   -- BGP
-  writeMem 0xFF48 (0xFF :: Word8)   -- OBP0
-  writeMem 0xFF49 (0xFF :: Word8)   -- OBP1
-  writeMem 0xFF4A (0x00 :: Word8)   -- WY
-  writeMem 0xFF4B (0x00 :: Word8)   -- WX
-  writeMem IE (0x00 :: Word8)       -- IE
-  writeMem IF (0x00 :: Word8)       -- IF
+  writeByte 0xFF05 (0x00 :: Word8)   -- TIMA
+  writeByte 0xFF06 (0x00 :: Word8)   -- TMA
+  writeByte 0xFF07 (0x00 :: Word8)   -- TAC
+  writeByte 0xFF10 (0x80 :: Word8)   -- NR10
+  writeByte 0xFF11 (0xBF :: Word8)   -- NR11
+  writeByte 0xFF12 (0xF3 :: Word8)   -- NR12
+  writeByte 0xFF14 (0xBF :: Word8)   -- NR14
+  writeByte 0xFF16 (0x3F :: Word8)   -- NR21
+  writeByte 0xFF17 (0x00 :: Word8)   -- NR22
+  writeByte 0xFF19 (0xBF :: Word8)   -- NR24
+  writeByte 0xFF1A (0x7F :: Word8)   -- NR30
+  writeByte 0xFF1B (0xFF :: Word8)   -- NR31
+  writeByte 0xFF1C (0x9F :: Word8)   -- NR32
+  writeByte 0xFF1E (0xBF :: Word8)   -- NR33
+  writeByte 0xFF20 (0xFF :: Word8)   -- NR41
+  writeByte 0xFF21 (0x00 :: Word8)   -- NR42
+  writeByte 0xFF22 (0x00 :: Word8)   -- NR43
+  writeByte 0xFF23 (0xBF :: Word8)   -- NR30
+  writeByte 0xFF24 (0x77 :: Word8)   -- NR50
+  writeByte 0xFF25 (0xF3 :: Word8)   -- NR51
+  writeByte 0xFF26 (0xF1 :: Word8)   -- NR52
+  writeByte 0xFF40 (0x91 :: Word8)   -- LCDC
+  writeByte 0xFF42 (0x00 :: Word8)   -- SCY
+  writeByte 0xFF43 (0x00 :: Word8)   -- SCX
+  writeByte 0xFF45 (0x00 :: Word8)   -- LYC
+  writeByte 0xFF47 (0xFC :: Word8)   -- BGP
+  writeByte 0xFF48 (0xFF :: Word8)   -- OBP0
+  writeByte 0xFF49 (0xFF :: Word8)   -- OBP1
+  writeByte 0xFF4A (0x00 :: Word8)   -- WY
+  writeByte 0xFF4B (0x00 :: Word8)   -- WX
+  writeByte IE (0x00 :: Word8)       -- IE
+  writeByte IF (0x00 :: Word8)       -- IF
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -460,7 +460,7 @@ getNextInterrupt = countTrailingZeros
 
 -- | Raise an interrupt.
 raiseInterrupt ::  UsesMemory env m => Int -> ReaderT env m ()
-raiseInterrupt interrupt = writeMem IF =<< (`setBit` interrupt) <$> readByte IF
+raiseInterrupt interrupt = writeByte IF =<< (`setBit` interrupt) <$> readByte IF
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
@@ -478,11 +478,11 @@ cpuStep = do
       pc <- readPC
       sp <- readR16 RegSP
       let sp' = sp - 2
-      writeMem sp' pc
+      writeWord sp' pc
       writeR16 RegSP sp'
       writePC $ interruptVector nextInterrupt
       clearIME
-      writeMem IF $ clearBit interrupts nextInterrupt
+      writeByte IF $ clearBit interrupts nextInterrupt
       pure $ BusEvent [sp', sp' + 1] 28 -- TODO: Number of clocks here is just a guess
 
 -- | Execute a single instruction.
@@ -498,12 +498,12 @@ executeInstruction instruction = case instruction of
   LDHLI_R8 r8 -> do
     value <- readR8 r8
     hl    <- readR16 RegHL
-    writeMem hl value
+    writeByte hl value
     pure $ BusEvent [hl] $ clocks instruction True
   -- LD (HL) im8
   LDHLI_I8 im8 -> do
     hl <- readR16 RegHL
-    writeMem hl im8
+    writeByte hl im8
     pure $ BusEvent [hl] $ clocks instruction True
   -- LD A (BC)
   LDA_BCI -> do
@@ -529,7 +529,7 @@ executeInstruction instruction = case instruction of
     c <- readR8 RegC
     let addr = fromIntegral c + 0xFF00
     value <- readR8 RegA
-    writeMem addr value
+    writeByte addr value
     pure $ BusEvent [addr] $ clocks instruction True
   -- LD A (im8)
   LDA_I8I w8 -> do
@@ -541,7 +541,7 @@ executeInstruction instruction = case instruction of
   LDI8I_A w8 -> do
     let addr = fromIntegral w8 + 0xFF00
     value <- readR8 RegA
-    writeMem addr value
+    writeByte addr value
     pure $ BusEvent [addr] $ clocks instruction True
   -- LD A (im16)
   LDA_I16I w16 -> do
@@ -551,7 +551,7 @@ executeInstruction instruction = case instruction of
   -- LD (im16) A
   LDI16I_A w16 -> do
     value <- readR8 RegA
-    writeMem w16 value
+    writeByte w16 value
     pure $ BusEvent [w16] $ clocks instruction True
   -- LD A (HL++)
   LDA_INC -> do
@@ -571,26 +571,26 @@ executeInstruction instruction = case instruction of
   LDBCI_A -> do
     value <- readR8 RegA
     addr  <- readR16 RegBC
-    writeMem addr value
+    writeByte addr value
     pure $ BusEvent [addr] $ clocks instruction True
   -- LD (DE) A
   LDDEI_A -> do
     value <- readR8 RegA
     addr  <- readR16 RegDE
-    writeMem addr value
+    writeByte addr value
     pure $ BusEvent [addr] $ clocks instruction True
   -- LD (HL++) A
   LDHLI_INC -> do
     value <- readR8 RegA
     hl    <- readR16 RegHL
-    writeMem hl value
+    writeByte hl value
     writeR16 RegHL (hl + 1)
     pure $ BusEvent [hl] $ clocks instruction True
   -- LD (HL--) A
   LDHLI_DEC -> do
     value <- readR8 RegA
     hl    <- readR16 RegHL
-    writeMem hl value
+    writeByte hl value
     writeR16 RegHL (hl - 1)
     pure $ BusEvent [hl] $ clocks instruction True
   -- LD r16 im16
@@ -606,7 +606,7 @@ executeInstruction instruction = case instruction of
     sp <- readR16 RegSP
     let sp' = sp - 2
     value <- if r16 == RegSP then readAF else readR16 r16
-    writeMem sp' value
+    writeWord sp' value
     writeR16 RegSP sp'
     pure $ BusEvent [sp', sp' + 1] $ clocks instruction True
   -- POP r16
@@ -631,7 +631,7 @@ executeInstruction instruction = case instruction of
   -- LD (im16) SP
   LDI16I_SP w16 -> do
     sp <- readR16 RegSP
-    writeMem w16 sp
+    writeWord w16 sp
     pure $ BusEvent [w16, w16 + 1] $ clocks instruction True
   -- ADD \<r8|im8|(HL)\>
   ADD o8 -> do
@@ -899,7 +899,7 @@ executeInstruction instruction = case instruction of
     sp <- readR16 RegSP
     pc <- readPC
     let sp' = sp - 2
-    writeMem sp' pc
+    writeWord sp' pc
     writeR16 RegSP sp'
     writePC $ 8 * fromIntegral w8
     pure $ BusEvent [sp', sp' + 1] $ clocks instruction True
@@ -950,7 +950,7 @@ doCall w16 numberOfClocks = do
   sp <- readR16 RegSP
   let sp' = sp - 2
   pc <- readPC
-  writeMem sp' pc
+  writeWord sp' pc
   writePC w16
   writeR16 RegSP sp'
   pure $ BusEvent [sp', sp' + 1] numberOfClocks

@@ -67,7 +67,7 @@ updateTimer advance = do
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
-    $ writeMem DIV (fromIntegral (clocks' `shiftR` 8) :: Word8)
+    $ writeByte DIV (fromIntegral (clocks' `shiftR` 8) :: Word8)
 
   -- Update the TIMA register
   when (clocks .&. 0xFFF0 /= clocks' .&. 0xFFF0) $ do
@@ -82,9 +82,9 @@ updateTimer advance = do
 
       tima <- readByte TIMA
       if tima < 0xFF
-        then writeMem TIMA $ tima + 1
+        then writeByte TIMA $ tima + 1
         else do
           -- Handle overflow by loading from TMA
           tma <- readByte TMA
-          writeMem TIMA tma
+          writeByte TIMA tma
           raiseInterrupt 2

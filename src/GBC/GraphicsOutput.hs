@@ -75,7 +75,7 @@ eventLoop = do
           fence <- insertFence
           bindVertexArrayObject (bgScanline glState)
           glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-          syncResult <- waitForFence fence 5000000000
+          syncResult <- waitForFence fence 100000000
           unless (syncResult == AlreadySignaled || syncResult == ConditionSatisfied)
             $ liftIO (print syncResult)
           doneReadingVRAM
