@@ -20,6 +20,7 @@ module GLUtils
 
   -- * Attributes
   , Attribute(..)
+  , AttributeDivisor(..)
   , IntegerHandling(..)
   , NumComponents
   , ElementDataType(..)
@@ -179,8 +180,10 @@ instance OpenGLEnum ElementDataType where
   toOpenGLEnum Doubles        = GL_DOUBLE
   toOpenGLEnum Fixeds         = GL_FIXED
 
+data AttributeDivisor = PerVertex | PerInstance deriving (Eq, Ord, Show, Bounded, Enum)
+
 -- | A buffer attribute that can be accessed from shaders.
-data Attribute = Attribute !B.ByteString !NumComponents !ElementDataType !IntegerHandling deriving (Eq, Show)
+data Attribute = Attribute !B.ByteString !NumComponents !ElementDataType !AttributeDivisor !IntegerHandling deriving (Eq, Show)
 
 type Offset = IntPtr
 type Stride = GLsizei
@@ -188,7 +191,7 @@ type Stride = GLsizei
 -- | Set the offset and stride of an 'Attribute' in the current vertex buffer.
 {-# INLINABLE linkAttribute #-}
 linkAttribute :: Program -> Attribute -> Offset -> Stride -> IO ()
-linkAttribute (Program program) (Attribute name numComponents elementType integerHandling) offset stride
+linkAttribute (Program program) (Attribute name numComponents elementType divisor integerHandling) offset stride
   = do
     attribute <- fromIntegral <$> B.useAsCString name (glGetAttribLocation program)
     glEnableVertexAttribArray attribute
@@ -200,7 +203,11 @@ linkAttribute (Program program) (Attribute name numComponents elementType intege
                                                  (toOpenGLEnum elementType)
                                                  stride
                                                  (intPtrToPtr offset)
+    handleDivisor attribute
  where
+  handleDivisor attribute = case divisor of
+    PerVertex   -> pure ()
+    PerInstance -> glVertexAttribDivisor attribute 1
   vertexAttribPointerFloat attribute normalize = glVertexAttribPointer attribute
                                                                        numComponents
                                                                        (toOpenGLEnum elementType)
