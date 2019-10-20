@@ -2,19 +2,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module GBC.GraphicsOutput where
+module GBC.GraphicsOutput
+  ( VideoBuffers(..)
+  , startOutput
+  )
+where
 
 import           Control.Concurrent
-import           Data.Foldable
+import           GBC.Memory
 import           Control.Monad.Reader
 import           Data.Int
 import           Data.StateVar
-import           Data.Word
-import           Foreign.Marshal.Array
 import           Foreign.Ptr
-import           Foreign.Storable
 import           GBC.Graphics
-import           GBC.Memory
 import           GLUtils
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
@@ -22,26 +22,19 @@ import qualified SDL
 
 data WindowContext = WindowContext {
     window :: !SDL.Window
-  , memory :: !Memory
   , queue :: !(MVar (Maybe Update))
   , glContext :: !SDL.GLContext
   , glState :: !GLState
 }
-
-instance HasMemory WindowContext where
-  forMemory = memory
 
 -- | OpenGL state variables.
 data GLState = GLState {
     bgProgram :: !Program
   , bgProjection :: !(StateVar GLmatrix4)
   , bgScanline :: !VertexArrayObject
-  , bgCharacterBuffer :: !(Ptr Word8)
-  , bgBackground :: !(Ptr Word8)
-  , registers :: !(Ptr GLint)
 }
 
-startOutput :: UsesMemory env m => ReaderT env m (MVar (Maybe Update), SDL.Window)
+startOutput :: IO (MVar (Maybe Update), VideoBuffers, SDL.Window)
 startOutput = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   window <- liftIO $ SDL.createWindow
@@ -50,69 +43,51 @@ startOutput = do
                       , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
                       }
 
-  queue  <- liftIO newEmptyMVar
-  memory <- asks forMemory
+  queue        <- liftIO newEmptyMVar
+  videoBuffers <- newEmptyMVar
 
   void $ liftIO $ forkOS $ do
     glContext <- SDL.glCreateContext window
     SDL.swapInterval $= SDL.SynchronizedUpdates
-    glState <- liftIO setUpOpenGL
+    (glState, buffers) <- liftIO setUpOpenGL
+    putMVar videoBuffers buffers
 
-    fence0  <- insertFence
-    runReaderT (eventLoop fence0) WindowContext { .. }
+    runReaderT eventLoop WindowContext { .. }
     SDL.destroyWindow window
-  pure (queue, window)
 
-{-# SPECIALIZE readByte :: Word16 -> ReaderT WindowContext IO Word8 #-}
-eventLoop :: Fence -> ReaderT WindowContext IO ()
-eventLoop fence = do
+  buffers <- takeMVar videoBuffers
+  pure (queue, buffers, window)
+
+eventLoop :: ReaderT WindowContext IO ()
+eventLoop = do
   WindowContext {..} <- ask
-  mupdate            <- liftIO $ readMVar queue
-  let doneReadingVRAM = void . liftIO $ takeMVar queue
+  mupdate            <- liftIO (readMVar queue)
+  let doneReadingVRAM = void (liftIO (takeMVar queue))
 
   case mupdate of
-    Nothing          -> doneReadingVRAM
-    Just Update {..} -> do
-      fence' <- case updateMode of
+    Nothing                  -> doneReadingVRAM
+    Just (Update updateMode) -> do
+      case updateMode of
         VBlank -> do
           doneReadingVRAM
-          liftIO $ do
-            SDL.glSwapWindow window
-            pure fence
+          liftIO (SDL.glSwapWindow window)
         ReadVRAM -> do
-          -- Wait for previous commands to finish
-          liftIO $ do
-            syncResult <- waitForFence fence 5000000000
-            unless (syncResult == AlreadySignaled || syncResult == ConditionSatisfied)
-              $ print syncResult
-
-          -- Update the registers
-          when updateRegisters $ do
-            for_ [0 .. 11] $ \register -> do
-              byte <- readByte (0xFF40 + fromIntegral register)
-              liftIO (pokeElemOff (registers glState) register (fromIntegral byte))
-            glFlushMappedBufferRange GL_UNIFORM_BUFFER 0 48
-
-          when updateVRAM $ do
-            withVRAMPointer (\vram -> copyArray (bgCharacterBuffer glState) vram 0x1800)
-            withBGPointer (\bg -> copyArray (bgBackground glState) bg 0x400)
-
-          -- Signal that we're done updating VRAM.
-          doneReadingVRAM
+          fence <- insertFence
           bindVertexArrayObject (bgScanline glState)
           glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-          insertFence
-        _ -> do
+          syncResult <- waitForFence fence 5000000000
+          unless (syncResult == AlreadySignaled || syncResult == ConditionSatisfied)
+            $ liftIO (print syncResult)
           doneReadingVRAM
-          pure fence
-      eventLoop fence'
+        _ -> doneReadingVRAM
+      eventLoop
 
 -- | Position of the scanline.
 position :: Attribute
 position = Attribute "position" 2 Ints KeepInteger
 
 -- | Configure OpenGL.
-setUpOpenGL :: IO GLState
+setUpOpenGL :: IO (GLState, VideoBuffers)
 setUpOpenGL = do
   glViewport 0 0 160 144
 
@@ -132,23 +107,22 @@ setUpOpenGL = do
   linkAttribute bgProgram position 0 8
   void $ makeElementBuffer (join [[0, 1, 2], [2, 3, 0]])
 
-  texCharacterData             <- linkUniform bgProgram "texCharacterData"
-  bgCharacterBuffer            <- setUpTextureBuffer (TextureUnit 0) texCharacterData 0x1800
+  (vramBuffer, vram) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 0x2000
+  setUpTextureBuffer bgProgram "texCharacterData"  (TextureUnit 0) vramBuffer 0      0x1800
+  setUpTextureBuffer bgProgram "texBackgroundData" (TextureUnit 1) vramBuffer 0x1800 0x800
 
-  texBackgroundData            <- linkUniform bgProgram "texBackgroundData"
-  bgBackground                 <- setUpTextureBuffer (TextureUnit 1) texBackgroundData 0x400
+  (oamBuffer      , oam      ) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 160
+  (registersBuffer, registers) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 48
 
-  (registersBuffer, registers) <- makeWritablePersistentBuffer ExplicitFlush UniformBuffer 48
   linkUniformBuffer bgProgram "Registers" registersBuffer 0
 
-  pure GLState { .. }
+  pure (GLState { .. }, VideoBuffers { .. })
 
  where
-  setUpTextureBuffer textureUnit sampler size = do
+  setUpTextureBuffer program uniform textureUnit buffer offset size = do
     activeTextureUnit textureUnit
+    sampler <- linkUniform program uniform
     sampler $= textureUnit
     texture <- genTexture
     bindTexture TextureBuffer texture
-    (buffer, ptr) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer size
-    linkTextureBuffer buffer
-    pure ptr
+    linkTextureBufferRange buffer offset size

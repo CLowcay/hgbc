@@ -112,7 +112,7 @@ pattern DMA = 0xFF46
 doDMA :: UsesMemory env m => BusEvent -> ReaderT env m ()
 doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
   address <- fromIntegral <$> readByte DMA
-  dma (address `shiftL` 8) 0xFE00 160
+  dmaToOAM (address `shiftL` 8)
 
 {-# INLINABLE busStep #-}
 busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)

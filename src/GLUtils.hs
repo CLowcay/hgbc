@@ -37,6 +37,7 @@ module GLUtils
   , makeElementBuffer
   , makeWritablePersistentBuffer
   , linkTextureBuffer
+  , linkTextureBufferRange
   , linkUniformBuffer
 
   -- * Textures
@@ -127,6 +128,10 @@ linkUniform (Program program) uniform = liftIO $ do
 -- | Link the currently bound texture buffer to the currently buffer texture.
 linkTextureBuffer :: MonadIO m => BufferObject -> m ()
 linkTextureBuffer (BufferObject buffer) = glTexBuffer GL_TEXTURE_BUFFER GL_R8UI buffer
+
+-- | Link the currently bound texture buffer to the currently buffer texture.
+linkTextureBufferRange :: MonadIO m => BufferObject -> GLintptr -> GLsizeiptr -> m ()
+linkTextureBufferRange (BufferObject buffer) = glTexBufferRange GL_TEXTURE_BUFFER GL_R8UI buffer
 
 -- | A vertex array object.
 newtype VertexArrayObject = VertexArrayObject GLuint deriving (Eq, Show)

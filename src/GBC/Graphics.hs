@@ -53,13 +53,11 @@ data GraphicsState = GraphicsState {
   , clocksRemaining :: !Int
   , lcdLine :: !Word8
   , lineClocksRemaining :: !Int
-  , vramDirty :: !Bool
-  , registerDirty :: !Bool
 } deriving Eq
 
 -- | The initial graphics state.
 initGraphics :: GraphicsState
-initGraphics = GraphicsState VBlank 153 0 0 False False
+initGraphics = GraphicsState VBlank 153 0 0
 
 class HasGraphicsState env where
   forGraphicsState :: env -> IORef GraphicsState
@@ -67,18 +65,7 @@ class HasGraphicsState env where
 type UsesGraphics env m = (UsesMemory env m, HasGraphicsState env)
 
 -- | Notification that the graphics state has changed.
-data Update = Update {
-    updateVRAM :: !Bool
-  , updateMode :: !Mode
-  , updateLine :: !Word8
-  , updateRegisters :: !Bool
-} deriving (Eq, Ord, Show)
-
-isInVRAM :: Word16 -> Bool
-isInVRAM addr = addr >= 0x8000 && addr < 0xA000
-
-isGraphicsRegister :: Word16 -> Bool
-isGraphicsRegister addr = addr >= 0xFF40 && addr <= 0xFF4B
+newtype Update = Update Mode deriving (Eq, Ord, Show)
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -207,20 +194,19 @@ decodeVRAM = for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ]
 graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
 graphicsStep (BusEvent newWrites clocks) = do
   graphicsState               <- asks forGraphicsState
-  graphics@GraphicsState {..} <- liftIO $ readIORef graphicsState
+  GraphicsState {..} <- liftIO (readIORef graphicsState)
 
   lcdEnabled                  <- testGraphicsFlag LCDC flagLCDEnable
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
-  let vramDirty'                    = vramDirty || any isInVRAM newWrites
-  let registerDirty'                = registerDirty || any isGraphicsRegister newWrites
 
   when (STAT `elem` newWrites) $ do
     stat <- readByte STAT
-    writeMem STAT $ setMode stat $ if lcdEnabled then mode' else lcdMode
+    writeMem STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
 
-  if lcdEnabled
-    then do
+  if not lcdEnabled
+    then pure Nothing
+    else do
       when (lcdLine /= line') $ writeMem LY line'
 
       liftIO . writeIORef graphicsState $ GraphicsState
@@ -228,12 +214,9 @@ graphicsStep (BusEvent newWrites clocks) = do
         , clocksRemaining     = remaining'
         , lcdLine             = line'
         , lineClocksRemaining = lineClocksRemaining'
-        , vramDirty           = not $ mode' == ReadVRAM && vramDirty'
-        , registerDirty       = not $ mode' == ReadVRAM && registerDirty'
         }
 
-      if lcdMode /= mode'
-        then do
+      if lcdMode == mode' then pure Nothing else do
           stat <- readByte STAT
 
           -- Update STAT register
@@ -249,11 +232,4 @@ graphicsStep (BusEvent newWrites clocks) = do
           when (stat `testBit` interruptOAM && mode' == ScanOAM) $ raiseInterrupt 1
           when (mode' == VBlank) $ raiseInterrupt 0
 
-          pure . Just $ Update (mode' == ReadVRAM && vramDirty')
-                               mode'
-                               line'
-                               (mode' == ReadVRAM && registerDirty')
-        else pure Nothing
-    else do
-      liftIO . writeIORef graphicsState $ graphics { vramDirty = vramDirty' }
-      pure Nothing
+          pure . Just $ Update mode'

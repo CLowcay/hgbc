@@ -4,6 +4,7 @@ module GBC.DecodeSpec where
 
 import           Control.Monad.Reader
 import           Data.Word
+import           Foreign.Ptr
 import           GBC.Decode
 import           GBC.ISA
 import           GBC.Memory
@@ -16,7 +17,7 @@ makeROM d = ROM $ B.take (32 * 1024 * 1024) $ B.pack (0xFF : d) <> B.replicate (
 
 decodesTo :: [Word8] -> Instruction -> IO ()
 decodesTo encoding expectedDecoding = do
-  memory               <- initMemory $ makeROM encoding
+  memory               <- initMemory (makeROM encoding) (VideoBuffers nullPtr nullPtr nullPtr)
   (instruction, addr1) <- runReaderT (runDecode 1 decode) memory
   instruction `shouldBe` expectedDecoding
   addr1 `shouldBe` 1 + fromIntegral (length encoding)
@@ -517,24 +518,17 @@ spec = describe "decode" $ do
   it "decodes HALT" $ [0b01_110_110] `decodesTo` HALT
   it "decodes STOP" $ [0b00_010_000, 0] `decodesTo` STOP
   it "does not decode invalid STOP" $ [0b00_010_000, 1] `decodesTo` INVALID 0b00_010_000
-  it "does not decode invalid instruction 11_100 100"
-    $           [0b11_100_100]
-    `decodesTo` INVALID 0b11_100_100
-  it "does not decode invalid instruction 11_101 100"
-    $           [0b11_101_100]
-    `decodesTo` INVALID 0b11_101_100
-  it "does not decode invalid instruction 11_110 100"
-    $           [0b11_110_100]
-    `decodesTo` INVALID 0b11_110_100
-  it "does not decode invalid instruction 11_111 100"
-    $           [0b11_111_100]
-    `decodesTo` INVALID 0b11_111_100
-  it "does not decode invalid instruction 11_011 101"
-    $           [0b11_011_101]
-    `decodesTo` INVALID 0b11_011_101
-  it "does not decode invalid instruction 11_101 101"
-    $           [0b11_101_101]
-    `decodesTo` INVALID 0b11_101_101
-  it "does not decode invalid instruction 11_111 101"
-    $           [0b11_111_101]
-    `decodesTo` INVALID 0b11_111_101
+  it "does not decode invalid instruction 11_100 100" $ [0b11_100_100] `decodesTo` INVALID
+    0b11_100_100
+  it "does not decode invalid instruction 11_101 100" $ [0b11_101_100] `decodesTo` INVALID
+    0b11_101_100
+  it "does not decode invalid instruction 11_110 100" $ [0b11_110_100] `decodesTo` INVALID
+    0b11_110_100
+  it "does not decode invalid instruction 11_111 100" $ [0b11_111_100] `decodesTo` INVALID
+    0b11_111_100
+  it "does not decode invalid instruction 11_011 101" $ [0b11_011_101] `decodesTo` INVALID
+    0b11_011_101
+  it "does not decode invalid instruction 11_101 101" $ [0b11_101_101] `decodesTo` INVALID
+    0b11_101_101
+  it "does not decode invalid instruction 11_111 101" $ [0b11_111_101] `decodesTo` INVALID
+    0b11_111_101

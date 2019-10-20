@@ -10,6 +10,7 @@ import           Data.Function
 import           Data.Int
 import           Data.Maybe
 import           Data.Word
+import           Foreign.Ptr
 import           GBC.CPU
 import           GBC.ISA
 import           GBC.Memory
@@ -33,7 +34,7 @@ instance HasMemory CPUTestState where
 
 withNewCPU :: ReaderT CPUTestState IO () -> IO ()
 withNewCPU computation = do
-  mem <- initMemory blankROM
+  mem <- initMemory blankROM (VideoBuffers nullPtr nullPtr nullPtr)
   cpu <- initCPU
   void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where

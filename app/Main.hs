@@ -9,6 +9,7 @@ import           Debug.CLI
 import           Debug.Commands
 import           GBC.Bus
 import           GBC.CPU
+import           GBC.Graphics
 import           GBC.GraphicsOutput
 import           GBC.Memory
 import           GBC.ROM
@@ -28,13 +29,14 @@ main = do
       putStrLn $ "Error validating ROM " ++ show romFile ++ ": " ++ err
       exitFailure
     Right rom -> do
-      mem        <- initMemory rom
+      (mainWindowSync, videoBuffers, mainWindow) <- startOutput
+      mem        <- initMemory rom videoBuffers
       cpuState   <- initCPU
       debugState <- initDebug romFile cpuState mem
-      runDebugger debugState
+      runDebugger mainWindowSync mainWindow debugState
 
-runDebugger :: DebugState -> IO ()
-runDebugger debugState = do
+runDebugger :: MVar (Maybe Update) -> SDL.Window -> DebugState -> IO ()
+runDebugger mainWindowSync mainWindow debugState = do
   channel     <- newEmptyMVar
   commandDone <- newEmptyMVar
   hSetBuffering stdout NoBuffering
@@ -51,7 +53,6 @@ runDebugger debugState = do
               putMVar commandDone ()
         commandRunner
   void . forkIO $ flip runReaderT debugState $ do
-    (sync, window) <- startOutput
-    registerWindow window sync
+    registerWindow mainWindow mainWindowSync
     commandRunner
   whileJust_ nextCommand $ \cmd -> putMVar channel cmd >> takeMVar commandDone

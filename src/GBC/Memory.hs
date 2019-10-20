@@ -5,33 +5,40 @@
 
 module GBC.Memory
   ( Memory
+  , VideoBuffers(..)
   , HasMemory(..)
   , UsesMemory
   , initMemory
   , getROMHeader
-  , dma
+  , dmaToOAM
   , readByte
   , writeMem
   , readChunk
-  , withVRAMPointer
-  , withBGPointer
-  , withOAMPointer
   )
 where
 
-import           Common
+import           Data.Bits
 import           Control.Monad.Reader
 import           Data.Word
+import           Data.Int
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.ROM
 import qualified Data.ByteString               as B
+import qualified Data.ByteString.Unsafe        as B
+
+data VideoBuffers = VideoBuffers {
+    vram :: !(Ptr Word8)
+  , oam :: !(Ptr Word8)
+  , registers :: !(Ptr Int32)
+}
 
 data Memory = Memory {
-    memRom :: B.ByteString
-  , memRam :: ForeignPtr Word8
+    memRom :: !B.ByteString
+  , memRam :: !(ForeignPtr Word8)
+  , videoBuffer :: !VideoBuffers
 }
 
 class HasMemory env where
@@ -45,76 +52,69 @@ instance HasMemory Memory where
 type UsesMemory env m = (MonadIO m, HasMemory env)
 
 -- | The initial memory state.
-initMemory :: ROM -> IO Memory
-initMemory (ROM rom) = Memory rom <$> mallocForeignPtrArray 0x7FFF
+initMemory :: ROM -> VideoBuffers -> IO Memory
+initMemory (ROM memRom) videoBuffer = do
+  memRam <- mallocForeignPtrArray 0x7FFF
+  pure Memory { .. }
 
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
 
--- | Perform an action that requires a pointer to VRAM (0x8000).
-withVRAMPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
-withVRAMPointer action = do
-  memory <- asks forMemory
-  liftIO (withForeignPtr (memRam memory) action)
-
--- | Perform an action that requires a pointer to BG memory (0x9800).
-withBGPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
-withBGPointer action = do
-  memory <- asks forMemory
-  liftIO (withForeignPtr (memRam memory) $ \ptr -> action (ptr `plusPtr` 0x1800))
-
--- | Perform an action that requires a pointer to OAM memory (0xFE00).
-withOAMPointer :: UsesMemory env m => (Ptr Word8 -> IO a) -> ReaderT env m a
-withOAMPointer action = do
-  memory <- asks forMemory
-  liftIO (withForeignPtr (memRam memory) $ \ptr -> action (ptr `plusPtr` 0x7E00))
-
--- | Perform a direct memory transfer.
-dma :: UsesMemory env m => Word16 -> Word16 -> Int -> ReaderT env m ()
-dma source destination size =
-  if source < 0x8000 || destination < 0x8000 || size > fromIntegral (0xFFFF - destination)
-    then error $ "DMA out of bounds " ++ formatHex source ++ " " ++ formatHex destination
-    else do
-      Memory {..} <- asks forMemory
-      let sourceOffset      = (fromIntegral source) - 0x8000
-      let destinationOffset = (fromIntegral destination) - 0x8000
-      liftIO $ withForeignPtr memRam $ \ram -> moveArray
-        (ram `plusPtr` sourceOffset :: Ptr Word8)
-        (ram `plusPtr` destinationOffset :: Ptr Word8)
-        size
+-- | Copy data to OAM memory via DMA.
+dmaToOAM :: UsesMemory env m => Word16 -> ReaderT env m ()
+dmaToOAM source = do
+  Memory {..} <- asks forMemory
+  liftIO $ case source .&. 0xE000 of
+    0x0000 -> B.unsafeUseAsCString memRom $ \ptr -> moveArray (oam videoBuffer) (castPtr ptr) 160
+    0x2000 -> B.unsafeUseAsCString memRom $ \ptr -> moveArray (oam videoBuffer) (castPtr ptr) 160
+    0x4000 -> B.unsafeUseAsCString memRom $ \ptr -> moveArray (oam videoBuffer) (castPtr ptr) 160
+    0x6000 -> B.unsafeUseAsCString memRom $ \ptr -> moveArray (oam videoBuffer) (castPtr ptr) 160
+    0x8000 ->
+      moveArray (oam videoBuffer) (vram videoBuffer `plusPtr` (fromIntegral source - 0x8000)) 160
+    0xA000 -> withForeignPtr memRam
+      $ \ram -> moveArray (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000)) 160
+    0xC000 -> withForeignPtr memRam
+      $ \ram -> moveArray (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000)) 160
+    _ -> error ("Invalid source for DMA " ++ show source)
 
 -- | Read a byte from memory.
 {-# INLINE readByte #-}
 readByte :: UsesMemory env m => Word16 -> ReaderT env m Word8
 readByte addr = do
   Memory {..} <- asks forMemory
-  if addr < 0x8000
-    then pure $ memRom `B.index` fromIntegral addr
-    else liftIO $ withForeignPtr memRam $ flip peekByteOff (fromIntegral addr - 0x8000)
+  case addr .&. 0xE000 of
+    0x0000 -> pure (memRom `B.index` romOffset)
+    0x2000 -> pure (memRom `B.index` romOffset)
+    0x4000 -> pure (memRom `B.index` romOffset)
+    0x6000 -> pure (memRom `B.index` romOffset)
+    0x8000 -> liftIO (peekByteOff (vram videoBuffer) ramOffset)
+    0xA000 -> liftIO (withForeignPtr memRam (`peekByteOff` ramOffset))
+    0xC000 -> liftIO (withForeignPtr memRam (`peekByteOff` ramOffset))
+    0xE000 -> liftIO (withForeignPtr memRam (`peekByteOff` ramOffset))
+    x      -> error ("Impossible coarse read address" ++ show x)
+ where
+  romOffset = fromIntegral addr
+  ramOffset = fromIntegral addr - 0x8000
 
 -- | Write to memory.
 {-# INLINE writeMem #-}
 writeMem :: (Storable a, UsesMemory env m) => Word16 -> a -> ReaderT env m ()
 writeMem addr value = do
   Memory {..} <- asks forMemory
-  if addr < 0x8000
-    then pure ()
-    else liftIO $ withForeignPtr memRam $ \ptr -> pokeByteOff ptr (fromIntegral addr - 0x8000) value
+  case addr .&. 0xE000 of
+    0x0000 -> pure ()
+    0x2000 -> pure ()
+    0x4000 -> pure ()
+    0x6000 -> pure ()
+    0x8000 -> liftIO (pokeByteOff (vram videoBuffer) ramOffset value)
+    0xA000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value)
+    0xC000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value)
+    0xE000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value)
+    x      -> error ("Impossible coarse read address" ++ show x)
+  where ramOffset = fromIntegral addr - 0x8000
 
 -- | Read a chunk of memory.
 {-# INLINABLE readChunk #-}
 readChunk :: (UsesMemory env m) => Word16 -> Int -> ReaderT env m B.ByteString
-readChunk base len = do
-  Memory {..} <- asks forMemory
-  let romData = pure $ if base >= 0x8000
-        then ""
-        else B.take (len `min` fromIntegral (0x8000 - base)) . B.drop (fromIntegral base) $ memRom
-  let ramData = if fromIntegral base + len <= 0x8000
-        then pure ""
-        else
-          let base' = fromIntegral base `max` 0x8000
-              len'  = len + fromIntegral base - base'
-          in  withForeignPtr memRam
-                $ \ptr -> B.packCStringLen (castPtr $ ptr `plusPtr` (base' - 0x8000), len')
-  liftIO $ (<>) <$> romData <*> ramData
+readChunk base len = B.pack <$> traverse readByte [base .. base + fromIntegral len]

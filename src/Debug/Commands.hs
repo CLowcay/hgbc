@@ -23,7 +23,6 @@ import           Data.Word
 import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
-import           Debug.TileViewer
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Graphics
@@ -56,7 +55,6 @@ data Command = ShowHeader
              | AddSymbol String Word16
              | DeleteSymbol String
              | ListSymbols
-             | ViewTiles
              deriving (Eq, Ord, Show)
 
 -- | The current state of the debugger.
@@ -262,6 +260,3 @@ doCommand (DeleteSymbol symbol) = do
 doCommand ListSymbols = do
   symbols <- listSymbols <$> getCodeMap
   for_ symbols $ \(label, value) -> liftIO $ putStrLn $ label ++ ": " ++ formatHex value
-doCommand ViewTiles = do
-  (sync, window) <- startTileViewer
-  registerWindow window sync

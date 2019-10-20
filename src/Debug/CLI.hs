@@ -82,7 +82,6 @@ command =
     <|> (ListBreakpoints <$ symbol "breakpoints")
     <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
     <|> (DeleteSymbol <$> try (symbol "delete" *> symbol "symbol" *> labelValue))
-    <|> (ViewTiles <$ try (symbol "view" *> symbol "tiles"))
 
 register8 :: Parser Register8
 register8 =
