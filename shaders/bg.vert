@@ -20,8 +20,10 @@ layout (std140) uniform Registers
   int WX;   // 0xFF4B
 };
 
+const float BackgroundPriority = 20481;
+
 void main()
 { 
   pixelPos = vec2(position.x, LY);
-  gl_Position = projection * vec4(position.x, position.y + LY, 0.0, 1.0);
+  gl_Position = projection * vec4(position.x, position.y + LY, 1.1, 1.0);
 }

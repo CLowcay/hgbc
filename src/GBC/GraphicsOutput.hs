@@ -34,7 +34,6 @@ data GLState = GLState {
   , bgScanline :: !VertexArrayObject
   , oamProgram :: !Program
   , oamBox :: !VertexArrayObject
-  , oamData :: !VertexArrayObject
 }
 
 startOutput :: IO (MVar (Maybe Update), VideoBuffers, SDL.Window)
@@ -74,6 +73,12 @@ eventLoop = do
         VBlank -> do
           doneReadingVRAM
           liftIO (SDL.glSwapWindow window)
+          glClear GL_DEPTH_BUFFER_BIT
+        ScanOAM -> do
+          useProgram (oamProgram glState)
+          bindVertexArrayObject (oamBox glState)
+          glDrawElementsInstanced GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr 40
+          doneReadingVRAM
         ReadVRAM -> do
           useProgram (bgProgram glState)
           bindVertexArrayObject (bgScanline glState)
@@ -87,22 +92,11 @@ eventLoop = do
 position :: Attribute
 position = Attribute "position" 2 Ints PerVertex KeepInteger
 
--- | OAM sprite position.
-oamAttributeOffset :: Attribute
-oamAttributeOffset = Attribute "offset" 2 UnsignedBytes PerInstance KeepInteger
-
--- | OAM sprite character code.
-oamAttributeCharCode :: Attribute
-oamAttributeCharCode = Attribute "charCode" 1 UnsignedBytes PerInstance KeepInteger
-
--- | OAM sprite attributes.
-oamAttributeAttributes :: Attribute
-oamAttributeAttributes = Attribute "attributes" 1 UnsignedBytes PerInstance KeepInteger
-
 -- | Configure OpenGL.
 setUpOpenGL :: IO (GLState, VideoBuffers)
 setUpOpenGL = do
   glViewport 0 0 160 144
+  glEnable GL_DEPTH_TEST
 
   gbVert    <- B.readFile "shaders/bg.vert"
   gbFrag    <- B.readFile "shaders/bg.frag"
@@ -111,7 +105,7 @@ setUpOpenGL = do
 
   bgProjection     <- linkUniform bgProgram "projection"
   projectionMatrix <- makeMatrix
-    (join [[2.0 / 160, 0, 0, 0], [0, -2.0 / 144, 0, 0], [0, 0, 1, 0], [-1, 1, 0, 1]])
+    (join [[2.0 / 160, 0, 0, 0], [0, -2.0 / 144, 0, 0], [0, 0, 2/20481, 0], [-1, 1, -1, 1]])
   bgProjection $= projectionMatrix
 
   bgScanline <- genVertexArrayObject
@@ -132,19 +126,19 @@ setUpOpenGL = do
   oamProgram <- compileShaders [(VertexShader, oamVert), (FragmentShader, oamFrag)]
   useProgram oamProgram
 
+  bindBuffer TextureBufferBuffer vramBuffer
+  setUpTextureBuffer oamProgram "texCharacterData"  (TextureUnit 0) vramBuffer 0      0x1800
+  setUpTextureBuffer oamProgram "texBackgroundData" (TextureUnit 1) vramBuffer 0x1800 0x800
+
   oamBox <- genVertexArrayObject
   bindVertexArrayObject oamBox
   void (makeVertexBuffer (join [[0, 0 :: Int32], [8, 0], [8, 8], [0, 8]]))
   linkAttribute oamProgram position 0 8
   void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
 
-  oamData <- genVertexArrayObject
-  bindVertexArrayObject oamData
-  (_, oam) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 160
-  linkAttribute oamProgram oamAttributeOffset     0 4
-  linkAttribute oamProgram oamAttributeCharCode   2 4
-  linkAttribute oamProgram oamAttributeAttributes 3 4
+  (oamBuffer, oam) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer (40 * 4 * 4)
   linkUniformBuffer oamProgram "Registers" registersBuffer 0
+  linkUniformBuffer oamProgram "OAMRegisters" oamBuffer 1
 
   pure (GLState { .. }, VideoBuffers { .. })
 

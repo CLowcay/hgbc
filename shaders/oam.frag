@@ -1,9 +1,14 @@
 #version 150 core
 
+
+in vec2 instanceOffset;
+flat in int instanceCode;
+flat in int instanceAttributes;
+
 out vec4 outColor;
+
 uniform usamplerBuffer texCharacterData;
 uniform usamplerBuffer texBackgroundData;
-in vec2 pixelPos;
 
 layout (std140) uniform Registers
 {
@@ -21,24 +26,23 @@ layout (std140) uniform Registers
   int WX;   // 0xFF4B
 };
 
+const int Palette = 0x10;
+
 void main( )
 { 
-  int characterDataOffset = (LCDC & 0x10) == 0 ? 0x800 : 0;
-  int codeAreaOffset = (LCDC & 0x08) == 0 ? 0 : 0x400;
+  if (gl_FragCoord.y != LY) {
+    discard;
+  }
 
-  int px = (int(pixelPos.x) + SCX) & 255;
-  int py = (int(pixelPos.y) + SCY) & 255;
-  int tx = px >> 3;
-  int ty = py >> 3;
-  int ox = 7 - (px & 7);
-  int oy = py & 7;
-  int tile = characterDataOffset +
-      int(texelFetch(texBackgroundData, codeAreaOffset + (ty * 32) + tx).r);
+  int palette = (instanceAttributes & Palette) == 0 ? OBP0 : OBP1;
 
-  int b0 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2)).r);
-  int b1 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2) + 1).r);
+  int ox = int(instanceOffset.x);
+  int oy = int(instanceOffset.y);
+
+  int b0 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2)).r);
+  int b1 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2) + 1).r);
   int pixelIndex = ((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1);
-  int internalPaletteIndex = BGP >> (pixelIndex * 2) & 3;
+  int internalPaletteIndex = palette >> (pixelIndex * 2) & 3;
   float pixel = float(3 - internalPaletteIndex) / 3.0;
   outColor = vec4(pixel, pixel, pixel, 1);
 }

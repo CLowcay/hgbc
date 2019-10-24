@@ -1,6 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -64,6 +63,7 @@ getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = extractHeader $ ROM memRom
 
 -- | Copy data to OAM memory via DMA.
+-- TODO: Cannot use moveArray, have to expand the bytes to ints.
 dmaToOAM :: UsesMemory env m => Word16 -> ReaderT env m ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
@@ -93,13 +93,11 @@ readByte addr = do
     0x8000 -> liftIO (peekByteOff (vram videoBuffer) ramOffset)
     0xA000 -> liftIO (withForeignPtr memRam (`peekByteOff` ramOffset))
     0xC000 -> liftIO (withForeignPtr memRam (`peekByteOff` ramOffset))
-    0xE000 -> liftIO $ if
-      | addr >= 0xFE00 && addr < 0xFEA0
-      -> peekByteOff (oam videoBuffer) oamOffset
-      | addr >= 0xFF40 && addr <= 0xFF4B
-      -> fromIntegral <$> peekElemOff (registers videoBuffer) registerOffset
-      | otherwise
-      -> withForeignPtr memRam (`peekByteOff` ramOffset)
+    0xE000 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
+      then peekElemOff (oam videoBuffer) oamOffset
+      else if addr >= 0xFF40 && addr <= 0xFF4B
+        then fromIntegral <$> peekElemOff (registers videoBuffer) registerOffset
+        else withForeignPtr memRam (`peekByteOff` ramOffset)
     x -> error ("Impossible coarse read address" ++ show x)
  where
   romOffset      = fromIntegral addr
@@ -110,7 +108,7 @@ readByte addr = do
 {-# INLINE writeWord #-}
 writeWord :: UsesMemory env m => Word16 -> Word16 -> ReaderT env m ()
 writeWord addr value = do
-  writeByte addr (fromIntegral (value .&. 0xFF))
+  writeByte addr       (fromIntegral (value .&. 0xFF))
   writeByte (addr + 1) (fromIntegral (value `shiftR` 8))
 
 -- | Write to memory.
@@ -126,12 +124,11 @@ writeByte addr value = do
     0x8000 -> liftIO (pokeByteOff (vram videoBuffer) ramOffset value)
     0xA000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value)
     0xC000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value)
-    0xE000 -> liftIO $ if
-      | addr >= 0xFE00 && addr < 0xFEA0 -> pokeByteOff (oam videoBuffer) oamOffset value
-      | addr >= 0xFF40 && addr <= 0xFF4B -> pokeElemOff (registers videoBuffer)
-                                                        registerOffset
-                                                        (fromIntegral value)
-      | otherwise -> withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value
+    0xE000 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
+      then pokeElemOff (oam videoBuffer) oamOffset value
+      else if addr >= 0xFF40 && addr <= 0xFF4B
+        then pokeElemOff (registers videoBuffer) registerOffset (fromIntegral value)
+        else withForeignPtr memRam $ \ptr -> pokeByteOff ptr ramOffset value
     x -> error ("Impossible coarse read address" ++ show x)
  where
   ramOffset      = fromIntegral addr - 0x8000

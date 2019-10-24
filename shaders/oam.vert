@@ -1,11 +1,19 @@
 #version 150 core
 
-in ivec2 position;
-in ivec2 offset;
-in int charCode;
-in int attributes;
-uniform mat4 projection;
+// An OBJ register
+struct ObjRegister {
+  ivec2 offset;
+  int charCode;
+  int attributes;
+};
 
+in ivec2 position;
+
+out vec2 instanceOffset;
+flat out int instanceCode;
+flat out int instanceAttributes;
+
+uniform mat4 projection;
 layout (std140) uniform Registers
 {
   int LCDC; // 0xFF40
@@ -22,7 +30,44 @@ layout (std140) uniform Registers
   int WX;   // 0xFF4B
 };
 
+layout (std140) uniform OAMRegisters
+{
+  ObjRegister OBJ[40];
+};
+
+const int DisplayPriority = 0x80;
+const int VerticalFlip = 0x40;
+const int HorizontalFlip = 0x20;
+
+const int LargeBlocks = 0x04;
+const mat2 doubleHeight = mat2(1, 0,
+                               0, 2);
+
+const int BackgroundPriorityStart = 10241;
+
+const ivec2 OAMOrigin = ivec2(-8, -10);
+
 void main()
 { 
-  gl_Position = projection * vec4(position.x, position.y, 0.0, 1.0);
+  instanceCode = OBJ[gl_InstanceID].charCode;
+
+  instanceAttributes = OBJ[gl_InstanceID].attributes;
+  bool isHorizontalFlip = bool(instanceAttributes & HorizontalFlip);
+  bool isVerticalFlip = bool(instanceAttributes & VerticalFlip);
+  bool isBgPriority = bool(instanceAttributes & DisplayPriority);
+
+  instanceOffset = vec2(isHorizontalFlip ? 8 - position.x : position.x,
+                        isVerticalFlip ? 8 - position.y : position.y);
+
+  ivec2 thisOffset = OBJ[gl_InstanceID].offset;
+  int zOffset = isBgPriority ? BackgroundPriorityStart : 0;
+
+  vec2 realPosition;
+  if((LCDC & LargeBlocks) != 0) {
+    realPosition = (doubleHeight * position) + thisOffset + OAMOrigin;
+  } else {
+    realPosition = position + thisOffset + OAMOrigin;
+  }
+
+  gl_Position = projection * vec4(realPosition, (thisOffset.x * 40) + gl_InstanceID + zOffset, 1.0);
 }

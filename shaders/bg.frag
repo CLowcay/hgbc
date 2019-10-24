@@ -21,6 +21,8 @@ layout (std140) uniform Registers
   int WX;   // 0xFF4B
 };
 
+const float BackgroundFrontLayer = 10240/20481;
+
 void main( )
 { 
   int characterDataOffset = (LCDC & 0x10) == 0 ? 0x800 : 0;
@@ -32,13 +34,18 @@ void main( )
   int ty = py >> 3;
   int ox = 7 - (px & 7);
   int oy = py & 7;
-  int tile = characterDataOffset +
-      int(texelFetch(texBackgroundData, codeAreaOffset + (ty * 32) + tx).r);
+  int rawTile = int(texelFetch(texBackgroundData, codeAreaOffset + (ty * 32) + tx).r);
+  int tile = rawTile > 127 ? rawTile : characterDataOffset + rawTile;
 
   int b0 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2)).r);
   int b1 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2) + 1).r);
   int pixelIndex = ((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1);
   int internalPaletteIndex = BGP >> (pixelIndex * 2) & 3;
   float pixel = float(3 - internalPaletteIndex) / 3.0;
+
+  if (pixelIndex != 0) {
+    gl_FragDepth = BackgroundFrontLayer;
+  }
+
   outColor = vec4(pixel, pixel, pixel, 1);
 }
