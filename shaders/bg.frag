@@ -21,7 +21,7 @@ layout (std140) uniform Registers
   int WX;   // 0xFF4B
 };
 
-const float BackgroundFrontLayer = 10240/20481;
+const float BackgroundFrontLayer = 10240.0/20481.0;
 
 void main( )
 { 
@@ -43,7 +43,9 @@ void main( )
   int internalPaletteIndex = BGP >> (pixelIndex * 2) & 3;
   float pixel = float(3 - internalPaletteIndex) / 3.0;
 
-  if (pixelIndex != 0) {
+  if (pixelIndex == 0) {
+    gl_FragDepth = gl_FragCoord.z;
+  } else {
     gl_FragDepth = BackgroundFrontLayer;
   }
 

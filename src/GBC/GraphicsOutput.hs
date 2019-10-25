@@ -105,7 +105,7 @@ setUpOpenGL = do
 
   bgProjection     <- linkUniform bgProgram "projection"
   projectionMatrix <- makeMatrix
-    (join [[2.0 / 160, 0, 0, 0], [0, -2.0 / 144, 0, 0], [0, 0, 2/20481, 0], [-1, 1, -1, 1]])
+    (join [[2.0 / 160, 0, 0, 0], [0, -2.0 / 144, 0, 0], [0, 0, 2 / 20481, 0], [-1, 1, -1, 1]])
   bgProjection $= projectionMatrix
 
   bgScanline <- genVertexArrayObject
@@ -126,9 +126,14 @@ setUpOpenGL = do
   oamProgram <- compileShaders [(VertexShader, oamVert), (FragmentShader, oamFrag)]
   useProgram oamProgram
 
+  oamProjection <- linkUniform oamProgram "projection"
+  oamProjection $= projectionMatrix
+
   bindBuffer TextureBufferBuffer vramBuffer
-  setUpTextureBuffer oamProgram "texCharacterData"  (TextureUnit 0) vramBuffer 0      0x1800
-  setUpTextureBuffer oamProgram "texBackgroundData" (TextureUnit 1) vramBuffer 0x1800 0x800
+  oamTexCharacterData  <- linkUniform oamProgram "texCharacterData"
+  oamTexBackgroundData <- linkUniform oamProgram "texBackgroundData"
+  oamTexCharacterData $= TextureUnit 0
+  oamTexBackgroundData $= TextureUnit 1
 
   oamBox <- genVertexArrayObject
   bindVertexArrayObject oamBox
@@ -137,8 +142,8 @@ setUpOpenGL = do
   void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
 
   (oamBuffer, oam) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer (40 * 4 * 4)
-  linkUniformBuffer oamProgram "Registers" registersBuffer 0
-  linkUniformBuffer oamProgram "OAMRegisters" oamBuffer 1
+  linkUniformBuffer oamProgram "Registers"    registersBuffer 0
+  linkUniformBuffer oamProgram "OAMRegisters" oamBuffer       1
 
   pure (GLState { .. }, VideoBuffers { .. })
 

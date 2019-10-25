@@ -1,6 +1,5 @@
 #version 150 core
 
-
 in vec2 instanceOffset;
 flat in int instanceCode;
 flat in int instanceAttributes;
@@ -30,7 +29,7 @@ const int Palette = 0x10;
 
 void main( )
 { 
-  if (gl_FragCoord.y != LY) {
+  if (int(gl_FragCoord.y) != 143 - LY) {
     discard;
   }
 

@@ -51,8 +51,8 @@ updateKeyboardState (KeyboardEvent d) keypadState =
   let symbol = case keysymKeycode $ keyboardEventKeysym d of
         KeycodeZ         -> Just keyA
         KeycodeX         -> Just keyB
-        KeycodeReturn    -> Just keySELECT
-        KeycodeBackspace -> Just keySTART
+        KeycodeReturn    -> Just keySTART
+        KeycodeBackspace -> Just keySELECT
         KeycodeRight     -> Just keyRIGHT
         KeycodeLeft      -> Just keyLEFT
         KeycodeUp        -> Just keyUP

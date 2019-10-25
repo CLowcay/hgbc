@@ -25,5 +25,5 @@ const float BackgroundPriority = 20481;
 void main()
 { 
   pixelPos = vec2(position.x, LY);
-  gl_Position = projection * vec4(position.x, position.y + LY, 1.1, 1.0);
+  gl_Position = projection * vec4(position.x, position.y + LY, BackgroundPriority, 1.0);
 }

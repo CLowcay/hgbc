@@ -45,7 +45,7 @@ const mat2 doubleHeight = mat2(1, 0,
 
 const int BackgroundPriorityStart = 10241;
 
-const ivec2 OAMOrigin = ivec2(-8, -10);
+const ivec2 OAMOrigin = ivec2(-8, -16);
 
 void main()
 { 
@@ -56,17 +56,18 @@ void main()
   bool isVerticalFlip = bool(instanceAttributes & VerticalFlip);
   bool isBgPriority = bool(instanceAttributes & DisplayPriority);
 
-  instanceOffset = vec2(isHorizontalFlip ? 8 - position.x : position.x,
-                        isVerticalFlip ? 8 - position.y : position.y);
-
-  ivec2 thisOffset = OBJ[gl_InstanceID].offset;
+  ivec2 thisOffset = OBJ[gl_InstanceID].offset.yx;
   int zOffset = isBgPriority ? BackgroundPriorityStart : 0;
 
   vec2 realPosition;
   if((LCDC & LargeBlocks) != 0) {
     realPosition = (doubleHeight * position) + thisOffset + OAMOrigin;
+    instanceOffset = vec2(isHorizontalFlip ? position.x : 7 - position.x,
+                          isVerticalFlip ? 15 - position.y : position.y);
   } else {
     realPosition = position + thisOffset + OAMOrigin;
+    instanceOffset = vec2(isHorizontalFlip ? position.x : 7 - position.x,
+                          isVerticalFlip ? 7 - position.y : position.y);
   }
 
   gl_Position = projection * vec4(realPosition, (thisOffset.x * 40) + gl_InstanceID + zOffset, 1.0);
