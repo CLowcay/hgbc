@@ -35,8 +35,8 @@ void main( )
 
   int palette = (instanceAttributes & Palette) == 0 ? OBP0 : OBP1;
 
-  int ox = int(instanceOffset.x);
-  int oy = int(instanceOffset.y);
+  int ox = int(instanceOffset.x - 0.5);
+  int oy = int(instanceOffset.y - 0.5);
 
   int b0 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2)).r);
   int b1 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2) + 1).r);
