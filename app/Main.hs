@@ -6,7 +6,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Loops
 import           Control.Monad.Reader
 import           Debug.CLI
-import           Debug.Commands
+import           Debug.Debugger
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Graphics

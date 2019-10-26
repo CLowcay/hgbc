@@ -3,7 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 
-module Debug.Commands
+module Debug.Debugger
   ( Command(..)
   , MemAddress(..)
   , DebugState
@@ -25,8 +25,8 @@ import           Debug.Dump
 import           Debug.Map
 import           GBC.Bus
 import           GBC.CPU
-import           GBC.Graphics
 import           GBC.Decode
+import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Memory
 

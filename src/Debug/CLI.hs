@@ -5,17 +5,17 @@ module Debug.CLI
   )
 where
 
+import           Data.Maybe
 import           Data.Void
 import           Data.Word
-import           Debug.Commands
+import           Debug.Debugger
+import           GBC.ISA
+import           System.IO
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
-import           System.IO
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
-import           Data.Maybe
 import qualified Text.Megaparsec.Char.Lexer    as L
-import           GBC.ISA
 
 nextCommand :: IO (Maybe Command)
 nextCommand = do
