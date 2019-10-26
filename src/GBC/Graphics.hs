@@ -223,7 +223,7 @@ graphicsStep (BusEvent newWrites clocks) = do
           lyc  <- readByte LYC
           let matchFlag = if lyc == line' then bit matchBit else 0
           writeByte STAT
-            $ modifyBits (bit matchBit .&. maskMode) (modeBits mode' .|. matchFlag) stat
+            $ modifyBits (bit matchBit .|. maskMode) (modeBits mode' .|. matchFlag) stat
 
           -- Raise interrupts
           when (stat `testBit` interruptCoincidence && lyc == line') $ raiseInterrupt 1
