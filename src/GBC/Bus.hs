@@ -11,6 +11,8 @@ module GBC.Bus
   , HasBusState(..)
   , UsesBus
   , initBusState
+  , isBreakFlagSet
+  , clearBreakFlag
   , registerWindow
   , busStep
   , handleEvents
@@ -27,7 +29,7 @@ import           GBC.Graphics
 import           GBC.Timer
 import           GBC.Keypad
 import           GBC.Memory
-import           SDL
+import           SDL                           as SDL
 import           SDL.Orphans                    ( )
 import qualified Data.HashTable.IO             as H
 import           Data.Bits
@@ -40,6 +42,7 @@ data BusState = BusState {
   , keypadState :: !(IORef Word8)
   , lastEventPollAt :: !(IORef Word32)
   , timerState :: !TimerState
+  , breakFlag :: !(IORef Bool)
 }
 
 class HasBusState env where
@@ -67,9 +70,11 @@ instance HasBusState env => HasTimerState env where
 
 type UsesBus env m = (HasBusState env, UsesCPU env m, UsesKeypad env m)
 
+-- | Number of milliseconds to wait between polling for events.
 pollDelay :: Word32
 pollDelay = 10
 
+-- | Create an initial bus state.
 initBusState :: CPUState -> Memory -> IO BusState
 initBusState cpuState mem =
   BusState cpuState mem
@@ -78,13 +83,23 @@ initBusState cpuState mem =
     <*> initKeypadState
     <*> newIORef 0
     <*> newIORef 0
+    <*> newIORef False
 
+-- | Check if the debug break flag is set.
+isBreakFlagSet :: UsesBus env m => ReaderT env m Bool
+isBreakFlagSet = liftIO . readIORef . breakFlag =<< asks forBusState
+
+-- | Reset the debug break flag.
+clearBreakFlag :: UsesBus env m => ReaderT env m ()
+clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< asks forBusState
+
+-- | Register a window to recieve updates from the graphics subsytem.
 registerWindow :: UsesBus env m => Window -> MVar (Maybe Update) -> ReaderT env m ()
 registerWindow window queue = do
   windows <- graphicsOutput <$> asks forBusState
   liftIO $ H.insert windows window queue
 
-{-# INLINABLE killWindow #-}
+-- | Close a registred window.
 killWindow :: UsesBus env m => Window -> ReaderT env m ()
 killWindow window = do
   windows <- graphicsOutput <$> asks forBusState
@@ -96,24 +111,31 @@ killWindow window = do
         putMVar var Nothing
         H.delete windows window
 
+pattern ReleasedBreakKey :: SDL.EventPayload
+pattern ReleasedBreakKey <- SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _))
+
+-- | Poll and dispatch events.
 {-# INLINE handleEvents #-}
 handleEvents :: UsesBus env m => ReaderT env m ()
 handleEvents = do
-  events <- pollEvents
+  events <- SDL.pollEvents
   keypadHandleUserEvents events
   for_ (eventPayload <$> events) $ \case
-    (WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
-    _                     -> pure ()
+    (SDL.WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
+    ReleasedBreakKey          -> liftIO . flip writeIORef True . breakFlag =<< asks forBusState
+    _                         -> pure ()
 
 pattern DMA :: Word16
 pattern DMA = 0xFF46
 
+-- | Perform a DMA transfer.
 {-# INLINABLE doDMA #-}
 doDMA :: UsesMemory env m => BusEvent -> ReaderT env m ()
 doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
   address <- fromIntegral <$> readByte DMA
   dmaToOAM (address `shiftL` 8)
 
+-- | Execute a single step of the emulation.
 {-# INLINABLE busStep #-}
 busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)
 busStep = do

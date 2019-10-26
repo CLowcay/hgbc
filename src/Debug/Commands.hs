@@ -79,23 +79,23 @@ class HasDebugState env where
 type UsesDebug env m = (UsesBus env m, HasDebugState env)
 
 -- | Initialise the debugger.
-{-# INLINEABLE initDebug #-}
+{-# INLINABLE initDebug #-}
 initDebug :: FilePath -> CPUState -> Memory -> IO DebugState
 initDebug thisROMFile cpuState mem = do
   busState <- initBusState cpuState mem
   DebugState busState thisROMFile <$> (newIORef =<< initMap thisROMFile) <*> initBreakpointTable
 
-{-# INLINEABLE getCodeMap #-}
+{-# INLINABLE getCodeMap #-}
 getCodeMap :: UsesDebug env m => ReaderT env m SymbolTable
 getCodeMap = liftIO . readIORef =<< codeMap <$> asks forDebugState
 
-{-# INLINEABLE setCodeMap #-}
+{-# INLINABLE setCodeMap #-}
 setCodeMap :: UsesDebug env m => SymbolTable -> ReaderT env m ()
 setCodeMap value = liftIO . (`writeIORef` value) =<< codeMap <$> asks forDebugState
 
 -- | Create a function to decorate disassembly dumps. Adds symbols to indicate
 -- breakpoints, PC and other information.
-{-# INLINEABLE makeDecorator #-}
+{-# INLINABLE makeDecorator #-}
 makeDecorator :: UsesDebug env m => ReaderT env m (Word16 -> IO String)
 makeDecorator = do
   DebugState {..} <- asks forDebugState
@@ -116,7 +116,7 @@ type BreakPreCondition env m = ReaderT env m Bool
 type BreakPostCondition env m = BusEvent -> ReaderT env m Bool
 
 -- | Break after a certain number of instructions have been executed.
-{-# INLINEABLE breakOnCountOf #-}
+{-# INLINABLE breakOnCountOf #-}
 breakOnCountOf :: MonadIO m => Int -> ReaderT env m (BreakPreCondition env m)
 breakOnCountOf n0 = do
   counter <- liftIO $ newIORef n0
@@ -129,36 +129,36 @@ breakOnCountOf n0 = do
         pure False
 
 -- | Break when breakpoints are triggered.
-{-# INLINEABLE breakOnBreakpoints #-}
+{-# INLINABLE breakOnBreakpoints #-}
 breakOnBreakpoints :: UsesDebug env m => ReaderT env m (BreakPostCondition env m)
 breakOnBreakpoints = do
   DebugState {..} <- asks forDebugState
   pure . const $ shouldBreak breakpoints
 
 -- | Break when the PC equals a certain value.
-{-# INLINEABLE breakOnPC #-}
+{-# INLINABLE breakOnPC #-}
 breakOnPC :: UsesCPU env m => Word16 -> BreakPostCondition env m
 breakOnPC pc = const $ (pc ==) <$> readPC
 
 -- | Break when a RET instruction is executed with the current stack pointer.
-{-# INLINEABLE breakOnRet #-}
+{-# INLINABLE breakOnRet #-}
 breakOnRet :: UsesCPU env m => Word16 -> BreakPreCondition env m
 breakOnRet originalSP = do
   sp          <- readR16 RegSP
   instruction <- decodeOnly decode
   case instruction of
-    RET -> pure $ originalSP == sp
+    RET               -> pure $ originalSP == sp
     (RETCC condition) -> do
       shouldRet <- testCondition condition
       pure $ shouldRet && originalSP == sp
     RETI -> pure $ originalSP == sp
-    _         -> pure False
+    _    -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.
-{-# INLINEABLE doRun #-}
+{-# INLINABLE doRun #-}
 doRun
   :: UsesBus env m => [BreakPreCondition env m] -> [BreakPostCondition env m] -> ReaderT env m ()
-doRun preConditions postConditions = go
+doRun preConditions postConditions = clearBreakFlag >> go
  where
   go = do
     doPreBreak <- orM preConditions
@@ -166,11 +166,12 @@ doRun preConditions postConditions = go
       then pure ()
       else do
         (debugInfo, _) <- busStep
+        breakFlag      <- isBreakFlagSet
         doPostBreak    <- orM $ fmap ($ debugInfo) postConditions
-        if doPostBreak then pure () else go
+        if doPostBreak || breakFlag then pure () else go
 
 -- | Disassemble the next 4 instructions at the current PC.
-{-# INLINEABLE disassembleAtPC #-}
+{-# INLINABLE disassembleAtPC #-}
 disassembleAtPC :: UsesDebug env m => ReaderT env m ()
 disassembleAtPC = do
   symbols   <- getCodeMap
@@ -178,7 +179,7 @@ disassembleAtPC = do
   pc        <- readPC
   dumpDisassembly decorator symbols pc 4
 
-{-# INLINEABLE withAddress #-}
+{-# INLINABLE withAddress #-}
 withAddress :: UsesDebug env m => MemAddress -> (Word16 -> ReaderT env m ()) -> ReaderT env m ()
 withAddress (ConstAddress addr ) action = action addr
 withAddress (LabelAddress label) action = do

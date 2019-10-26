@@ -141,4 +141,4 @@ writeByte addr value = do
 -- | Read a chunk of memory.
 {-# INLINABLE readChunk #-}
 readChunk :: (UsesMemory env m) => Word16 -> Int -> ReaderT env m B.ByteString
-readChunk base len = B.pack <$> traverse readByte [base .. base + fromIntegral len]
+readChunk base len = B.pack <$> traverse readByte [base .. base + fromIntegral len - 1]
