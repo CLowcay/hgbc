@@ -17,6 +17,7 @@ import           GBC.Memory
 import           GBC.ROM
 import           Test.Hspec
 import qualified Data.ByteString               as B
+import           Data.Foldable
 
 blankROM :: ROM
 blankROM = ROM $ B.replicate (32 * 1024 * 1024) 0
@@ -102,7 +103,7 @@ withFlagsUpdateZ mask (expected, expectedCarry) computation = do
   registerFile1 <- getRegisterFile
   liftIO $ do
     registerFile1 `shouldBe` registerFile0
-    (flags1 .&. mask)
+    (flags1 .&. (mask .|. flagZ))
       `shouldBe` ((if hasCarry then expectedCarry else expected) .|. if a1 == 0 then flagZ else 0)
 
 withIMEUpdate :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
@@ -363,6 +364,7 @@ spec = do
         ev <- executeInstruction CCF
         liftIO $ ev `shouldBe` noWrite
   describe "Interrupt" interrupt
+  describe "DAA"       testDAA
 
 didRead :: BusEvent
 didRead = BusEvent [] 8
@@ -1120,3 +1122,52 @@ interrupt = do
       fromIntegral sl .|. (fromIntegral sh `shiftL` 8) `shouldBe` pc0
       ime `shouldBe` False
 
+testDAA :: Spec
+testDAA = do
+  traverse_ testAddition    allBCDCombos
+  traverse_ testSubtraction allBCDCombos
+ where
+  allBCDCombos = [ (a, b) | a <- [0 .. 99], b <- [0 .. 99] ]
+
+  toBCD :: Word8 -> Word16
+  toBCD x =
+    let (r0, d0) = x `divMod` 10
+        (d2, d1) = r0 `divMod` 10
+    in  (fromIntegral d2 `shiftL` 8) .|. (fromIntegral d1 `shiftL` 4) .|. fromIntegral d0
+  toBCD8 = fromIntegral . toBCD
+
+  testSubtraction (a, b) =
+    it ("works for " ++ show a ++ " - " ++ show b)
+      $ withNewCPU
+      $ withAllFlagCombos
+      $ withFlagsUpdateZ (flagN .|. flagCY) (dup $ flagN .|. if a < b then flagCY else 0)
+      $ preservingR8 RegA
+      $ do
+          writeR8 RegA (toBCD8 a)
+          void (executeInstruction (SUB (I8 (toBCD8 b))))
+          ev    <- executeInstruction DAA
+          r     <- readR8 RegA
+          carry <- testFlag flagCY
+          let result = if carry then fromIntegral r + 0x0100 else fromIntegral r
+          liftIO $ do
+            ev `shouldBe` noWrite
+            result `shouldBe` (if a < b then toBCD (a - b + 100) + 0x0100 else toBCD (a - b))
+          pure r
+
+  testAddition (a, b) =
+    it ("works for " ++ show a ++ " + " ++ show b)
+      $ withNewCPU
+      $ withAllFlagCombos
+      $ withFlagsUpdateZ flagCY (dup $ if a + b > 99 then flagCY else 0)
+      $ preservingR8 RegA
+      $ do
+          writeR8 RegA (toBCD8 a)
+          void (executeInstruction (ADD (I8 (toBCD8 b))))
+          ev    <- executeInstruction DAA
+          r     <- readR8 RegA
+          carry <- testFlag flagCY
+          let result = if carry then fromIntegral r + 0x0100 else fromIntegral r
+          liftIO $ do
+            ev `shouldBe` noWrite
+            (a, b, result) `shouldBe` (a, b, toBCD (a + b))
+          pure r

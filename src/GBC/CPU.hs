@@ -1,7 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE BinaryLiterals #-}
 
 module GBC.CPU
   ( RegisterFile(..)
@@ -374,8 +374,8 @@ reset = do
   writeByte 0xFF49 (0xFF :: Word8)   -- OBP1
   writeByte 0xFF4A (0x00 :: Word8)   -- WY
   writeByte 0xFF4B (0x00 :: Word8)   -- WX
-  writeByte IE (0x00 :: Word8)       -- IE
-  writeByte IF (0x00 :: Word8)       -- IF
+  writeByte IE     (0x00 :: Word8)       -- IE
+  writeByte IF     (0x00 :: Word8)       -- IF
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -459,7 +459,7 @@ getNextInterrupt :: Word8 -> Int
 getNextInterrupt = countTrailingZeros
 
 -- | Raise an interrupt.
-raiseInterrupt ::  UsesMemory env m => Int -> ReaderT env m ()
+raiseInterrupt :: UsesMemory env m => Int -> ReaderT env m ()
 raiseInterrupt interrupt = writeByte IF =<< (`setBit` interrupt) <$> readByte IF
 
 -- | Fetch, decode, and execute a single instruction.
@@ -468,7 +468,7 @@ cpuStep :: UsesCPU env m => ReaderT env m BusEvent
 cpuStep = do
   -- Check if we have an interrupt
   interrupts <- pendingEnabledInterrupts
-  ime <- testIME
+  ime        <- testIME
 
   if interrupts == 0 || not ime
     then executeInstruction =<< decodeAndAdvancePC decode
@@ -905,8 +905,24 @@ executeInstruction instruction = case instruction of
     pure $ BusEvent [sp', sp' + 1] $ clocks instruction True
   -- DAA
   DAA -> do
-    pc <- readPC
-    error $ "DAA not implemented at " ++ formatHex pc
+    flags <- readF
+    a     <- readR8 RegA
+
+    let op = if isFlagSet flagN flags then OpSub else OpAdd
+    let (ir, flags') =
+          if a .&. 0x0F > 9 || isFlagSet flagH flags then adder8 op a 0x06 False else (a, flags)
+    let (r, flagsFinal) = if ir `shiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
+          then adder8 op ir 0x60 False
+          else (ir, flags)
+
+    writeR8 RegA r
+    setFlagsMask
+      (flagCY .|. flagZ .|. flagH)
+      ((flagsFinal .&. flagCY) .|. (flags' .&. flagCY) .|. (flags .&. flagCY) .|. if r == 0
+        then flagZ
+        else 0
+      )
+    pure $ BusEvent [] $ clocks instruction True
   -- CPL
   CPL -> do
     writeR8 RegA =<< complement <$> readR8 RegA
