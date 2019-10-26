@@ -1,11 +1,7 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
-
 module GBC.Timer
   ( TimerState
   , initTimerState
-  , HasTimerState(..)
-  , UsesTimer
+  , HasTimer(..)
   , updateTimer
   )
 where
@@ -13,6 +9,7 @@ where
 import           Data.IORef
 import           GBC.Memory
 import           GBC.CPU
+import           GBC.Registers
 import           Common
 import           Control.Exception              ( assert )
 import           Control.Monad.Reader
@@ -26,22 +23,8 @@ type TimerState = IORef Word16
 initTimerState :: IO TimerState
 initTimerState = newIORef 0
 
-class HasTimerState env where
+class HasMemory env => HasTimer env where
   forTimerState :: env -> TimerState
-
-type UsesTimer env m = (HasTimerState env, UsesMemory env m)
-
-pattern DIV :: Word16
-pattern DIV = 0xFF04
-
-pattern TIMA :: Word16
-pattern TIMA = 0xFF05
-
-pattern TMA :: Word16
-pattern TMA = 0xFF06
-
-pattern TAC :: Word16
-pattern TAC = 0xFF07
 
 -- | Select the relevant bits from the timer state given the low 2 bits of the
 -- TAC register.
@@ -58,7 +41,7 @@ testTimerStop = (`testBit` 2)
 
 -- | Update the timer state.
 {-# INLINABLE updateTimer #-}
-updateTimer :: UsesTimer env m => Int -> ReaderT env m ()
+updateTimer :: HasTimer env => Int -> ReaderT env IO ()
 updateTimer advance = do
   -- Update the internal clock count
   timer  <- asks forTimerState
@@ -68,7 +51,7 @@ updateTimer advance = do
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
-    $ writeByte DIV (fromIntegral (clocks' `shiftR` 8) :: Word8)
+    $ writeByte DIV (fromIntegral (clocks' `unsafeShiftR` 8) :: Word8)
 
   -- Update the TIMA register
   when (clocks .&. 0xFFF0 /= clocks' .&. 0xFFF0) $ do

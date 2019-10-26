@@ -1,10 +1,8 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module GBC.Keypad
-  ( HasKeypadState(..)
-  , UsesKeypad
+  ( HasKeypad(..)
+  , KeypadState
   , initKeypadState
   , keypadHandleUserEvents
   , keypadHandleBusEvent
@@ -18,6 +16,7 @@ import           Data.IORef
 import           Data.Word
 import           GBC.CPU
 import           GBC.Memory
+import           GBC.Registers
 import           SDL.Event
 import           SDL.Input.Keyboard
 
@@ -32,18 +31,14 @@ keyLEFT = 0x20
 keyUP = 0x40
 keyDOWN = 0x80
 
--- | The keypad register.
-pattern P1 :: Word16
-pattern P1 = 0xFF00
-
 -- | Create the initial keypad state.
 initKeypadState :: IO (IORef Word8)
 initKeypadState = newIORef 0x00
 
-class HasKeypadState env where
-  forKeypadState :: env -> IORef Word8
+type KeypadState = IORef Word8
 
-type UsesKeypad env m = (HasKeypadState env, UsesMemory env m)
+class HasMemory env => HasKeypad env where
+  forKeypadState :: env -> KeypadState
 
 -- | Update the keypad state given an SDL event payload.
 updateKeyboardState :: EventPayload -> Word8 -> Word8
@@ -67,20 +62,20 @@ updateKeyboardState _ keypadState = keypadState
 
 -- | Update the 'regKeypad' register.
 {-# INLINE refreshKeypad #-}
-refreshKeypad :: UsesKeypad env m => ReaderT env m ()
+refreshKeypad :: HasKeypad env => ReaderT env IO ()
 refreshKeypad = do
   keypad <- liftIO . readIORef =<< asks forKeypadState
   p1     <- readByte P1
   let p1' = case (p1 `testBit` 4, p1 `testBit` 5) of
         (True , False) -> (p1 .&. 0xF0) .|. (complement keypad .&. 0x0F)
-        (False, True ) -> (p1 .&. 0xF0) .|. (complement (keypad `shiftR` 4) .&. 0x0F)
+        (False, True ) -> (p1 .&. 0xF0) .|. (complement (keypad `unsafeShiftR` 4) .&. 0x0F)
         _              -> p1
   writeByte P1 p1'
   when (0 /= 0x0F .&. p1 .&. complement p1') $ raiseInterrupt 4
 
 -- | Update the keypad state from a list of SDL events.
 {-# INLINE keypadHandleUserEvents #-}
-keypadHandleUserEvents :: UsesKeypad env m => [Event] -> ReaderT env m ()
+keypadHandleUserEvents :: HasKeypad env => [Event] -> ReaderT env IO ()
 keypadHandleUserEvents events = do
   keypad  <- asks forKeypadState
   keypad0 <- liftIO $ readIORef keypad
@@ -90,5 +85,5 @@ keypadHandleUserEvents events = do
 
 -- | Watch for bus events that might require us to refresh the 'regKeypad' register.
 {-# INLINE keypadHandleBusEvent #-}
-keypadHandleBusEvent :: UsesKeypad env m => BusEvent -> ReaderT env m ()
+keypadHandleBusEvent :: HasKeypad env => BusEvent -> ReaderT env IO ()
 keypadHandleBusEvent BusEvent {..} = when (P1 `elem` writeAddress) refreshKeypad

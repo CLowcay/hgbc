@@ -26,7 +26,7 @@ setBreakpoint = insert
 getBreakpoint :: BreakpointTable -> Word16 -> IO (Maybe Bool)
 getBreakpoint = lookup
 
-shouldBreak :: UsesCPU env m => BreakpointTable -> ReaderT env m Bool
+shouldBreak :: HasCPU env => BreakpointTable -> ReaderT env IO Bool
 shouldBreak table = do
   pc <- readPC
   liftIO $ (== Just True) <$> lookup table pc

@@ -9,21 +9,27 @@ where
 
 import           Control.Concurrent
 import           Control.Monad
+import           Data.IORef
 import           Data.Int
 import           Data.StateVar
+import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
+import           Foreign.Storable
 import           GBC.Graphics
 import           GBC.Memory
 import           GLUtils
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
+import           Data.Bits
 import qualified SDL
+import qualified SDL.Raw
 
 data WindowContext = WindowContext {
     window :: !SDL.Window
   , sync :: !GraphicsSync
-  , glContext :: !SDL.GLContext
   , glState :: !GLState
+  , lineCounter :: !(IORef Int)
+  , waitCounter :: !(IORef Int)
 }
 
 -- | OpenGL state variables.
@@ -47,10 +53,15 @@ startOutput sync = do
   videoBuffers <- newEmptyMVar
 
   void $ forkOS $ do
-    glContext <- SDL.glCreateContext window
+    printDisplayModeInfo
+
+    void (SDL.glCreateContext window)
     SDL.swapInterval $= SDL.SynchronizedUpdates
     (glState, buffers) <- setUpOpenGL
     putMVar videoBuffers buffers
+
+    lineCounter <- newIORef 0
+    waitCounter <- newIORef 0
 
     eventLoop WindowContext { .. }
     SDL.destroyWindow window
@@ -58,8 +69,32 @@ startOutput sync = do
   buffers <- takeMVar videoBuffers
   pure (buffers, window)
 
+printDisplayModeInfo :: IO ()
+printDisplayModeInfo = alloca $ \pDisplayMode -> do
+  void (SDL.Raw.getDesktopDisplayMode 0 pDisplayMode)
+  mode <- peek pDisplayMode
+  putStrLn
+    (  "Display mode "
+    ++ show (SDL.Raw.displayModeW mode)
+    ++ "x"
+    ++ show (SDL.Raw.displayModeH mode)
+    ++ " "
+    ++ show (SDL.Raw.displayModeRefreshRate mode)
+    ++ "Hz"
+    )
+
 eventLoop :: WindowContext -> IO ()
 eventLoop context@WindowContext {..} = do
+  modifyIORef' lineCounter (+1)
+  isEmptyMVar (currentLine sync) >>= \isEmpty ->
+    when isEmpty $ modifyIORef' waitCounter (+1)
+
+  lineCount <- readIORef lineCounter
+  when (lineCount .&. 0x1FFF == 0) $ do
+    waitCount <- readIORef waitCounter
+    let percent = round ((fromIntegral waitCount / fromIntegral lineCount) * (100.0 :: Double)) :: Int
+    putStrLn ("Missed " ++ show waitCount ++ " out of " ++ show lineCount ++ " " ++ show percent ++ "% miss rate")
+
   line <- takeMVar (currentLine sync)
 
   useProgram (oamProgram glState)

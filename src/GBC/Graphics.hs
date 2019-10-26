@@ -1,28 +1,14 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ConstraintKinds #-}
 
 module GBC.Graphics
   ( GraphicsState(..)
   , GraphicsSync(..)
-  , HasGraphicsState(..)
-  , UsesGraphics
+  , HasGraphics(..)
   , Mode(..)
   , initGraphics
   , newGraphicsSync
   , graphicsStep
-  , pattern LCDC
-  , pattern STAT
-  , pattern LY
-  , pattern LYC
-  , pattern SCX
-  , pattern SCY
-  , pattern WX
-  , pattern WY
-  , pattern BGP
-  , pattern OBP0
-  , pattern OBP1
   , flagLCDEnable
   , flagWindowTileMap
   , flagWindowEnable
@@ -35,13 +21,15 @@ module GBC.Graphics
 where
 
 import           Common
-import           Control.Monad.Reader
 import           Control.Concurrent.MVar
+import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Foldable
 import           Data.IORef
 import           Data.Word
 import           GBC.CPU
 import           GBC.Memory
+import           GBC.Registers
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
@@ -72,13 +60,12 @@ newGraphicsSync :: IO GraphicsSync
 newGraphicsSync = do
   hblankStart <- newEmptyMVar
   currentLine <- newEmptyMVar
-  pure GraphicsSync {..}
+  pure GraphicsSync { .. }
 
-class HasGraphicsState env where
+class HasMemory env => HasGraphics env where
   forGraphicsState :: env -> IORef GraphicsState
   forGraphicsSync :: env -> GraphicsSync
-
-type UsesGraphics env m = (UsesMemory env m, HasGraphicsState env)
+  forLCDEnabled :: env -> IORef Bool
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -118,39 +105,6 @@ nextLine line remaining clocks =
         then (line, remaining')
         else (if line' >= totalLines then 0 else line', remaining' + lineClocks)
 
-pattern LCDC :: Word16
-pattern LCDC = 0xFF40
-
-pattern STAT :: Word16
-pattern STAT = 0xFF41
-
-pattern LY :: Word16
-pattern LY = 0xFF44
-
-pattern LYC :: Word16
-pattern LYC = 0xFF45
-
-pattern SCX :: Word16
-pattern SCX = 0xFF43
-
-pattern SCY :: Word16
-pattern SCY = 0xFF42
-
-pattern WX :: Word16
-pattern WX = 0xFF4B
-
-pattern WY :: Word16
-pattern WY = 0xFF4A
-
-pattern BGP :: Word16
-pattern BGP = 0xFF47
-
-pattern OBP0 :: Word16
-pattern OBP0 = 0xFF48
-
-pattern OBP1 :: Word16
-pattern OBP1 = 0xFF48
-
 flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
   :: Word8
 flagLCDEnable = 0x80
@@ -172,10 +126,6 @@ interruptHBlank = 3
 maskMode :: Word8
 maskMode = 0x03
 
-{-# INLINE testGraphicsFlag #-}
-testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
-testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
-
 -- | Modify some bits with a mask.
 modifyBits :: Word8 -> Word8 -> Word8 -> Word8
 modifyBits mask value source = value .|. (source .&. complement mask)
@@ -192,21 +142,27 @@ modeBits ScanOAM  = 2
 modeBits ReadVRAM = 3
 
 {-# INLINABLE graphicsStep #-}
-graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m ()
+graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()
 graphicsStep (BusEvent newWrites clocks) = do
   graphicsState      <- asks forGraphicsState
   graphicsSync       <- asks forGraphicsSync
   GraphicsState {..} <- liftIO (readIORef graphicsState)
 
-  lcdEnabled         <- testGraphicsFlag LCDC flagLCDEnable
+  lcdEnabled         <- asks forLCDEnabled
+  isLCDEnabled       <- liftIO (readIORef lcdEnabled)
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
 
-  when (STAT `elem` newWrites) $ do
-    stat <- readByte STAT
-    writeByte STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
+  for_ newWrites $ \case
+    STAT -> do
+      stat <- readByte STAT
+      writeByte STAT (setMode stat (if isLCDEnabled then mode' else lcdMode))
+    LCDC -> do
+      lcdc <- readByte LCDC
+      liftIO (writeIORef lcdEnabled (isFlagSet flagLCDEnable lcdc))
+    _ -> pure ()
 
-  when lcdEnabled $ do
+  when isLCDEnabled $ do
     when (lcdLine /= line') $ writeByte LY line'
 
     liftIO . writeIORef graphicsState $ GraphicsState { lcdMode             = mode'

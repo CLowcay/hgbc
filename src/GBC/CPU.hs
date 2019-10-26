@@ -1,4 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BinaryLiterals #-}
@@ -7,8 +6,7 @@ module GBC.CPU
   ( RegisterFile(..)
   , CPUMode(..)
   , CPUState(..)
-  , HasCPUState(..)
-  , UsesCPU
+  , HasCPU(..)
   , BusEvent(..)
   , initCPU
   , getMode
@@ -44,6 +42,7 @@ module GBC.CPU
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
@@ -53,8 +52,8 @@ import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.Decode
 import           GBC.ISA
-import           Common
 import           GBC.Memory
+import           GBC.Registers
 
 -- | The register file.
 data RegisterFile = RegisterFile {
@@ -129,59 +128,56 @@ data CPUState = CPUState {
   , cpuMode :: !(IORef CPUMode)
 }
 
-class HasCPUState env where
+class HasMemory env => HasCPU env where
   forCPUState :: env -> CPUState
 
 -- | Initialize a new CPU.
 initCPU :: IO CPUState
 initCPU = CPUState <$> mallocForeignPtr <*> newIORef ModeNormal
 
--- | Constraints for monads that update the CPU.
-type UsesCPU env m = (UsesMemory env m, HasCPUState env)
-
 -- | Get the current cpu mode.
 {-# INLINABLE getMode #-}
-getMode :: UsesCPU env m => ReaderT env m CPUMode
+getMode :: HasCPU env => ReaderT env IO CPUMode
 getMode = do
   CPUState {..} <- asks forCPUState
   liftIO $ readIORef cpuMode
 
 -- | Get the CPU mode.
 {-# INLINABLE setMode #-}
-setMode :: UsesCPU env m => CPUMode -> ReaderT env m ()
+setMode :: HasCPU env => CPUMode -> ReaderT env IO ()
 setMode mode = do
   CPUState {..} <- asks forCPUState
   liftIO $ writeIORef cpuMode mode
 
 -- | Get the values of all the registers.
 {-# INLINABLE getRegisterFile #-}
-getRegisterFile :: UsesCPU env m => ReaderT env m RegisterFile
+getRegisterFile :: HasCPU env => ReaderT env IO RegisterFile
 getRegisterFile = do
   CPUState {..} <- asks forCPUState
   liftIO $ withForeignPtr registers peek
 
 -- | Read data from the register file.
 {-# INLINE readRegister #-}
-readRegister :: (UsesCPU env m, Storable a) => Int -> ReaderT env m a
+readRegister :: (HasCPU env, Storable a) => Int -> ReaderT env IO a
 readRegister offset = do
   CPUState {..} <- asks forCPUState
   liftIO $ withForeignPtr registers $ flip peekByteOff offset
 
 -- | Write data to the register file.
 {-# INLINE writeRegister #-}
-writeRegister :: (UsesCPU env m, Storable a) => Int -> a -> ReaderT env m ()
+writeRegister :: (HasCPU env, Storable a) => Int -> a -> ReaderT env IO ()
 writeRegister offset value = do
   CPUState {..} <- asks forCPUState
   liftIO $ withForeignPtr registers $ \ptr -> pokeByteOff ptr offset value
 
 -- | Read a single register.
 {-# INLINABLE readR8 #-}
-readR8 :: UsesCPU env m => Register8 -> ReaderT env m Word8
+readR8 :: HasCPU env => Register8 -> ReaderT env IO Word8
 readR8 = readRegister . offsetR8
 
 -- | Write a single register.
 {-# INLINABLE writeR8 #-}
-writeR8 :: UsesCPU env m => Register8 -> Word8 -> ReaderT env m ()
+writeR8 :: HasCPU env => Register8 -> Word8 -> ReaderT env IO ()
 writeR8 register = writeRegister $ offsetR8 register
 
 -- | Get the offset in the register file of a single register.
@@ -196,12 +192,12 @@ offsetR8 RegL = offsetL
 
 -- | Read a 16-bit register.
 {-# INLINABLE readR16 #-}
-readR16 :: UsesCPU env m => Register16 -> ReaderT env m Word16
+readR16 :: HasCPU env => Register16 -> ReaderT env IO Word16
 readR16 = readRegister . offsetR16
 
 -- | Write a 16-bit register.
 {-# INLINABLE writeR16 #-}
-writeR16 :: UsesCPU env m => Register16 -> Word16 -> ReaderT env m ()
+writeR16 :: HasCPU env => Register16 -> Word16 -> ReaderT env IO ()
 writeR16 register = writeRegister $ offsetR16 register
 
 -- | Get the offset in the register file of a register pair.
@@ -213,40 +209,40 @@ offsetR16 RegSP = offsetSP
 
 -- | Read the PC register.
 {-# INLINABLE readPC #-}
-readPC :: UsesCPU env m => ReaderT env m Word16
+readPC :: HasCPU env => ReaderT env IO Word16
 readPC = readRegister offsetPC
 
 -- | Write the PC register.
 {-# INLINABLE writePC #-}
-writePC :: UsesCPU env m => Word16 -> ReaderT env m ()
+writePC :: HasCPU env => Word16 -> ReaderT env IO ()
 writePC = writeRegister offsetPC
 
 -- | Read the AF register.
 {-# INLINABLE readAF #-}
-readAF :: UsesCPU env m => ReaderT env m Word16
+readAF :: HasCPU env => ReaderT env IO Word16
 readAF = readRegister offsetF
 
 -- | Write the AF register.
 {-# INLINABLE writeAF #-}
-writeAF :: UsesCPU env m => Word16 -> ReaderT env m ()
+writeAF :: HasCPU env => Word16 -> ReaderT env IO ()
 writeAF = writeRegister offsetF
 
 -- | Read from a 'Operand8'. Returns a list of addresses that were read from.
 {-# INLINE readOperand8 #-}
-readOperand8 :: UsesCPU env m => Operand8 -> ReaderT env m Word8
+readOperand8 :: HasCPU env => Operand8 -> ReaderT env IO Word8
 readOperand8 (R8 register) = readR8 register
 readOperand8 (I8 value   ) = pure value
 readOperand8 HLI           = readByte =<< readR16 RegHL
 
 -- | Read from a 'SmallOperand8'.  Returns a list of addresses that were read from.
 {-# INLINE readSmallOperand8 #-}
-readSmallOperand8 :: UsesCPU env m => SmallOperand8 -> ReaderT env m Word8
+readSmallOperand8 :: HasCPU env => SmallOperand8 -> ReaderT env IO Word8
 readSmallOperand8 (SmallR8 register) = readR8 register
 readSmallOperand8 SmallHLI           = readOperand8 HLI
 
 -- | Write to a 'SmallOperand8'.  Returns a list of addresses that were written to.
 {-# INLINE writeSmallOperand8 #-}
-writeSmallOperand8 :: UsesCPU env m => SmallOperand8 -> Word8 -> ReaderT env m [Word16]
+writeSmallOperand8 :: HasCPU env => SmallOperand8 -> Word8 -> ReaderT env IO [Word16]
 writeSmallOperand8 (SmallR8 register) value = [] <$ writeR8 register value
 writeSmallOperand8 SmallHLI           value = do
   hl <- readR16 RegHL
@@ -267,14 +263,14 @@ flagIME = 0x0100
 
 -- | Check if a flag is set.
 {-# INLINE testFlag #-}
-testFlag :: UsesCPU env m => Flag -> ReaderT env m Bool
+testFlag :: HasCPU env => Flag -> ReaderT env IO Bool
 testFlag flag = do
   f <- readRegister offsetF
   pure $ f .&. flag /= 0
 
 -- | Check if a condition code is true.
 {-# INLINE testCondition #-}
-testCondition :: UsesCPU env m => ConditionCode -> ReaderT env m Bool
+testCondition :: HasCPU env => ConditionCode -> ReaderT env IO Bool
 testCondition CondNZ = not <$> testFlag flagZ
 testCondition CondZ  = testFlag flagZ
 testCondition CondNC = not <$> testFlag flagCY
@@ -282,54 +278,54 @@ testCondition CondC  = testFlag flagCY
 
 -- | Read the F register.
 {-# INLINE readF #-}
-readF :: UsesCPU env m => ReaderT env m Word8
+readF :: HasCPU env => ReaderT env IO Word8
 readF = readRegister offsetF
 
 -- | Write the F register.
 {-# INLINE writeF #-}
-writeF :: UsesCPU env m => Word8 -> ReaderT env m ()
+writeF :: HasCPU env => Word8 -> ReaderT env IO ()
 writeF = writeRegister offsetF
 
 -- | Set all the flags.
 {-# INLINE setFlags #-}
-setFlags :: UsesCPU env m => Word8 -> ReaderT env m ()
+setFlags :: HasCPU env => Word8 -> ReaderT env IO ()
 setFlags = setFlagsMask 0xF0
 
 -- | Set some flags.
 {-# INLINE setFlagsMask #-}
 setFlagsMask
-  :: UsesCPU env m
+  :: HasCPU env
   => Word8 -- ^ bitmask containing flags to set.
   -> Word8 -- ^ new flags values.
-  -> ReaderT env m ()
+  -> ReaderT env IO ()
 setFlagsMask mask flags = do
   oldFlags <- readRegister offsetF
   writeRegister offsetF $ (oldFlags .&. complement mask) .|. (flags .&. mask)
 
 -- | Set the master interrupt flag.
 {-# INLINE setIME #-}
-setIME :: UsesCPU env m => ReaderT env m ()
+setIME :: HasCPU env => ReaderT env IO ()
 setIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .|. flagIME)
 
 -- | Clear the master interrupt flag.
 {-# INLINE clearIME #-}
-clearIME :: UsesCPU env m => ReaderT env m ()
+clearIME :: HasCPU env => ReaderT env IO ()
 clearIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .&. complement flagIME)
 
 -- | Check the status of the interrupt flag.
 {-# INLINE testIME #-}
-testIME :: UsesCPU env m => ReaderT env m Bool
+testIME :: HasCPU env => ReaderT env IO Bool
 testIME = do
   ime <- readRegister offsetHidden
   pure $ ime .&. flagIME /= 0
 
 -- | Reset the CPU.
 {-# INLINABLE reset #-}
-reset :: UsesCPU env m => ReaderT env m ()
+reset :: HasCPU env => ReaderT env IO ()
 reset = do
   writeR8 RegA 0x01
   writeF 0xB0
@@ -344,9 +340,9 @@ reset = do
   setIME
   writePC 0x150
 
-  writeByte 0xFF05 (0x00 :: Word8)   -- TIMA
-  writeByte 0xFF06 (0x00 :: Word8)   -- TMA
-  writeByte 0xFF07 (0x00 :: Word8)   -- TAC
+  writeByte TIMA   (0x00 :: Word8)
+  writeByte TMA    (0x00 :: Word8)
+  writeByte TAC    (0x00 :: Word8)
   writeByte 0xFF10 (0x80 :: Word8)   -- NR10
   writeByte 0xFF11 (0xBF :: Word8)   -- NR11
   writeByte 0xFF12 (0xF3 :: Word8)   -- NR12
@@ -365,17 +361,17 @@ reset = do
   writeByte 0xFF24 (0x77 :: Word8)   -- NR50
   writeByte 0xFF25 (0xF3 :: Word8)   -- NR51
   writeByte 0xFF26 (0xF1 :: Word8)   -- NR52
-  writeByte 0xFF40 (0x91 :: Word8)   -- LCDC
-  writeByte 0xFF42 (0x00 :: Word8)   -- SCY
-  writeByte 0xFF43 (0x00 :: Word8)   -- SCX
-  writeByte 0xFF45 (0x00 :: Word8)   -- LYC
-  writeByte 0xFF47 (0xFC :: Word8)   -- BGP
-  writeByte 0xFF48 (0xFF :: Word8)   -- OBP0
-  writeByte 0xFF49 (0xFF :: Word8)   -- OBP1
-  writeByte 0xFF4A (0x00 :: Word8)   -- WY
-  writeByte 0xFF4B (0x00 :: Word8)   -- WX
-  writeByte IE     (0x00 :: Word8)       -- IE
-  writeByte IF     (0x00 :: Word8)       -- IF
+  writeByte LCDC   (0x91 :: Word8)
+  writeByte SCY    (0x00 :: Word8)
+  writeByte SCX    (0x00 :: Word8)
+  writeByte LYC    (0x00 :: Word8)
+  writeByte BGP    (0xFC :: Word8)
+  writeByte OBP0   (0xFF :: Word8)
+  writeByte OBP1   (0xFF :: Word8)
+  writeByte WY     (0x00 :: Word8)
+  writeByte WX     (0x00 :: Word8)
+  writeByte IE     (0x00 :: Word8)
+  writeByte IF     (0x00 :: Word8)
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -414,7 +410,7 @@ inc8 op value =
 
 -- | Decode an instruction and advance the PC.
 {-# INLINE decodeAndAdvancePC #-}
-decodeAndAdvancePC :: UsesCPU env m => Decode a -> ReaderT env m a
+decodeAndAdvancePC :: HasCPU env => Decode a -> ReaderT env IO a
 decodeAndAdvancePC action = do
   pc       <- readPC
   (r, pc') <- runDecode pc action
@@ -423,19 +419,11 @@ decodeAndAdvancePC action = do
 
 -- | Decode an instruction.
 {-# INLINE decodeOnly #-}
-decodeOnly :: UsesCPU env m => Decode a -> ReaderT env m a
+decodeOnly :: HasCPU env => Decode a -> ReaderT env IO a
 decodeOnly action = do
   pc     <- readPC
   (r, _) <- runDecode pc action
   pure r
-
--- | IE register
-pattern IE :: Word16
-pattern IE = 0xFFFF
-
--- | IF register
-pattern IF :: Word16
-pattern IF = 0xFF0F
 
 interruptVector :: Int -> Word16
 interruptVector 0 = 0x40
@@ -447,7 +435,7 @@ interruptVector n = error $ "Invalid interrupt vector " ++ show n
 
 -- | Get all of the pending interrupts that are ready to service.
 {-# INLINE pendingEnabledInterrupts #-}
-pendingEnabledInterrupts :: UsesCPU env m => ReaderT env m Word8
+pendingEnabledInterrupts :: HasCPU env => ReaderT env IO Word8
 pendingEnabledInterrupts = do
   interrupt <- readByte IF
   enabled   <- readByte IE
@@ -460,12 +448,12 @@ getNextInterrupt = countTrailingZeros
 
 -- | Raise an interrupt.
 {-# INLINE raiseInterrupt #-}
-raiseInterrupt :: UsesMemory env m => Int -> ReaderT env m ()
+raiseInterrupt :: HasMemory env => Int -> ReaderT env IO ()
 raiseInterrupt interrupt = writeByte IF =<< (`setBit` interrupt) <$> readByte IF
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
-cpuStep :: UsesCPU env m => ReaderT env m BusEvent
+cpuStep :: HasCPU env => ReaderT env IO BusEvent
 cpuStep = do
   -- Check if we have an interrupt
   interrupts <- pendingEnabledInterrupts
@@ -488,7 +476,7 @@ cpuStep = do
 
 -- | Execute a single instruction.
 {-# INLINABLE executeInstruction #-}
-executeInstruction :: UsesCPU env m => Instruction -> ReaderT env m BusEvent
+executeInstruction :: HasCPU env => Instruction -> ReaderT env IO BusEvent
 executeInstruction instruction = case instruction of
   -- LD r8 \<r8|im8|(HL)\>
   LD_R8 r8 o8 -> do
@@ -912,7 +900,7 @@ executeInstruction instruction = case instruction of
     let op = if isFlagSet flagN flags then OpSub else OpAdd
     let (ir, flags') =
           if a .&. 0x0F > 9 || isFlagSet flagH flags then adder8 op a 0x06 False else (a, flags)
-    let (r, flagsFinal) = if ir `shiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
+    let (r, flagsFinal) = if ir `unsafeShiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
           then adder8 op ir 0x60 False
           else (ir, flags)
 
@@ -962,7 +950,7 @@ executeInstruction instruction = case instruction of
     error $ "Invalid instruction " ++ formatHex w8 ++ " at " ++ formatHex (pc - 1)
 
 {-# INLINE doCall #-}
-doCall :: UsesCPU env m => Word16 -> Int -> ReaderT env m BusEvent
+doCall :: HasCPU env => Word16 -> Int -> ReaderT env IO BusEvent
 doCall w16 numberOfClocks = do
   sp <- readR16 RegSP
   let sp' = sp - 2
@@ -973,7 +961,7 @@ doCall w16 numberOfClocks = do
   pure $ BusEvent [sp', sp' + 1] numberOfClocks
 
 {-# INLINE doRet #-}
-doRet :: UsesCPU env m => Int -> ReaderT env m BusEvent
+doRet :: HasCPU env => Int -> ReaderT env IO BusEvent
 doRet numberOfClocks = do
   sp  <- readR16 RegSP
   pcL <- fromIntegral <$> readByte sp

@@ -25,6 +25,8 @@ import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
 import           GBC.Bus
+import           GBC.Keypad
+import           GBC.Timer
 import           GBC.CPU
 import           GBC.Decode
 import           GBC.Graphics
@@ -63,41 +65,71 @@ data Command = ShowHeader
 -- | The current state of the debugger.
 data DebugState = DebugState {
     bus :: !BusState
+  , memory :: !Memory
+  , cpu :: !CPUState
+  , graphicsState :: !(IORef GraphicsState)
+  , graphicsSync :: !GraphicsSync
+  , lcdEnabled :: !(IORef Bool)
+  , keypadState :: !KeypadState
+  , timerState :: !TimerState
   , romFile :: !FilePath
   , codeMap :: !(IORef SymbolTable)
   , breakpoints :: !BreakpointTable
 }
 
-instance HasBusState DebugState where
+instance HasMemory DebugState where
+  {-# INLINE forMemory #-}
+  forMemory = memory
+
+instance HasCPU DebugState where
+  {-# INLINE forCPUState #-}
+  forCPUState = cpu
+
+instance HasKeypad DebugState where
+  {-# INLINE forKeypadState #-}
+  forKeypadState = keypadState
+
+instance HasTimer DebugState where
+  {-# INLINE forTimerState #-}
+  forTimerState = timerState
+
+instance HasGraphics DebugState where
+  {-# INLINE forGraphicsState #-}
+  forGraphicsState = graphicsState
+  {-# INLINE forGraphicsSync #-}
+  forGraphicsSync = graphicsSync
+  {-# INLINE forLCDEnabled #-}
+  forLCDEnabled = lcdEnabled
+
+instance HasBus DebugState where
   {-# INLINE forBusState #-}
   forBusState = bus
 
-instance HasDebugState DebugState where
-  {-# INLINE forDebugState #-}
-  forDebugState = id
-
-class HasDebugState env where
-  forDebugState :: env -> DebugState
-
-type UsesDebug env m = (UsesBus env m, HasDebugState env)
+type MonadDebug a = ReaderT DebugState IO a
 
 -- | Initialise the debugger.
 initDebug :: FilePath -> CPUState -> Memory -> GraphicsSync -> IO DebugState
-initDebug thisROMFile cpuState mem sync = do
-  busState <- initBusState cpuState mem sync
-  DebugState busState thisROMFile <$> (newIORef =<< initMap thisROMFile) <*> initBreakpointTable
+initDebug romFile cpu memory graphicsSync = do
+  codeMap       <- newIORef =<< initMap romFile
+  breakpoints   <- initBreakpointTable
+  bus           <- initBusState
+  graphicsState <- newIORef initGraphics
+  keypadState   <- initKeypadState
+  lcdEnabled    <- newIORef True
+  timerState    <- initTimerState
+  pure DebugState { .. }
 
-getCodeMap :: UsesDebug env m => ReaderT env m SymbolTable
-getCodeMap = liftIO . readIORef =<< codeMap <$> asks forDebugState
+getCodeMap :: MonadDebug SymbolTable
+getCodeMap = liftIO . readIORef =<< asks codeMap
 
-setCodeMap :: UsesDebug env m => SymbolTable -> ReaderT env m ()
-setCodeMap value = liftIO . (`writeIORef` value) =<< codeMap <$> asks forDebugState
+setCodeMap :: SymbolTable -> MonadDebug ()
+setCodeMap value = liftIO . (`writeIORef` value) =<< asks codeMap
 
 -- | Create a function to decorate disassembly dumps. Adds symbols to indicate
 -- breakpoints, PC and other information.
-makeDecorator :: UsesDebug env m => ReaderT env m (Word16 -> IO String)
+makeDecorator :: MonadDebug (Word16 -> IO String)
 makeDecorator = do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   pc              <- readPC
   pure $ \addr -> do
     bp <- getBreakpoint breakpoints addr <&> \case
@@ -108,14 +140,14 @@ makeDecorator = do
 
 -- | A condition to check before executing the next instruction. Break if the
 -- condition is True.
-type BreakPreCondition env m = ReaderT env m Bool
+type BreakPreCondition = MonadDebug Bool
 
 -- | A condition to check after executing the next instruction. Break if the
 -- condition is True.
-type BreakPostCondition env m = BusEvent -> ReaderT env m Bool
+type BreakPostCondition = BusEvent -> MonadDebug Bool
 
 -- | Break after a certain number of instructions have been executed.
-breakOnCountOf :: MonadIO m => Int -> ReaderT env m (BreakPreCondition env m)
+breakOnCountOf :: Int -> MonadDebug BreakPreCondition
 breakOnCountOf n0 = do
   counter <- liftIO (newIORef n0)
   pure . liftIO $ do
@@ -127,17 +159,17 @@ breakOnCountOf n0 = do
         pure False
 
 -- | Break when breakpoints are triggered.
-breakOnBreakpoints :: UsesDebug env m => ReaderT env m (BreakPostCondition env m)
+breakOnBreakpoints :: MonadDebug BreakPostCondition
 breakOnBreakpoints = do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   pure (const (shouldBreak breakpoints))
 
 -- | Break when the PC equals a certain value.
-breakOnPC :: UsesCPU env m => Word16 -> BreakPostCondition env m
+breakOnPC :: Word16 -> BreakPostCondition
 breakOnPC pc = const ((pc ==) <$> readPC)
 
 -- | Break when a RET instruction is executed with the current stack pointer.
-breakOnRet :: UsesCPU env m => Word16 -> BreakPreCondition env m
+breakOnRet :: Word16 -> BreakPreCondition
 breakOnRet originalSP = do
   sp          <- readR16 RegSP
   instruction <- decodeOnly decode
@@ -150,8 +182,7 @@ breakOnRet originalSP = do
     _    -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.
-doRun
-  :: UsesBus env m => [BreakPreCondition env m] -> [BreakPostCondition env m] -> ReaderT env m Int
+doRun :: [BreakPreCondition] -> [BreakPostCondition] -> MonadDebug Int
 doRun preConditions postConditions = clearBreakFlag >> go 0
  where
   go !ticks = do
@@ -166,14 +197,14 @@ doRun preConditions postConditions = clearBreakFlag >> go 0
         if doPostBreak || breakFlag then pure ticks' else go ticks'
 
 -- | Disassemble the next 4 instructions at the current PC.
-disassembleAtPC :: UsesDebug env m => ReaderT env m ()
+disassembleAtPC :: MonadDebug ()
 disassembleAtPC = do
   symbols   <- getCodeMap
   decorator <- makeDecorator
   pc        <- readPC
   dumpDisassembly decorator symbols pc 4
 
-withAddress :: UsesDebug env m => MemAddress -> (Word16 -> ReaderT env m ()) -> ReaderT env m ()
+withAddress :: MemAddress -> (Word16 -> MonadDebug ()) -> MonadDebug ()
 withAddress (ConstAddress addr ) action = action addr
 withAddress (LabelAddress label) action = do
   symbols <- getCodeMap
@@ -188,7 +219,7 @@ reportingClockStats action = do
   t1     <- SDL.ticks
   let duration       = t1 - t0
   let expectedCycles = (4194304.0 * fromIntegral duration) / 1000.0 :: Double
-  let percentSpeed   = (fromIntegral cycles / expectedCycles) * 100.0
+  let percentSpeed = (fromIntegral cycles / expectedCycles) * 100.0
 
   liftIO $ do
     putStrLn (show cycles ++ " cycles in " ++ show duration ++ "ms")
@@ -196,8 +227,7 @@ reportingClockStats action = do
     putStrLn ("Relative to expected clock " ++ showFFloat (Just 2) percentSpeed "" ++ "% speed")
 
 -- | Execute a debugger command.
-{-# SPECIALIZE doCommand :: Command -> ReaderT DebugState IO () #-}
-doCommand :: UsesDebug env m => Command -> ReaderT env m ()
+doCommand :: Command -> MonadDebug ()
 doCommand ShowHeader = do
   mem <- asks forMemory
   liftIO (dumpHeader (getROMHeader mem))
@@ -223,7 +253,7 @@ doCommand StepOut = do
   sp             <- readR16 RegSP
   postConditions <- sequence [breakOnBreakpoints]
   reportingClockStats (doRun [breakOnRet sp] postConditions)
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   wasBreakpoint   <- shouldBreak breakpoints
   unless wasBreakpoint (void busStep)
   disassembleAtPC
@@ -240,28 +270,28 @@ doCommand (Poke8   addr value) = withAddress addr $ \actualAddr -> writeByte act
 doCommand (PokeR8  reg  value) = writeR8 reg value
 doCommand (PokeR16 reg  value) = writeR16 reg value
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   liftIO (setBreakpoint breakpoints breakAddr True)
 doCommand (DeleteBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   liftIO (clearBreakpoint breakpoints breakAddr)
 doCommand (DisableBreakpiont addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   liftIO (setBreakpoint breakpoints breakAddr False)
 doCommand ListBreakpoints = do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   liftIO $ do
     allBreakpoints <- listBreakpoints breakpoints
     when (null allBreakpoints) $ putStrLn "No breakpoints set"
     for_ allBreakpoints
       $ \(addr, enabled) -> putStrLn (formatHex addr ++ if not enabled then " (disabled)" else "")
 doCommand (AddSymbol symbol value) = do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   codeMap'        <- addToMap (symbol, value) <$> getCodeMap
   liftIO (saveMap (mapFileName romFile) codeMap')
   setCodeMap codeMap'
 doCommand (DeleteSymbol symbol) = do
-  DebugState {..} <- asks forDebugState
+  DebugState {..} <- ask
   codeMap'        <- removeFromMap symbol <$> getCodeMap
   liftIO (saveMap (mapFileName romFile) codeMap')
   setCodeMap codeMap'

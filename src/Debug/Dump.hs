@@ -85,7 +85,7 @@ formatByteCount b | b < 1024        = show b
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
 dumpDisassembly
-  :: UsesMemory env m => (Word16 -> IO String) -> SymbolTable -> Word16 -> Int -> ReaderT env m ()
+  :: HasMemory env => (Word16 -> IO String) -> SymbolTable -> Word16 -> Int -> ReaderT env IO ()
 dumpDisassembly decorator symbolTable base n = do
   instructions <- decodeN base n
   for_ instructions $ \(addr, instruction) -> do
@@ -105,7 +105,7 @@ dumpDisassembly decorator symbolTable base n = do
   extraInfo addr (JRCC _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
   extraInfo _    _        = ""
 
-dumpMem :: UsesMemory env m => Word16 -> ReaderT env m ()
+dumpMem :: HasMemory env => Word16 -> ReaderT env IO ()
 dumpMem base = for_ [0 .. 15]
   $ \line -> let offset = base + line * 16 in liftIO . hexDump offset =<< readChunk offset 16
 

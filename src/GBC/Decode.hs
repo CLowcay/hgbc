@@ -17,18 +17,18 @@ import           Data.Word
 import           GBC.ISA
 import           GBC.Memory
 
-type Decode a = ReaderT Memory (StateT Word16 IO) a
+type Decode a = StateT Word16 (ReaderT Memory IO) a
 
 {-# INLINE runDecode #-}
-runDecode :: UsesMemory env m => Word16 -> Decode a -> ReaderT env m (a, Word16)
+runDecode :: HasMemory env => Word16 -> Decode a -> ReaderT env IO (a, Word16)
 runDecode addr computation = do
   mem <- asks forMemory
-  liftIO $ runStateT (runReaderT computation mem) addr
+  liftIO $ runReaderT (runStateT computation addr) mem
 
 table :: Array Word8 (Decode Instruction)
 table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
  where
-  doDecode x = (x, decodeBytes (x `shiftR` 6 .&. 0x03) (x `shiftR` 3 .&. 0x07) (x .&. 0x07))
+  doDecode x = (x, decodeBytes (x `unsafeShiftR` 6 .&. 0x03) (x `unsafeShiftR` 3 .&. 0x07) (x .&. 0x07))
   decodeBytes 0 0 0 = pure NOP
   decodeBytes 0 1 0 = LDI16I_SP <$> nextWord
   decodeBytes 0 2 0 = do
@@ -91,7 +91,7 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   decodeBytes 3 6  3  = pure $ DI
   decodeBytes 3 7  3  = pure $ EI
   decodeBytes 3 cc 4  = if cc .&. 0x04 /= 0
-    then pure $ INVALID (0o304 .|. cc `shiftL` 3)
+    then pure $ INVALID (0o304 .|. cc `unsafeShiftL` 3)
     else CALLCC (conditionCode cc) <$> nextWord
   decodeBytes 3 1  5 = CALL <$> nextWord
   decodeBytes 3 3  5 = pure $ INVALID 0o335
@@ -128,9 +128,9 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
       (3, b, r) -> SET b . SmallR8 $ register r
       _         -> INVALID b1
 
-  decodeBytes a b c = pure . INVALID $ (a `shiftL` 6) .|. (b `shiftL` 3) .|. c
+  decodeBytes a b c = pure . INVALID $ (a `unsafeShiftL` 6) .|. (b `unsafeShiftL` 3) .|. c
 
-  splitByte x = (x `shiftR` 6 .&. 0x03, x `shiftR` 3 .&. 0x07, x .&. 0x07)
+  splitByte x = (x `unsafeShiftR` 6 .&. 0x03, x `unsafeShiftR` 3 .&. 0x07, x .&. 0x07)
   register 0o0 = RegB
   register 0o1 = RegC
   register 0o2 = RegD
@@ -160,7 +160,7 @@ table = array (0, 0xFF) $ doDecode <$> [0 .. 0xFF]
   aluOp x = error $ "invalid ALU operation code " ++ show x
 
 {-# INLINABLE decodeN #-}
-decodeN :: forall env m . UsesMemory env m => Word16 -> Int -> ReaderT env m [(Word16, Instruction)]
+decodeN :: HasMemory env => Word16 -> Int -> ReaderT env IO [(Word16, Instruction)]
 decodeN base = fmap fst . runDecode base . doDecode
  where
   doDecode :: Int -> Decode [(Word16, Instruction)]
@@ -179,14 +179,14 @@ decode = do
 nextByte :: Decode Word8
 nextByte = do
   addr <- get
-  r    <- readByte addr
+  r    <- lift (readByte addr)
   modify (+ 1)
   pure r
 
 nextWord :: Decode Word16
 nextWord = do
   addr <- get
-  l    <- fromIntegral <$> readByte addr
-  h    <- fromIntegral <$> readByte (addr + 1)
+  l    <- fromIntegral <$> lift (readByte addr)
+  h    <- fromIntegral <$> lift (readByte (addr + 1))
   modify (+ 2)
   pure $ (h `unsafeShiftL` 8) .|. l

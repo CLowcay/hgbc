@@ -1,5 +1,3 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -7,7 +5,6 @@ module GBC.Memory
   ( Memory
   , VideoBuffers(..)
   , HasMemory(..)
-  , UsesMemory
   , initMemory
   , getROMHeader
   , dmaToOAM
@@ -49,9 +46,6 @@ instance HasMemory Memory where
   {-# INLINE forMemory #-}
   forMemory = id
 
--- | Constraints for monads that can access memory.
-type UsesMemory env m = (MonadIO m, HasMemory env)
-
 -- | The initial memory state.
 initMemory :: ROM -> VideoBuffers -> IO Memory
 initMemory (ROM memRom) videoBuffer = do
@@ -64,19 +58,19 @@ getROMHeader Memory {..} = extractHeader $ ROM memRom
 
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.
-{-# INLINABLE  dmaToOAM #-}
-dmaToOAM :: UsesMemory env m => Word16 -> ReaderT env m ()
+{-# INLINE dmaToOAM #-}
+dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
-  liftIO $ case source .&. 0xE000 of
-    0x0000 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    0x2000 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    0x4000 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    0x6000 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    0x8000 -> copyOAM (oam videoBuffer) (vram videoBuffer `plusPtr` (fromIntegral source - 0x8000))
-    0xA000 -> withForeignPtr memRam
+  liftIO $ case source `unsafeShiftR` 13 of
+    0 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
+    1 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
+    2 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
+    3 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
+    4 -> copyOAM (oam videoBuffer) (vram videoBuffer `plusPtr` (fromIntegral source - 0x8000))
+    5 -> withForeignPtr memRam
       $ \ram -> copyOAM (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000))
-    0xC000 -> withForeignPtr memRam
+    6 -> withForeignPtr memRam
       $ \ram -> copyOAM (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000))
     _ -> error ("Invalid source for DMA " ++ show source)
  where
@@ -85,22 +79,24 @@ dmaToOAM source = do
     for_ [0 .. 159] $ \off -> pokeElemOff to off . fromIntegral =<< peekElemOff from off
 
 -- | Read a byte from memory.
-{-# INLINE readByte #-}
-readByte :: UsesMemory env m => Word16 -> ReaderT env m Word8
+{-# INLINABLE readByte #-}
+readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
-  case addr .&. 0xE000 of
-    0x0000 -> pure (memRom `B.index` romOffset)
-    0x2000 -> pure (memRom `B.index` romOffset)
-    0x4000 -> pure (memRom `B.index` romOffset)
-    0x6000 -> pure (memRom `B.index` romOffset)
-    0x8000 -> liftIO (peekElemOff (vram videoBuffer) ramOffset)
-    0xA000 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
-    0xC000 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
-    0xE000 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
+  case addr `unsafeShiftR` 13 of
+    0 -> pure (memRom `B.unsafeIndex` romOffset)
+    1 -> pure (memRom `B.unsafeIndex` romOffset)
+    2 -> pure (memRom `B.unsafeIndex` romOffset)
+    3 -> pure (memRom `B.unsafeIndex` romOffset)
+    4 -> liftIO (peekElemOff (vram videoBuffer) ramOffset)
+    5 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
+    6 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
+    7 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
       then fromIntegral <$> peekElemOff (oam videoBuffer) oamOffset
       else if addr >= 0xFF40 && addr <= 0xFF4B
-        then fromIntegral <$> peekElemOff (registers videoBuffer) registerOffset
+        then do
+          value <- peekElemOff (registers videoBuffer) registerOffset
+          pure (fromIntegral value)
         else withForeignPtr memRam (`peekElemOff` ramOffset)
     x -> error ("Impossible coarse read address" ++ show x)
  where
@@ -109,26 +105,26 @@ readByte addr = do
   oamOffset      = fromIntegral addr - 0xFE00
   registerOffset = fromIntegral addr - 0xFF40
 
-{-# INLINE writeWord #-}
-writeWord :: UsesMemory env m => Word16 -> Word16 -> ReaderT env m ()
+{-# INLINABLE writeWord #-}
+writeWord :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
 writeWord addr value = do
   writeByte addr       (fromIntegral (value .&. 0xFF))
-  writeByte (addr + 1) (fromIntegral (value `shiftR` 8))
+  writeByte (addr + 1) (fromIntegral (value `unsafeShiftR` 8))
 
 -- | Write to memory.
-{-# INLINE writeByte #-}
-writeByte :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m ()
+{-# INLINABLE writeByte #-}
+writeByte :: HasMemory env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
   Memory {..} <- asks forMemory
-  case addr .&. 0xE000 of
-    0x0000 -> pure ()
-    0x2000 -> pure ()
-    0x4000 -> pure ()
-    0x6000 -> pure ()
-    0x8000 -> liftIO (pokeElemOff (vram videoBuffer) ramOffset value)
-    0xA000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
-    0xC000 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
-    0xE000 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
+  case addr `unsafeShiftR` 13 of
+    0 -> pure ()
+    1 -> pure ()
+    2 -> pure ()
+    3 -> pure ()
+    4 -> liftIO (pokeElemOff (vram videoBuffer) ramOffset value)
+    5 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
+    6 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
+    7 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
       then pokeElemOff (oam videoBuffer) oamOffset (fromIntegral value)
       else if addr >= 0xFF40 && addr <= 0xFF4B
         then pokeElemOff (registers videoBuffer) registerOffset (fromIntegral value)
@@ -141,5 +137,5 @@ writeByte addr value = do
 
 -- | Read a chunk of memory.
 {-# INLINABLE readChunk #-}
-readChunk :: (UsesMemory env m) => Word16 -> Int -> ReaderT env m B.ByteString
+readChunk :: HasMemory env => Word16 -> Int -> ReaderT env IO B.ByteString
 readChunk base len = B.pack <$> traverse readByte [base .. base + fromIntegral len - 1]
