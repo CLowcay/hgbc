@@ -1,5 +1,4 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module GBC.GraphicsOutput
@@ -9,12 +8,12 @@ module GBC.GraphicsOutput
 where
 
 import           Control.Concurrent
-import           GBC.Memory
-import           Control.Monad.Reader
+import           Control.Monad
 import           Data.Int
 import           Data.StateVar
 import           Foreign.Ptr
 import           GBC.Graphics
+import           GBC.Memory
 import           GLUtils
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
@@ -22,7 +21,7 @@ import qualified SDL
 
 data WindowContext = WindowContext {
     window :: !SDL.Window
-  , queue :: !(MVar (Maybe Update))
+  , sync :: !GraphicsSync
   , glContext :: !SDL.GLContext
   , glState :: !GLState
 }
@@ -36,57 +35,49 @@ data GLState = GLState {
   , oamBox :: !VertexArrayObject
 }
 
-startOutput :: IO (MVar (Maybe Update), VideoBuffers, SDL.Window)
-startOutput = do
+startOutput :: GraphicsSync -> IO (VideoBuffers, SDL.Window)
+startOutput sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
-  window <- liftIO $ SDL.createWindow
+  window <- SDL.createWindow
     "Graphics output"
     SDL.defaultWindow { SDL.windowInitialSize     = SDL.V2 160 144
                       , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
                       }
 
-  queue        <- liftIO newEmptyMVar
   videoBuffers <- newEmptyMVar
 
-  void $ liftIO $ forkOS $ do
+  void $ forkOS $ do
     glContext <- SDL.glCreateContext window
     SDL.swapInterval $= SDL.SynchronizedUpdates
-    (glState, buffers) <- liftIO setUpOpenGL
+    (glState, buffers) <- setUpOpenGL
     putMVar videoBuffers buffers
 
-    runReaderT eventLoop WindowContext { .. }
+    eventLoop WindowContext { .. }
     SDL.destroyWindow window
 
   buffers <- takeMVar videoBuffers
-  pure (queue, buffers, window)
+  pure (buffers, window)
 
-eventLoop :: ReaderT WindowContext IO ()
-eventLoop = do
-  WindowContext {..} <- ask
-  mupdate            <- liftIO (readMVar queue)
-  let doneReadingVRAM = void (liftIO (takeMVar queue))
+eventLoop :: WindowContext -> IO ()
+eventLoop context@WindowContext {..} = do
+  line <- takeMVar (currentLine sync)
 
-  case mupdate of
-    Nothing                  -> doneReadingVRAM
-    Just (Update updateMode) -> do
-      case updateMode of
-        VBlank -> do
-          doneReadingVRAM
-          liftIO (SDL.glSwapWindow window)
-          glClear GL_DEPTH_BUFFER_BIT
-        ScanOAM -> do
-          useProgram (oamProgram glState)
-          bindVertexArrayObject (oamBox glState)
-          glDrawElementsInstanced GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr 40
-          doneReadingVRAM
-        ReadVRAM -> do
-          useProgram (bgProgram glState)
-          bindVertexArrayObject (bgScanline glState)
-          glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-          glFinish
-          doneReadingVRAM
-        _ -> doneReadingVRAM
-      eventLoop
+  useProgram (oamProgram glState)
+  bindVertexArrayObject (oamBox glState)
+  glDrawElementsInstanced GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr 40
+
+  useProgram (bgProgram glState)
+  bindVertexArrayObject (bgScanline glState)
+  glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+
+  glFinish
+  putMVar (hblankStart sync) ()
+
+  when (line == 143) $ do
+    SDL.glSwapWindow window
+    glClear GL_DEPTH_BUFFER_BIT
+
+  unless (line == 255) $ eventLoop context
 
 -- | Position of the scanline.
 position :: Attribute

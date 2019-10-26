@@ -57,6 +57,7 @@ testTimerStop :: Word8 -> Bool
 testTimerStop = (`testBit` 2)
 
 -- | Update the timer state.
+{-# INLINABLE updateTimer #-}
 updateTimer :: UsesTimer env m => Int -> ReaderT env m ()
 updateTimer advance = do
   -- Update the internal clock count

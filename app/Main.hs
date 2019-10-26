@@ -29,14 +29,15 @@ main = do
       putStrLn $ "Error validating ROM " ++ show romFile ++ ": " ++ err
       exitFailure
     Right rom -> do
-      (mainWindowSync, videoBuffers, mainWindow) <- startOutput
-      mem        <- initMemory rom videoBuffers
-      cpuState   <- initCPU
-      debugState <- initDebug romFile cpuState mem
-      runDebugger mainWindowSync mainWindow debugState
+      sync              <- newGraphicsSync
+      (videoBuffers, _) <- startOutput sync
+      mem               <- initMemory rom videoBuffers
+      cpuState          <- initCPU
+      debugState        <- initDebug romFile cpuState mem sync
+      runDebugger debugState
 
-runDebugger :: MVar (Maybe Update) -> SDL.Window -> DebugState -> IO ()
-runDebugger mainWindowSync mainWindow debugState = do
+runDebugger :: DebugState -> IO ()
+runDebugger debugState = do
   channel     <- newEmptyMVar
   commandDone <- newEmptyMVar
   hSetBuffering stdout NoBuffering
@@ -52,7 +53,5 @@ runDebugger mainWindowSync mainWindow debugState = do
               hFlush stdout
               putMVar commandDone ()
         commandRunner
-  void . forkIO $ flip runReaderT debugState $ do
-    registerWindow mainWindow mainWindowSync
-    commandRunner
+  void (forkIO (runReaderT commandRunner debugState))
   whileJust_ nextCommand $ \cmd -> putMVar channel cmd >> takeMVar commandDone

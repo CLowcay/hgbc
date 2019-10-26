@@ -64,6 +64,7 @@ getROMHeader Memory {..} = extractHeader $ ROM memRom
 
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.
+{-# INLINABLE  dmaToOAM #-}
 dmaToOAM :: UsesMemory env m => Word16 -> ReaderT env m ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory

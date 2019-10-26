@@ -13,7 +13,6 @@ module GBC.Bus
   , initBusState
   , isBreakFlagSet
   , clearBreakFlag
-  , registerWindow
   , busStep
   , handleEvents
   )
@@ -31,14 +30,13 @@ import           GBC.Keypad
 import           GBC.Memory
 import           SDL                           as SDL
 import           SDL.Orphans                    ( )
-import qualified Data.HashTable.IO             as H
 import           Data.Bits
 
 data BusState = BusState {
     cpu :: !CPUState
   , memory :: !Memory
   , graphics :: !(IORef GraphicsState)
-  , graphicsOutput :: !(H.BasicHashTable Window (MVar (Maybe Update)))
+  , graphicsSync :: !GraphicsSync
   , keypadState :: !(IORef Word8)
   , lastEventPollAt :: !(IORef Word32)
   , timerState :: !TimerState
@@ -47,6 +45,10 @@ data BusState = BusState {
 
 class HasBusState env where
   forBusState :: env -> BusState
+
+instance HasBusState BusState where
+  {-# INLINE forBusState #-}
+  forBusState = id
 
 instance HasBusState env => HasMemory env where
   {-# INLINE forMemory #-}
@@ -59,6 +61,7 @@ instance HasBusState env => HasCPUState env where
 instance HasBusState env => HasGraphicsState env where
   {-# INLINE forGraphicsState #-}
   forGraphicsState = graphics . forBusState
+  forGraphicsSync = graphicsSync . forBusState
 
 instance HasBusState env => HasKeypadState env where
   {-# INLINE forKeypadState #-}
@@ -75,41 +78,32 @@ pollDelay :: Word32
 pollDelay = 10
 
 -- | Create an initial bus state.
-initBusState :: CPUState -> Memory -> IO BusState
-initBusState cpuState mem =
+initBusState :: CPUState -> Memory -> GraphicsSync -> IO BusState
+initBusState cpuState mem sync =
   BusState cpuState mem
     <$> newIORef initGraphics
-    <*> H.new
+    <*> pure sync
     <*> initKeypadState
     <*> newIORef 0
     <*> newIORef 0
     <*> newIORef False
 
 -- | Check if the debug break flag is set.
+{-# INLINABLE isBreakFlagSet #-}
 isBreakFlagSet :: UsesBus env m => ReaderT env m Bool
 isBreakFlagSet = liftIO . readIORef . breakFlag =<< asks forBusState
 
 -- | Reset the debug break flag.
+{-# INLINABLE clearBreakFlag #-}
 clearBreakFlag :: UsesBus env m => ReaderT env m ()
 clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< asks forBusState
 
--- | Register a window to recieve updates from the graphics subsytem.
-registerWindow :: UsesBus env m => Window -> MVar (Maybe Update) -> ReaderT env m ()
-registerWindow window queue = do
-  windows <- graphicsOutput <$> asks forBusState
-  liftIO $ H.insert windows window queue
-
--- | Close a registred window.
-killWindow :: UsesBus env m => Window -> ReaderT env m ()
-killWindow window = do
-  windows <- graphicsOutput <$> asks forBusState
-  liftIO $ do
-    mvar <- H.lookup windows window
-    case mvar of
-      Nothing  -> pure ()
-      Just var -> do
-        putMVar var Nothing
-        H.delete windows window
+-- | Close all windows.
+{-# INLINABLE killWindows #-}
+killWindows :: UsesBus env m => ReaderT env m ()
+killWindows = do
+  sync <- graphicsSync <$> asks forBusState
+  liftIO (putMVar (currentLine sync) 255)
 
 pattern ReleasedBreakKey :: SDL.EventPayload
 pattern ReleasedBreakKey <- SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _))
@@ -121,7 +115,7 @@ handleEvents = do
   events <- SDL.pollEvents
   keypadHandleUserEvents events
   for_ (eventPayload <$> events) $ \case
-    (SDL.WindowClosedEvent d) -> killWindow (windowClosedEventWindow d)
+    (SDL.WindowClosedEvent _) -> killWindows
     ReleasedBreakKey          -> liftIO . flip writeIORef True . breakFlag =<< asks forBusState
     _                         -> pure ()
 
@@ -137,7 +131,7 @@ doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
 
 -- | Execute a single step of the emulation.
 {-# INLINABLE busStep #-}
-busStep :: UsesBus env m => ReaderT env m (BusEvent, Maybe Update)
+busStep :: UsesBus env m => ReaderT env m BusEvent
 busStep = do
   busEvent <- cpuStep
   keypadHandleBusEvent busEvent
@@ -150,8 +144,5 @@ busStep = do
     handleEvents
     liftIO $ writeIORef lastEventPollAt =<< ticks
 
-  graphicsUpdate <- graphicsStep busEvent
-  case graphicsUpdate of
-    Nothing     -> pure ()
-    Just update -> liftIO $ traverse_ ((`putMVar` Just update) . snd) =<< H.toList graphicsOutput
-  pure (busEvent, graphicsUpdate)
+  graphicsStep busEvent
+  pure busEvent

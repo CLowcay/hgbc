@@ -50,7 +50,10 @@ library:
     - -Wincomplete-record-updates
     - -Wredundant-constraints
     - -Wpartial-fields
-    # - -Wall-missed-specialisations
+    - -fexpose-all-unfoldings
+    - -fspecialise-aggressively
+    - -fcross-module-specialise
+    - -Wall-missed-specialisations
 
 executables:
   hgbc:

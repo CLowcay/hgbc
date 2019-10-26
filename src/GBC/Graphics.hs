@@ -1,18 +1,17 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ConstraintKinds #-}
 
 module GBC.Graphics
   ( GraphicsState(..)
+  , GraphicsSync(..)
   , HasGraphicsState(..)
   , UsesGraphics
   , Mode(..)
-  , Update(..)
   , initGraphics
+  , newGraphicsSync
   , graphicsStep
-  , decodeVRAM
   , pattern LCDC
   , pattern STAT
   , pattern LY
@@ -37,9 +36,9 @@ where
 
 import           Common
 import           Control.Monad.Reader
+import           Control.Concurrent.MVar
 import           Data.Bits
 import           Data.IORef
-import           Data.Traversable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Memory
@@ -55,17 +54,31 @@ data GraphicsState = GraphicsState {
   , lineClocksRemaining :: !Int
 } deriving Eq
 
+-- | Graphics synchronization objects. It's a pair of MVars. The CPU thread
+-- takes from start and puts to currentLine. The graphics output thread takes
+-- from currentLine and puts to start. This keeps the threads moving in
+-- lockstep.
+data GraphicsSync = GraphicsSync {
+    hblankStart :: !(MVar ())        -- Graphics output puts a () here when it is safe to enter HBlank.
+  , currentLine :: !(MVar Word8)     -- We put a line number here before we enter ScanOAM.
+}
+
 -- | The initial graphics state.
 initGraphics :: GraphicsState
 initGraphics = GraphicsState VBlank 153 0 0
 
+-- | Make a new Graphics sync object.
+newGraphicsSync :: IO GraphicsSync
+newGraphicsSync = do
+  hblankStart <- newEmptyMVar
+  currentLine <- newEmptyMVar
+  pure GraphicsSync {..}
+
 class HasGraphicsState env where
   forGraphicsState :: env -> IORef GraphicsState
+  forGraphicsSync :: env -> GraphicsSync
 
 type UsesGraphics env m = (UsesMemory env m, HasGraphicsState env)
-
--- | Notification that the graphics state has changed.
-newtype Update = Update Mode deriving (Eq, Ord, Show)
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -159,7 +172,7 @@ interruptHBlank = 3
 maskMode :: Word8
 maskMode = 0x03
 
-{-# INLINABLE testGraphicsFlag #-}
+{-# INLINE testGraphicsFlag #-}
 testGraphicsFlag :: UsesMemory env m => Word16 -> Word8 -> ReaderT env m Bool
 testGraphicsFlag reg flag = isFlagSet flag <$> readByte reg
 
@@ -178,25 +191,14 @@ modeBits VBlank   = 1
 modeBits ScanOAM  = 2
 modeBits ReadVRAM = 3
 
-{-# INLINABLE decodeVRAM #-}
-decodeVRAM :: UsesMemory env m => ReaderT env m [[Word8]]
-decodeVRAM = for [ (x, y, yi) | yi <- [0 .. 23], y <- [0 .. 7], x <- [0 .. 15] ] $ \(x, y, yi) ->
-  do
-    (l, h) <- readWord $ x * 16 + y * 2 + yi * 256
-    pure $ zipWith combine (decodeByte l) (decodeByte h)
- where
-  decodeByte :: Word8 -> [Word8]
-  decodeByte byte = (\t -> if byte `testBit` t then 1 else 0) <$> [7, 6 .. 0]
-  combine byteL byteH = 64 * (byteL .|. (byteH `shiftL` 1))
-  readWord offset = (,) <$> readByte (0x8000 + offset) <*> readByte (0x8001 + offset)
-
 {-# INLINABLE graphicsStep #-}
-graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m (Maybe Update)
+graphicsStep :: UsesGraphics env m => BusEvent -> ReaderT env m ()
 graphicsStep (BusEvent newWrites clocks) = do
-  graphicsState               <- asks forGraphicsState
+  graphicsState      <- asks forGraphicsState
+  graphicsSync       <- asks forGraphicsSync
   GraphicsState {..} <- liftIO (readIORef graphicsState)
 
-  lcdEnabled                  <- testGraphicsFlag LCDC flagLCDEnable
+  lcdEnabled         <- testGraphicsFlag LCDC flagLCDEnable
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
 
@@ -204,32 +206,32 @@ graphicsStep (BusEvent newWrites clocks) = do
     stat <- readByte STAT
     writeByte STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
 
-  if not lcdEnabled
-    then pure Nothing
-    else do
-      when (lcdLine /= line') $ writeByte LY line'
+  when lcdEnabled $ do
+    when (lcdLine /= line') $ writeByte LY line'
 
-      liftIO . writeIORef graphicsState $ GraphicsState
-        { lcdMode             = mode'
-        , clocksRemaining     = remaining'
-        , lcdLine             = line'
-        , lineClocksRemaining = lineClocksRemaining'
-        }
+    liftIO . writeIORef graphicsState $ GraphicsState { lcdMode             = mode'
+                                                      , clocksRemaining     = remaining'
+                                                      , lcdLine             = line'
+                                                      , lineClocksRemaining = lineClocksRemaining'
+                                                      }
 
-      if lcdMode == mode' then pure Nothing else do
-          stat <- readByte STAT
+    when (lcdMode /= mode') $ do
+      stat <- readByte STAT
 
-          -- Update STAT register
-          lyc  <- readByte LYC
-          let matchFlag = if lyc == line' then bit matchBit else 0
-          writeByte STAT
-            $ modifyBits (bit matchBit .|. maskMode) (modeBits mode' .|. matchFlag) stat
+      -- Update STAT register
+      lyc  <- readByte LYC
+      let matchFlag = if lyc == line' then bit matchBit else 0
+      writeByte STAT (modifyBits (bit matchBit .|. maskMode) (modeBits mode' .|. matchFlag) stat)
 
-          -- Raise interrupts
-          when (stat `testBit` interruptCoincidence && lyc == line') $ raiseInterrupt 1
-          when (stat `testBit` interruptHBlank && mode' == HBlank) $ raiseInterrupt 1
-          when (stat `testBit` interruptVBlank && mode' == VBlank) $ raiseInterrupt 1
-          when (stat `testBit` interruptOAM && mode' == ScanOAM) $ raiseInterrupt 1
-          when (mode' == VBlank) $ raiseInterrupt 0
+      -- If we're entering ReadVRAM mode, then signal the graphics output.
+      when (mode' == ReadVRAM) $ liftIO (putMVar (currentLine graphicsSync) line')
 
-          pure . Just $ Update mode'
+      -- Raise interrupts
+      when (stat `testBit` interruptCoincidence && lyc == line') (raiseInterrupt 1)
+      when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
+      when (stat `testBit` interruptVBlank && mode' == VBlank) (raiseInterrupt 1)
+      when (stat `testBit` interruptOAM && mode' == ScanOAM) (raiseInterrupt 1)
+      when (mode' == VBlank) (raiseInterrupt 0)
+
+      -- If we're entering HBlank mode, then sync
+      when (mode' == HBlank) $ liftIO (takeMVar (hblankStart graphicsSync))

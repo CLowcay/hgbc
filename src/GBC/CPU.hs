@@ -239,13 +239,13 @@ readOperand8 (I8 value   ) = pure value
 readOperand8 HLI           = readByte =<< readR16 RegHL
 
 -- | Read from a 'SmallOperand8'.  Returns a list of addresses that were read from.
-{-# INLINABLE readSmallOperand8 #-}
+{-# INLINE readSmallOperand8 #-}
 readSmallOperand8 :: UsesCPU env m => SmallOperand8 -> ReaderT env m Word8
 readSmallOperand8 (SmallR8 register) = readR8 register
 readSmallOperand8 SmallHLI           = readOperand8 HLI
 
 -- | Write to a 'SmallOperand8'.  Returns a list of addresses that were written to.
-{-# INLINABLE writeSmallOperand8 #-}
+{-# INLINE writeSmallOperand8 #-}
 writeSmallOperand8 :: UsesCPU env m => SmallOperand8 -> Word8 -> ReaderT env m [Word16]
 writeSmallOperand8 (SmallR8 register) value = [] <$ writeR8 register value
 writeSmallOperand8 SmallHLI           value = do
@@ -266,14 +266,14 @@ flagIME :: Word16
 flagIME = 0x0100
 
 -- | Check if a flag is set.
-{-# INLINABLE testFlag #-}
+{-# INLINE testFlag #-}
 testFlag :: UsesCPU env m => Flag -> ReaderT env m Bool
 testFlag flag = do
   f <- readRegister offsetF
   pure $ f .&. flag /= 0
 
 -- | Check if a condition code is true.
-{-# INLINABLE testCondition #-}
+{-# INLINE testCondition #-}
 testCondition :: UsesCPU env m => ConditionCode -> ReaderT env m Bool
 testCondition CondNZ = not <$> testFlag flagZ
 testCondition CondZ  = testFlag flagZ
@@ -281,22 +281,22 @@ testCondition CondNC = not <$> testFlag flagCY
 testCondition CondC  = testFlag flagCY
 
 -- | Read the F register.
-{-# INLINABLE readF #-}
+{-# INLINE readF #-}
 readF :: UsesCPU env m => ReaderT env m Word8
 readF = readRegister offsetF
 
 -- | Write the F register.
-{-# INLINABLE writeF #-}
+{-# INLINE writeF #-}
 writeF :: UsesCPU env m => Word8 -> ReaderT env m ()
 writeF = writeRegister offsetF
 
 -- | Set all the flags.
-{-# INLINABLE setFlags #-}
+{-# INLINE setFlags #-}
 setFlags :: UsesCPU env m => Word8 -> ReaderT env m ()
 setFlags = setFlagsMask 0xF0
 
 -- | Set some flags.
-{-# INLINABLE setFlagsMask #-}
+{-# INLINE setFlagsMask #-}
 setFlagsMask
   :: UsesCPU env m
   => Word8 -- ^ bitmask containing flags to set.
@@ -307,21 +307,21 @@ setFlagsMask mask flags = do
   writeRegister offsetF $ (oldFlags .&. complement mask) .|. (flags .&. mask)
 
 -- | Set the master interrupt flag.
-{-# INLINABLE setIME #-}
+{-# INLINE setIME #-}
 setIME :: UsesCPU env m => ReaderT env m ()
 setIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .|. flagIME)
 
 -- | Clear the master interrupt flag.
-{-# INLINABLE clearIME #-}
+{-# INLINE clearIME #-}
 clearIME :: UsesCPU env m => ReaderT env m ()
 clearIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .&. complement flagIME)
 
 -- | Check the status of the interrupt flag.
-{-# INLINABLE testIME #-}
+{-# INLINE testIME #-}
 testIME :: UsesCPU env m => ReaderT env m Bool
 testIME = do
   ime <- readRegister offsetHidden
@@ -413,7 +413,7 @@ inc8 op value =
   in  (r, flags)
 
 -- | Decode an instruction and advance the PC.
-{-# INLINABLE decodeAndAdvancePC #-}
+{-# INLINE decodeAndAdvancePC #-}
 decodeAndAdvancePC :: UsesCPU env m => Decode a -> ReaderT env m a
 decodeAndAdvancePC action = do
   pc       <- readPC
@@ -422,7 +422,7 @@ decodeAndAdvancePC action = do
   pure r
 
 -- | Decode an instruction.
-{-# INLINABLE decodeOnly #-}
+{-# INLINE decodeOnly #-}
 decodeOnly :: UsesCPU env m => Decode a -> ReaderT env m a
 decodeOnly action = do
   pc     <- readPC
@@ -459,6 +459,7 @@ getNextInterrupt :: Word8 -> Int
 getNextInterrupt = countTrailingZeros
 
 -- | Raise an interrupt.
+{-# INLINE raiseInterrupt #-}
 raiseInterrupt :: UsesMemory env m => Int -> ReaderT env m ()
 raiseInterrupt interrupt = writeByte IF =<< (`setBit` interrupt) <$> readByte IF
 

@@ -49,13 +49,6 @@ module GLUtils
   , genTexture
   , bindTexture
 
-  -- * Synchronization
-  , Fence(..)
-  , SyncStatus(..)
-  , Timeout
-  , insertFence
-  , waitForFence
-
   -- * Programs
   , Program(..)
   , ShaderType(..)
@@ -91,7 +84,9 @@ class UniformAccess a where
   setUniform :: MonadIO m => GLint -> a -> m ()
 
 instance UniformAccess GLint where
+  {-# INLINE getUniform #-}
   getUniform program uniform = capture (glGetUniformiv program uniform)
+  {-# INLINE setUniform #-}
   setUniform = glUniform1i
 
 -- | Matrix types.
@@ -112,10 +107,12 @@ instance GLmatrix GLmatrix4 where
       pure (GLmatrix4 fptr)
 
 instance UniformAccess GLmatrix4 where
+  {-# INLINE getUniform #-}
   getUniform program uniform = do
     fptr <- liftIO (mallocForeignPtrArray 16)
     liftIO (withForeignPtr fptr (glGetUniformfv program uniform))
     pure (GLmatrix4 fptr)
+  {-# INLINE setUniform #-}
   setUniform uniform (GLmatrix4 fptr) =
     liftIO (withForeignPtr fptr (glUniformMatrix4fv uniform 1 GL_FALSE))
 
@@ -127,10 +124,12 @@ linkUniform (Program program) uniform = liftIO $ do
   pure (makeStateVar (getUniform program uniformLocation) (setUniform uniformLocation))
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
+{-# INLINABLE linkTextureBuffer #-}
 linkTextureBuffer :: MonadIO m => BufferObject -> m ()
 linkTextureBuffer (BufferObject buffer) = glTexBuffer GL_TEXTURE_BUFFER GL_R8UI buffer
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
+{-# INLINABLE linkTextureBufferRange #-}
 linkTextureBufferRange :: MonadIO m => BufferObject -> GLintptr -> GLsizeiptr -> m ()
 linkTextureBufferRange (BufferObject buffer) = glTexBufferRange GL_TEXTURE_BUFFER GL_R8UI buffer
 
@@ -331,32 +330,6 @@ genTexture = Texture <$> capture (glGenTextures 1)
 bindTexture :: MonadIO m => TextureTarget -> Texture -> m ()
 bindTexture target (Texture texture) = glBindTexture (toOpenGLEnum target) texture
 
--- | An OpenGL fence object.
-newtype Fence = Fence GLsync deriving (Eq, Show)
-
--- | Insert a fence into the GPU command pipeline.
-insertFence :: MonadIO m => m Fence
-insertFence = Fence <$> glFenceSync GL_SYNC_GPU_COMMANDS_COMPLETE 0
-
--- | Status of a fence following a wait operation.
-data SyncStatus = AlreadySignaled
-                | TimeoutExpired
-                | ConditionSatisfied
-                | WaitFailed
-                deriving (Eq, Ord, Show, Bounded, Enum)
-
-type Timeout = GLuint64
-waitForFence :: MonadIO m => Fence -> Timeout -> m SyncStatus
-waitForFence (Fence fence) timeout = do
-  status <- glClientWaitSync fence GL_SYNC_FLUSH_COMMANDS_BIT timeout
-  unless (status == GL_WAIT_FAILED) $ glDeleteSync fence
-  pure $ case status of
-    GL_ALREADY_SIGNALED    -> AlreadySignaled
-    GL_TIMEOUT_EXPIRED     -> TimeoutExpired
-    GL_CONDITION_SATISFIED -> ConditionSatisfied
-    GL_WAIT_FAILED         -> WaitFailed
-    code                   -> error ("Unknown sync wait result code " ++ show code)
-
 -- | A shader type.
 data ShaderType = ComputeShader
                 | VertexShader
@@ -421,6 +394,7 @@ compileShaders shaders = runResourceT $ do
     pure shader
 
 -- | Utility to deal with foreign functions that use pointers to return values.
+{-# INLINE capture #-}
 capture :: (Storable a, MonadIO m) => (Ptr a -> IO ()) -> m a
 capture action = liftIO . alloca $ \p -> do
   action p
