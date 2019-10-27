@@ -340,38 +340,38 @@ reset = do
   setIME
   writePC 0x150
 
-  writeByte TIMA   (0x00 :: Word8)
-  writeByte TMA    (0x00 :: Word8)
-  writeByte TAC    (0x00 :: Word8)
-  writeByte 0xFF10 (0x80 :: Word8)   -- NR10
-  writeByte 0xFF11 (0xBF :: Word8)   -- NR11
-  writeByte 0xFF12 (0xF3 :: Word8)   -- NR12
-  writeByte 0xFF14 (0xBF :: Word8)   -- NR14
-  writeByte 0xFF16 (0x3F :: Word8)   -- NR21
-  writeByte 0xFF17 (0x00 :: Word8)   -- NR22
-  writeByte 0xFF19 (0xBF :: Word8)   -- NR24
-  writeByte 0xFF1A (0x7F :: Word8)   -- NR30
-  writeByte 0xFF1B (0xFF :: Word8)   -- NR31
-  writeByte 0xFF1C (0x9F :: Word8)   -- NR32
-  writeByte 0xFF1E (0xBF :: Word8)   -- NR33
-  writeByte 0xFF20 (0xFF :: Word8)   -- NR41
-  writeByte 0xFF21 (0x00 :: Word8)   -- NR42
-  writeByte 0xFF22 (0x00 :: Word8)   -- NR43
-  writeByte 0xFF23 (0xBF :: Word8)   -- NR30
-  writeByte 0xFF24 (0x77 :: Word8)   -- NR50
-  writeByte 0xFF25 (0xF3 :: Word8)   -- NR51
-  writeByte 0xFF26 (0xF1 :: Word8)   -- NR52
-  writeByte LCDC   (0x91 :: Word8)
-  writeByte SCY    (0x00 :: Word8)
-  writeByte SCX    (0x00 :: Word8)
-  writeByte LYC    (0x00 :: Word8)
-  writeByte BGP    (0xFC :: Word8)
-  writeByte OBP0   (0xFF :: Word8)
-  writeByte OBP1   (0xFF :: Word8)
-  writeByte WY     (0x00 :: Word8)
-  writeByte WX     (0x00 :: Word8)
-  writeByte IE     (0x00 :: Word8)
-  writeByte IF     (0x00 :: Word8)
+  writeByte TIMA 0x00
+  writeByte TMA  0x00
+  writeByte TAC  0x00
+  writeByte NR10 0x80
+  writeByte NR11 0xBF
+  writeByte NR12 0xF3
+  writeByte NR14 0xBF
+  writeByte NR21 0x3F
+  writeByte NR22 0x00
+  writeByte NR24 0xBF
+  writeByte NR30 0x7F
+  writeByte NR31 0xFF
+  writeByte NR32 0x9F
+  writeByte NR33 0xBF
+  writeByte NR41 0xFF
+  writeByte NR42 0x00
+  writeByte NR43 0x00
+  writeByte NR30 0xBF
+  writeByte NR50 0x77
+  writeByte NR51 0xF3
+  writeByte NR52 0xF1
+  writeByte LCDC 0x91
+  writeByte SCY  0x00
+  writeByte SCX  0x00
+  writeByte LYC  0x00
+  writeByte BGP  0xFC
+  writeByte OBP0 0xFF
+  writeByte OBP1 0xFF
+  writeByte WY   0x00
+  writeByte WX   0x00
+  writeByte IE   0x00
+  writeByte IF   0x00
 
 -- | An arithmetic operation.
 data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
@@ -900,9 +900,10 @@ executeInstruction instruction = case instruction of
     let op = if isFlagSet flagN flags then OpSub else OpAdd
     let (ir, flags') =
           if a .&. 0x0F > 9 || isFlagSet flagH flags then adder8 op a 0x06 False else (a, flags)
-    let (r, flagsFinal) = if ir `unsafeShiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
-          then adder8 op ir 0x60 False
-          else (ir, flags)
+    let (r, flagsFinal) =
+          if ir `unsafeShiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
+            then adder8 op ir 0x60 False
+            else (ir, flags)
 
     writeR8 RegA r
     setFlagsMask

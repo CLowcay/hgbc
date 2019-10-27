@@ -7,6 +7,24 @@ module GBC.Registers (
   , pattern TIMA
   , pattern TMA
   , pattern TAC
+  , pattern NR10
+  , pattern NR11
+  , pattern NR12
+  , pattern NR14
+  , pattern NR21
+  , pattern NR22
+  , pattern NR24
+  , pattern NR30
+  , pattern NR31
+  , pattern NR32
+  , pattern NR33
+  , pattern NR41
+  , pattern NR42
+  , pattern NR43
+  , pattern NR44
+  , pattern NR50
+  , pattern NR51
+  , pattern NR52
   , pattern IF
   , pattern LCDC
   , pattern STAT
@@ -39,6 +57,60 @@ pattern TMA = 0xFF06
 
 pattern TAC :: Word16
 pattern TAC = 0xFF07
+
+pattern NR10 :: Word16
+pattern NR10 = 0xFF10
+
+pattern NR11 :: Word16
+pattern NR11 = 0xFF11
+
+pattern NR12 :: Word16
+pattern NR12 = 0xFF12
+
+pattern NR14 :: Word16
+pattern NR14 = 0xFF14
+
+pattern NR21 :: Word16
+pattern NR21 = 0xFF16
+
+pattern NR22 :: Word16
+pattern NR22 = 0xFF17
+
+pattern NR24 :: Word16
+pattern NR24 = 0xFF19
+
+pattern NR30 :: Word16
+pattern NR30 = 0xFF1A
+
+pattern NR31 :: Word16
+pattern NR31 = 0xFF1B
+
+pattern NR32 :: Word16
+pattern NR32 = 0xFF1C
+
+pattern NR33 :: Word16
+pattern NR33 = 0xFF1E
+
+pattern NR41 :: Word16
+pattern NR41 = 0xFF20
+
+pattern NR42 :: Word16
+pattern NR42 = 0xFF21
+
+pattern NR43 :: Word16
+pattern NR43 = 0xFF22
+
+pattern NR44 :: Word16
+pattern NR44 = 0xFF23
+
+pattern NR50 :: Word16
+pattern NR50 = 0xFF24
+
+pattern NR51 :: Word16
+pattern NR51 = 0xFF25
+
+pattern NR52 :: Word16
+pattern NR52 = 0xFF26
 
 pattern IF :: Word16
 pattern IF = 0xFF0F
