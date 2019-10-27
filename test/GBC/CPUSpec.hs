@@ -27,7 +27,7 @@ data CPUTestState = CPUTestState {
   , testMemory :: !Memory
 }
 
-instance HasCPUState CPUTestState where
+instance HasCPU CPUTestState where
   forCPUState = testCPU
 
 instance HasMemory CPUTestState where
@@ -63,22 +63,22 @@ withNewCPU computation = allocaArray 0x2000 $ \pVRAM -> allocaArray 160 $ \pOAM 
       fromIntegral (de .&. 0x00FF) `shouldBe` e
       fromIntegral (hl .&. 0x00FF) `shouldBe` l
 
-withAllFlagCombos :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
+withAllFlagCombos :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
 withAllFlagCombos computation = forM_ [0 .. 0xF] $ \flags -> do
   writeF $ (flags `unsafeShiftL` 4) .|. 0x0A
   computation
 
-withNoChangeToRegisters :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
+withNoChangeToRegisters :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
 withNoChangeToRegisters computation = do
   registerFile0 <- getRegisterFile
   computation
   registerFile1 <- getRegisterFile
   liftIO $ registerFile1 `shouldBe` registerFile0
 
-withFlagsUpdate :: UsesCPU env m => Word8 -> Word8 -> ReaderT env m () -> ReaderT env m ()
+withFlagsUpdate :: HasCPU env => Word8 -> Word8 -> ReaderT env IO () -> ReaderT env IO ()
 withFlagsUpdate mask expected = withFlagsUpdateC mask (expected, expected)
 
-withFlagsUpdateC :: UsesCPU env m => Word8 -> (Word8, Word8) -> ReaderT env m () -> ReaderT env m ()
+withFlagsUpdateC :: HasCPU env => Word8 -> (Word8, Word8) -> ReaderT env IO () -> ReaderT env IO ()
 withFlagsUpdateC mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
   flags0        <- readF
@@ -92,7 +92,7 @@ withFlagsUpdateC mask (expected, expectedCarry) computation = do
     (flags1 .&. mask) `shouldBe` (if hasCarry then expectedCarry else expected)
 
 withFlagsUpdateZ
-  :: UsesCPU env m => Word8 -> (Word8, Word8) -> ReaderT env m Word8 -> ReaderT env m ()
+  :: HasCPU env => Word8 -> (Word8, Word8) -> ReaderT env IO Word8 -> ReaderT env IO ()
 withFlagsUpdateZ mask (expected, expectedCarry) computation = do
   registerFile0 <- getRegisterFile
   flags0        <- readF
@@ -106,7 +106,7 @@ withFlagsUpdateZ mask (expected, expectedCarry) computation = do
     (flags1 .&. (mask .|. flagZ))
       `shouldBe` ((if hasCarry then expectedCarry else expected) .|. if a1 == 0 then flagZ else 0)
 
-withIMEUpdate :: UsesCPU env m => ReaderT env m () -> ReaderT env m ()
+withIMEUpdate :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
 withIMEUpdate computation = do
   ime <- testIME
   setIME
@@ -115,14 +115,14 @@ withIMEUpdate computation = do
   computation
   if ime then setIME else clearIME
 
-preservingR8 :: UsesCPU env m => Register8 -> ReaderT env m a -> ReaderT env m a
+preservingR8 :: HasCPU env => Register8 -> ReaderT env IO a -> ReaderT env IO a
 preservingR8 register computation = do
   v <- readR8 register
   r <- computation
   writeR8 register v
   pure r
 
-preservingR16 :: UsesCPU env m => Register16 -> ReaderT env m a -> ReaderT env m a
+preservingR16 :: HasCPU env => Register16 -> ReaderT env IO a -> ReaderT env IO a
 preservingR16 register computation = do
   v <- readR16 register
   r <- computation
@@ -916,14 +916,14 @@ setReset instruction doSet = do
   preserving SmallHLI    = id
   preserving (SmallR8 r) = preservingR8 r
 
-preservingPC :: UsesCPU env m => ReaderT env m a -> ReaderT env m a
+preservingPC :: HasCPU env => ReaderT env IO a -> ReaderT env IO a
 preservingPC computation = do
   pc <- readPC
   r  <- computation
   writePC pc
   pure r
 
-isConditionTrue :: UsesCPU env m => Maybe ConditionCode -> ReaderT env m Bool
+isConditionTrue :: HasCPU env => Maybe ConditionCode -> ReaderT env IO Bool
 isConditionTrue Nothing       = pure True
 isConditionTrue (Just CondC ) = testFlag flagCY
 isConditionTrue (Just CondNC) = not <$> testFlag flagCY

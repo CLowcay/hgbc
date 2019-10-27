@@ -33,7 +33,7 @@ clockControlMask 0 = 0xFC00
 clockControlMask 1 = 0xFFF0
 clockControlMask 2 = 0xFFC0
 clockControlMask 3 = 0xFF00
-clockControlMask x = error $ "Unknown clock control pattern " ++ formatHex x
+clockControlMask x = error ("Unknown clock control pattern " ++ formatHex x)
 
 -- | Check the timer stop flag for the TAC register.
 testTimerStop :: Word8 -> Bool
@@ -45,9 +45,9 @@ updateTimer :: HasTimer env => Int -> ReaderT env IO ()
 updateTimer advance = do
   -- Update the internal clock count
   timer  <- asks forTimerState
-  clocks <- liftIO $ readIORef timer
+  clocks <- liftIO (readIORef timer)
   let clocks' = clocks + fromIntegral advance
-  liftIO $ writeIORef timer clocks'
+  liftIO (writeIORef timer clocks')
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
@@ -56,7 +56,7 @@ updateTimer advance = do
   -- Update the TIMA register
   when (clocks .&. 0xFFF0 /= clocks' .&. 0xFFF0) $ do
     tac <- readByte TAC
-    let mask = clockControlMask $ tac .&. 0x03
+    let mask = clockControlMask (tac .&. 0x03)
 
     -- Update required
     when (not (testTimerStop tac) && (clocks .&. mask /= clocks' .&. mask)) $ do
@@ -66,7 +66,7 @@ updateTimer advance = do
 
       tima <- readByte TIMA
       if tima < 0xFF
-        then writeByte TIMA $ tima + 1
+        then writeByte TIMA (tima + 1)
         else do
           -- Handle overflow by loading from TMA
           tma <- readByte TMA

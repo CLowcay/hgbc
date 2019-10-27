@@ -3,6 +3,8 @@
 -- | This module contains pattern synonyms for the hardware registers.
 module GBC.Registers (
     pattern P1
+  , pattern SB
+  , pattern SC
   , pattern DIV
   , pattern TIMA
   , pattern TMA
@@ -10,14 +12,17 @@ module GBC.Registers (
   , pattern NR10
   , pattern NR11
   , pattern NR12
+  , pattern NR13
   , pattern NR14
   , pattern NR21
   , pattern NR22
+  , pattern NR23
   , pattern NR24
   , pattern NR30
   , pattern NR31
   , pattern NR32
   , pattern NR33
+  , pattern NR34
   , pattern NR41
   , pattern NR42
   , pattern NR43
@@ -38,6 +43,19 @@ module GBC.Registers (
   , pattern OBP1
   , pattern WY
   , pattern WX
+  , pattern KEY1
+  , pattern VBK
+  , pattern HDMA1
+  , pattern HDMA2
+  , pattern HDMA3
+  , pattern HDMA4
+  , pattern HDMA5
+  , pattern RP
+  , pattern BCPS
+  , pattern BCPD
+  , pattern OCPS
+  , pattern OCPD
+  , pattern SVBK
   , pattern IE
   ) where
 
@@ -45,6 +63,12 @@ import Data.Word
 
 pattern P1 :: Word16
 pattern P1 = 0xFF00
+
+pattern SB :: Word16
+pattern SB = 0xFF01
+
+pattern SC :: Word16
+pattern SC = 0xFF02
 
 pattern DIV :: Word16
 pattern DIV = 0xFF04
@@ -67,6 +91,9 @@ pattern NR11 = 0xFF11
 pattern NR12 :: Word16
 pattern NR12 = 0xFF12
 
+pattern NR13 :: Word16
+pattern NR13 = 0xFF13
+
 pattern NR14 :: Word16
 pattern NR14 = 0xFF14
 
@@ -75,6 +102,9 @@ pattern NR21 = 0xFF16
 
 pattern NR22 :: Word16
 pattern NR22 = 0xFF17
+
+pattern NR23 :: Word16
+pattern NR23 = 0xFF18
 
 pattern NR24 :: Word16
 pattern NR24 = 0xFF19
@@ -89,7 +119,10 @@ pattern NR32 :: Word16
 pattern NR32 = 0xFF1C
 
 pattern NR33 :: Word16
-pattern NR33 = 0xFF1E
+pattern NR33 = 0xFF1D
+
+pattern NR34 :: Word16
+pattern NR34 = 0xFF1E
 
 pattern NR41 :: Word16
 pattern NR41 = 0xFF20
@@ -150,6 +183,45 @@ pattern WY = 0xFF4A
 
 pattern WX :: Word16
 pattern WX = 0xFF4B
+
+pattern KEY1 :: Word16
+pattern KEY1 = 0xFF4D
+
+pattern VBK :: Word16
+pattern VBK = 0xFF4F
+
+pattern HDMA1 :: Word16
+pattern HDMA1 = 0xFF51
+
+pattern HDMA2 :: Word16
+pattern HDMA2 = 0xFF52
+
+pattern HDMA3 :: Word16
+pattern HDMA3 = 0xFF53
+
+pattern HDMA4 :: Word16
+pattern HDMA4 = 0xFF54
+
+pattern HDMA5 :: Word16
+pattern HDMA5 = 0xFF55
+
+pattern RP :: Word16
+pattern RP = 0xFF56
+
+pattern BCPS :: Word16
+pattern BCPS = 0xFF68
+
+pattern BCPD :: Word16
+pattern BCPD = 0xFF69
+
+pattern OCPS :: Word16
+pattern OCPS = 0xFF6A
+
+pattern OCPD :: Word16
+pattern OCPD = 0xFF5B
+
+pattern SVBK :: Word16
+pattern SVBK = 0xFF70
 
 pattern IE :: Word16
 pattern IE = 0xFFFF

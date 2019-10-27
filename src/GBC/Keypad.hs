@@ -43,7 +43,7 @@ class HasMemory env => HasKeypad env where
 -- | Update the keypad state given an SDL event payload.
 updateKeyboardState :: EventPayload -> Word8 -> Word8
 updateKeyboardState (KeyboardEvent d) keypadState =
-  let symbol = case keysymKeycode $ keyboardEventKeysym d of
+  let symbol = case keysymKeycode (keyboardEventKeysym d) of
         KeycodeZ         -> Just keyA
         KeycodeX         -> Just keyB
         KeycodeReturn    -> Just keySTART
@@ -71,16 +71,16 @@ refreshKeypad = do
         (False, True ) -> (p1 .&. 0xF0) .|. (complement (keypad `unsafeShiftR` 4) .&. 0x0F)
         _              -> p1
   writeByte P1 p1'
-  when (0 /= 0x0F .&. p1 .&. complement p1') $ raiseInterrupt 4
+  when (0 /= 0x0F .&. p1 .&. complement p1') (raiseInterrupt 4)
 
 -- | Update the keypad state from a list of SDL events.
 {-# INLINE keypadHandleUserEvents #-}
 keypadHandleUserEvents :: HasKeypad env => [Event] -> ReaderT env IO ()
 keypadHandleUserEvents events = do
   keypad  <- asks forKeypadState
-  keypad0 <- liftIO $ readIORef keypad
+  keypad0 <- liftIO (readIORef keypad)
   let keypad1 = foldl (&) keypad0 (updateKeyboardState . eventPayload <$> events)
-  liftIO $ writeIORef keypad keypad1
+  liftIO (writeIORef keypad keypad1)
   when (keypad0 /= keypad1) refreshKeypad
 
 -- | Watch for bus events that might require us to refresh the 'regKeypad' register.

@@ -14,18 +14,18 @@ where
 
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
+import           Data.Bits
 import           Data.Foldable
 import           Data.IORef
 import           Data.Word
 import           GBC.CPU
-import           GBC.Registers
 import           GBC.Graphics
-import           GBC.Timer
 import           GBC.Keypad
 import           GBC.Memory
-import           SDL                           as SDL
+import           GBC.Registers
+import           GBC.Timer
 import           SDL.Orphans                    ( )
-import           Data.Bits
+import qualified SDL
 
 data BusState = BusState {
     lastEventPollAt :: !(IORef Word32)
@@ -66,7 +66,7 @@ handleEvents :: HasBus env => ReaderT env IO ()
 handleEvents = do
   events <- SDL.pollEvents
   keypadHandleUserEvents events
-  for_ (eventPayload <$> events) $ \case
+  for_ (SDL.eventPayload <$> events) $ \case
     (SDL.WindowClosedEvent _) -> killWindows
     SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _)) ->
       liftIO . flip writeIORef True . breakFlag =<< asks forBusState
@@ -88,11 +88,11 @@ busStep = do
   doDMA busEvent
 
   BusState {..} <- asks forBusState
-  now           <- ticks
+  now           <- SDL.ticks
   lastPoll      <- liftIO $ readIORef lastEventPollAt
   when (now - lastPoll > pollDelay) $ do
     handleEvents
-    liftIO $ writeIORef lastEventPollAt =<< ticks
+    liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
   graphicsStep busEvent
   pure busEvent

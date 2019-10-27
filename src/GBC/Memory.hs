@@ -54,7 +54,7 @@ initMemory (ROM memRom) videoBuffer = do
 
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
-getROMHeader Memory {..} = extractHeader $ ROM memRom
+getROMHeader Memory {..} = extractHeader (ROM memRom)
 
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.
@@ -92,7 +92,9 @@ readByte addr = do
     5 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
     6 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
     7 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
-      then fromIntegral <$> peekElemOff (oam videoBuffer) oamOffset
+      then do
+        value <- peekElemOff (oam videoBuffer) oamOffset
+        pure (fromIntegral value)
       else if addr >= 0xFF40 && addr <= 0xFF4B
         then do
           value <- peekElemOff (registers videoBuffer) registerOffset
