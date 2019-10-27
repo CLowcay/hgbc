@@ -20,7 +20,6 @@ import           GBC.Memory
 import           GLUtils
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
-import           Data.Bits
 import qualified SDL
 import qualified SDL.Raw
 
@@ -85,15 +84,6 @@ printDisplayModeInfo = alloca $ \pDisplayMode -> do
 
 eventLoop :: WindowContext -> IO ()
 eventLoop context@WindowContext {..} = do
-  modifyIORef' lineCounter (+1)
-  isEmptyMVar (currentLine sync) >>= \isEmpty ->
-    when isEmpty $ modifyIORef' waitCounter (+1)
-
-  lineCount <- readIORef lineCounter
-  when (lineCount .&. 0x1FFF == 0) $ do
-    waitCount <- readIORef waitCounter
-    let percent = round ((fromIntegral waitCount / fromIntegral lineCount) * (100.0 :: Double)) :: Int
-    putStrLn ("Missed " ++ show waitCount ++ " out of " ++ show lineCount ++ " " ++ show percent ++ "% miss rate")
 
   line <- takeMVar (currentLine sync)
 
@@ -106,6 +96,7 @@ eventLoop context@WindowContext {..} = do
   glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
 
   glFinish
+
   putMVar (hblankStart sync) ()
 
   when (line == 143) $ do
