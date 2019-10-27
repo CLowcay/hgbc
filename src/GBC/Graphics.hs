@@ -36,10 +36,11 @@ data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounde
 
 -- | The graphics state.
 data GraphicsState = GraphicsState {
-    lcdMode :: !Mode
-  , clocksRemaining :: !Int
-  , lcdLine :: !Word8
-  , lineClocksRemaining :: !Int
+    lcdModeRef :: !(IORef Mode)
+  , clocksRemainingRef :: !(IORef Int)
+  , lcdLineRef :: !(IORef Word8)
+  , lineClocksRemainingRef :: !(IORef Int)
+  , lcdEnabledRef :: !(IORef Bool)
 } deriving Eq
 
 -- | Graphics synchronization objects. It's a pair of MVars. The CPU thread
@@ -52,8 +53,14 @@ data GraphicsSync = GraphicsSync {
 }
 
 -- | The initial graphics state.
-initGraphics :: GraphicsState
-initGraphics = GraphicsState VBlank 153 0 0
+initGraphics :: IO GraphicsState
+initGraphics = do
+  lcdModeRef             <- newIORef VBlank
+  clocksRemainingRef     <- newIORef 153
+  lcdLineRef             <- newIORef 0
+  lineClocksRemainingRef <- newIORef 0
+  lcdEnabledRef          <- newIORef True
+  pure GraphicsState { .. }
 
 -- | Make a new Graphics sync object.
 newGraphicsSync :: IO GraphicsSync
@@ -63,9 +70,8 @@ newGraphicsSync = do
   pure GraphicsSync { .. }
 
 class HasMemory env => HasGraphics env where
-  forGraphicsState :: env -> IORef GraphicsState
+  forGraphicsState :: env -> GraphicsState
   forGraphicsSync :: env -> GraphicsSync
-  forLCDEnabled :: env -> IORef Bool
 
 oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
 oamClocks = 80
@@ -144,32 +150,35 @@ modeBits ReadVRAM = 3
 {-# INLINABLE graphicsStep #-}
 graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()
 graphicsStep (BusEvent newWrites clocks) = do
-  graphicsState      <- asks forGraphicsState
-  graphicsSync       <- asks forGraphicsSync
-  GraphicsState {..} <- liftIO (readIORef graphicsState)
+  GraphicsState {..}  <- asks forGraphicsState
+  graphicsSync        <- asks forGraphicsSync
 
-  lcdEnabled         <- asks forLCDEnabled
-  isLCDEnabled       <- liftIO (readIORef lcdEnabled)
+  lcdEnabled          <- liftIO (readIORef lcdEnabledRef)
+  lcdMode             <- liftIO (readIORef lcdModeRef)
+  clocksRemaining     <- liftIO (readIORef clocksRemainingRef)
+  lcdLine             <- liftIO (readIORef lcdLineRef)
+  lineClocksRemaining <- liftIO (readIORef lineClocksRemainingRef)
+
   let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
   let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
 
   for_ newWrites $ \case
     STAT -> do
       stat <- readByte STAT
-      writeByte STAT (setMode stat (if isLCDEnabled then mode' else lcdMode))
+      writeByte STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
     LCDC -> do
       lcdc <- readByte LCDC
-      liftIO (writeIORef lcdEnabled (isFlagSet flagLCDEnable lcdc))
+      liftIO (writeIORef lcdEnabledRef (isFlagSet flagLCDEnable lcdc))
     _ -> pure ()
 
-  when isLCDEnabled $ do
+  when lcdEnabled $ do
     when (lcdLine /= line') $ writeByte LY line'
 
-    liftIO . writeIORef graphicsState $ GraphicsState { lcdMode             = mode'
-                                                      , clocksRemaining     = remaining'
-                                                      , lcdLine             = line'
-                                                      , lineClocksRemaining = lineClocksRemaining'
-                                                      }
+    liftIO $ do
+      writeIORef lcdModeRef             mode'
+      writeIORef clocksRemainingRef     remaining'
+      writeIORef lcdLineRef             line'
+      writeIORef lineClocksRemainingRef lineClocksRemaining'
 
     when (lcdMode /= mode') $ do
       stat <- readByte STAT

@@ -67,7 +67,7 @@ data DebugState = DebugState {
     bus :: !BusState
   , memory :: !Memory
   , cpu :: !CPUState
-  , graphicsState :: !(IORef GraphicsState)
+  , graphicsState :: !GraphicsState
   , graphicsSync :: !GraphicsSync
   , lcdEnabled :: !(IORef Bool)
   , keypadState :: !KeypadState
@@ -98,8 +98,6 @@ instance HasGraphics DebugState where
   forGraphicsState = graphicsState
   {-# INLINE forGraphicsSync #-}
   forGraphicsSync = graphicsSync
-  {-# INLINE forLCDEnabled #-}
-  forLCDEnabled = lcdEnabled
 
 instance HasBus DebugState where
   {-# INLINE forBusState #-}
@@ -113,7 +111,7 @@ initDebug romFile cpu memory graphicsSync = do
   codeMap       <- newIORef =<< initMap romFile
   breakpoints   <- initBreakpointTable
   bus           <- initBusState
-  graphicsState <- newIORef initGraphics
+  graphicsState <- initGraphics
   keypadState   <- initKeypadState
   lcdEnabled    <- newIORef True
   timerState    <- initTimerState
