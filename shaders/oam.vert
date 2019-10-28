@@ -62,12 +62,12 @@ void main()
   vec2 realPosition;
   if((LCDC & LargeBlocks) != 0) {
     realPosition = (doubleHeight * position) + thisOffset + OAMOrigin;
-    instanceOffset = vec2(isHorizontalFlip ? position.x : 8 - position.x,
-                          isVerticalFlip ? 16 - position.y : position.y);
+    instanceOffset = vec2(isHorizontalFlip ? position.x : (8 - position.x),
+                          isVerticalFlip ? (16 - (position.y * 2)) : (position.y * 2));
   } else {
     realPosition = position + thisOffset + OAMOrigin;
-    instanceOffset = vec2(isHorizontalFlip ? position.x : 8 - position.x,
-                          isVerticalFlip ? 16 - position.y : position.y);
+    instanceOffset = vec2(isHorizontalFlip ? position.x : (8 - position.x),
+                          isVerticalFlip ? (8 - position.y) : position.y);
   }
 
   gl_Position = projection * vec4(realPosition, (thisOffset.x * 40) + gl_InstanceID + zOffset, 1.0);

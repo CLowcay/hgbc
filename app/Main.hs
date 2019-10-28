@@ -34,6 +34,7 @@ main = do
       mem               <- initMemory rom videoBuffers
       cpuState          <- initCPU
       debugState        <- initDebug romFile cpuState mem sync
+      runReaderT reset debugState
       runDebugger debugState
 
 runDebugger :: DebugState -> IO ()

@@ -219,7 +219,7 @@ reportingClockStats action = do
   let expectedCycles = (4194304.0 * fromIntegral duration) / 1000.0 :: Double
   let percentSpeed = (fromIntegral cycles / expectedCycles) * 100.0
 
-  liftIO $ do
+  when (duration > 0) $ liftIO $ do
     putStrLn (show cycles ++ " cycles in " ++ show duration ++ "ms")
     putStrLn ("Clock rate = " ++ show ((cycles * 1000) `div` fromIntegral duration) ++ "Hz")
     putStrLn ("Relative to expected clock " ++ showFFloat (Just 2) percentSpeed "" ++ "% speed")

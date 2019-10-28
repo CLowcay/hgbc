@@ -146,11 +146,8 @@ setUpOpenGL = do
   oamProjection <- linkUniform oamProgram "projection"
   oamProjection $= projectionMatrix
 
-  bindBuffer TextureBufferBuffer vramBuffer
   oamTexCharacterData  <- linkUniform oamProgram "texCharacterData"
-  oamTexBackgroundData <- linkUniform oamProgram "texBackgroundData"
   oamTexCharacterData $= TextureUnit 0
-  oamTexBackgroundData $= TextureUnit 1
 
   oamBox <- genVertexArrayObject
   bindVertexArrayObject oamBox

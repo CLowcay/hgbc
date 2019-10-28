@@ -327,7 +327,7 @@ instance Format Instruction where
   formatWithSymbolTable _ RETI         = "RETI"
   formatWithSymbolTable _ RET          = "RET"
   formatWithSymbolTable _ (RETCC cc)   = "RET " ++ format cc
-  formatWithSymbolTable _ (RST   t )   = "RST" ++ formatHex t
+  formatWithSymbolTable _ (RST   t )   = "RST " ++ formatHex t
   formatWithSymbolTable _ DAA          = "DAA"
   formatWithSymbolTable _ CPL          = "CPL"
   formatWithSymbolTable _ NOP          = "NOP"

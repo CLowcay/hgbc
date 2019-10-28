@@ -488,9 +488,11 @@ cpuStep = do
   interrupts <- pendingEnabledInterrupts
   ime        <- testIME
 
-  if interrupts == 0 || not ime
-    then executeInstruction =<< decodeAndAdvancePC decode
-    else do
+  if interrupts /= 0 && ime
+    then do
+      modeRef <- asks (cpuMode . forCPUState)
+      liftIO (writeIORef modeRef ModeNormal)
+
       -- Handle an interrupt
       let nextInterrupt = getNextInterrupt interrupts
       pc  <- readPC
@@ -499,6 +501,12 @@ cpuStep = do
       clearIME
       writeByte IF (clearBit interrupts nextInterrupt)
       pure (BusEvent [sp', sp' + 1] 28) -- TODO: Number of clocks here is just a guess
+    else do
+      modeRef <- asks (cpuMode . forCPUState)
+      mode    <- liftIO (readIORef modeRef)
+      if mode == ModeHalt
+        then pure (BusEvent [] 32)
+        else executeInstruction =<< decodeAndAdvancePC decode
 
 {-# INLINE noWrite #-}
 noWrite :: Instruction -> BusEvent

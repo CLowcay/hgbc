@@ -25,18 +25,35 @@ const float BackgroundFrontLayer = 10240.0/20481.0;
 
 void main( )
 { 
-  int characterDataOffset = (LCDC & 0x10) == 0 ? 0x800 : 0;
-  int codeAreaOffset = (LCDC & 0x08) == 0 ? 0 : 0x400;
+  int characterDataOffset = (LCDC & 0x10) == 0 ? 256 : 0;
 
-  int px = (int(pixelPos.x) + SCX) & 255;
-  int py = (int(pixelPos.y) + SCY) & 255;
-  int tx = px >> 3;
-  int ty = py >> 3;
-  int ox = 7 - (px & 7);
-  int oy = py & 7;
-  int rawTile = int(texelFetch(texBackgroundData, codeAreaOffset + (ty * 32) + tx).r);
-  int tile = rawTile > 127 ? rawTile : characterDataOffset + rawTile;
+  int x = int(pixelPos.x);
+  int y = int(pixelPos.y);
 
+  int ox;
+  int oy;
+  int rawTile;
+  if ((x >= (WX - 7)) && (y >= WY)) {
+    int px = x + 7 - WX;
+    int py = y - WY;
+    int tx = px >> 3;
+    int ty = py >> 3;
+    ox = 7 - (px & 7);
+    oy = py & 7;
+    int windowCodeAreaOffset = (LCDC & 0x40) == 0 ? 0 : 0x400;
+    rawTile = int(texelFetch(texBackgroundData, windowCodeAreaOffset + (ty * 32) + tx).r);
+  } else {
+    int px = (x + SCX) & 255;
+    int py = (y + SCY) & 255;
+    int tx = px >> 3;
+    int ty = py >> 3;
+    ox = 7 - (px & 7);
+    oy = py & 7;
+    int codeAreaOffset = (LCDC & 0x08) == 0 ? 0 : 0x400;
+    rawTile = int(texelFetch(texBackgroundData, codeAreaOffset + (ty * 32) + tx).r);
+  }
+
+  int tile = rawTile > 127 ? rawTile : (characterDataOffset + rawTile);
   int b0 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2)).r);
   int b1 = int(texelFetch(texCharacterData, (tile * 16) + (oy * 2) + 1).r);
   int pixelIndex = ((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1);

@@ -7,7 +7,6 @@ flat in int instanceAttributes;
 out vec4 outColor;
 
 uniform usamplerBuffer texCharacterData;
-uniform usamplerBuffer texBackgroundData;
 
 layout (std140) uniform Registers
 {
@@ -41,6 +40,10 @@ void main( )
   int b0 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2)).r);
   int b1 = int(texelFetch(texCharacterData, (instanceCode * 16) + (oy * 2) + 1).r);
   int pixelIndex = ((b0 >> ox) & 1) | (((b1 >> ox) & 1) << 1);
+  if (pixelIndex == 0) {
+    discard;
+  }
+
   int internalPaletteIndex = palette >> (pixelIndex * 2) & 3;
   float pixel = float(3 - internalPaletteIndex) / 3.0;
   outColor = vec4(pixel, pixel, pixel, 1);
