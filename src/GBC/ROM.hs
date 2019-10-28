@@ -1,12 +1,29 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RankNTypes #-}
 
-module GBC.ROM where
+module GBC.ROM
+  ( ROM
+  , CGBSupport(..)
+  , SGBSupport(..)
+  , MBCType(..)
+  , Destination(..)
+  , CartridgeType(..)
+  , Header(..)
+  , validateROM
+  , extractHeader
+  , MBC(..)
+  , getMBC
+  )
+where
 
+import           Control.Monad
 import           Data.Binary.Get
 import           Data.Word
+import           Foreign.Marshal.Alloc
+import           Foreign.Ptr
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
-import           Control.Monad
+import qualified Data.ByteString.Unsafe        as B
 
 newtype ROM = ROM B.ByteString deriving (Eq, Ord, Show)
 
@@ -46,8 +63,7 @@ validateROM rom = do
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
 
 extractHeader :: ROM -> Header
-extractHeader (ROM rom) =
-  runGet getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
+extractHeader (ROM rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
  where
   getHeader :: Get Header
   getHeader = do
@@ -116,3 +132,33 @@ extractHeader (ROM rom) =
     0x1A -> pure $ CartridgeType (Just MBC5) True False
     0x1B -> pure $ CartridgeType (Just MBC5) True True
     x    -> fail $ "unknown cartridge type code " ++ show x
+
+-- | Get the Memory Bank Controller for this cartridge.
+getMBC :: ROM -> IO MBC
+getMBC rom =
+  let cType = cartridgeType (extractHeader rom)
+  in  case mbcType cType of
+        Nothing -> pure (nullMBC rom)
+        Just _  -> error ("Unsupported cartridge type " ++ show cType)
+
+-- | A memory bank controller.
+data MBC = MBC {
+    readROM :: Word16 -> IO Word8
+  , writeROM :: Word16 -> Word8 -> IO ()
+  , withROMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , readRAM :: Word16 -> IO Word8
+  , writeRAM :: Word16 -> Word8 -> IO ()
+  , withRAMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+}
+
+-- | Simulate a cartridge with no memory bank controller.
+nullMBC :: ROM -> MBC
+nullMBC (ROM romData) = MBC
+  { readROM        = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
+  , withROMPointer = \address action ->
+                       B.unsafeUseAsCString romData (action . (`plusPtr` fromIntegral address))
+  , writeROM       = \_ _ -> pure ()
+  , readRAM        = \_ -> pure 0
+  , writeRAM       = \_ _ -> pure ()
+  , withRAMPointer = \_ action -> allocaBytes 8192 action
+  }

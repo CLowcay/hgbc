@@ -25,7 +25,6 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.ROM
 import qualified Data.ByteString               as B
-import qualified Data.ByteString.Unsafe        as B
 
 data VideoBuffers = VideoBuffers {
     vram :: !(Ptr Word8)
@@ -34,7 +33,8 @@ data VideoBuffers = VideoBuffers {
 }
 
 data Memory = Memory {
-    memRom :: !B.ByteString
+    mbc :: !MBC
+  , romHeader :: !Header
   , memRam :: !(ForeignPtr Word8)
   , videoBuffer :: !VideoBuffers
 }
@@ -48,13 +48,15 @@ instance HasMemory Memory where
 
 -- | The initial memory state.
 initMemory :: ROM -> VideoBuffers -> IO Memory
-initMemory (ROM memRom) videoBuffer = do
+initMemory rom videoBuffer = do
+  let romHeader = extractHeader rom
   memRam <- mallocForeignPtrArray 0x7FFF
+  mbc    <- getMBC rom
   pure Memory { .. }
 
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
-getROMHeader Memory {..} = extractHeader (ROM memRom)
+getROMHeader Memory {..} = romHeader
 
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.
@@ -62,47 +64,42 @@ getROMHeader Memory {..} = extractHeader (ROM memRom)
 dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
+  let copyOAM from = for_ [0 .. 159] $ \off ->
+        pokeElemOff (oam videoBuffer) off . fromIntegral =<< peekElemOff (from :: Ptr Word8) off
+
   liftIO $ case source `unsafeShiftR` 13 of
-    0 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    1 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    2 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    3 -> B.unsafeUseAsCString memRom $ \ptr -> copyOAM (oam videoBuffer) (castPtr ptr)
-    4 -> copyOAM (oam videoBuffer) (vram videoBuffer `plusPtr` (fromIntegral source - 0x8000))
-    5 -> withForeignPtr memRam
-      $ \ram -> copyOAM (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000))
-    6 -> withForeignPtr memRam
-      $ \ram -> copyOAM (oam videoBuffer) (ram `plusPtr` (fromIntegral source - 0x8000))
+    0 -> withROMPointer mbc source copyOAM
+    1 -> withROMPointer mbc source copyOAM
+    2 -> withROMPointer mbc source copyOAM
+    3 -> withROMPointer mbc source copyOAM
+    4 -> copyOAM (vram videoBuffer `plusPtr` (fromIntegral source - 0x8000))
+    5 -> withRAMPointer mbc (source - 0x8000) copyOAM
+    6 -> withForeignPtr memRam $ \ram -> copyOAM (ram `plusPtr` (fromIntegral source - 0x8000))
     _ -> error ("Invalid source for DMA " ++ show source)
- where
-  copyOAM :: Ptr Int32 -> Ptr Word8 -> IO ()
-  copyOAM to from =
-    for_ [0 .. 159] $ \off -> pokeElemOff to off . fromIntegral =<< peekElemOff from off
 
 -- | Read a byte from memory.
 {-# INLINABLE readByte #-}
 readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
-  case addr `unsafeShiftR` 13 of
-    0 -> pure (memRom `B.unsafeIndex` romOffset)
-    1 -> pure (memRom `B.unsafeIndex` romOffset)
-    2 -> pure (memRom `B.unsafeIndex` romOffset)
-    3 -> pure (memRom `B.unsafeIndex` romOffset)
-    4 -> liftIO (peekElemOff (vram videoBuffer) ramOffset)
-    5 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
-    6 -> liftIO (withForeignPtr memRam (`peekElemOff` ramOffset))
-    7 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
-      then do
+  liftIO $ case addr `unsafeShiftR` 13 of
+    0 -> readROM mbc addr
+    1 -> readROM mbc addr
+    2 -> readROM mbc addr
+    3 -> readROM mbc addr
+    4 -> peekElemOff (vram videoBuffer) ramOffset
+    5 -> readRAM mbc (addr - 0x8000)
+    6 -> withForeignPtr memRam (`peekElemOff` ramOffset)
+    7
+      | addr >= 0xFE00 && addr <= 0xFE9F -> do
         value <- peekElemOff (oam videoBuffer) oamOffset
         pure (fromIntegral value)
-      else if addr >= 0xFF40 && addr <= 0xFF4B
-        then do
-          value <- peekElemOff (registers videoBuffer) registerOffset
-          pure (fromIntegral value)
-        else withForeignPtr memRam (`peekElemOff` ramOffset)
+      | addr >= 0xFF40 && addr <= 0xFF4B -> do
+        value <- peekElemOff (registers videoBuffer) registerOffset
+        pure (fromIntegral value)
+      | otherwise -> withForeignPtr memRam (`peekElemOff` ramOffset)
     x -> error ("Impossible coarse read address" ++ show x)
  where
-  romOffset      = fromIntegral addr
   ramOffset      = fromIntegral addr - 0x8000
   oamOffset      = fromIntegral addr - 0xFE00
   registerOffset = fromIntegral addr - 0xFF40
@@ -118,19 +115,22 @@ writeWord addr value = do
 writeByte :: HasMemory env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
   Memory {..} <- asks forMemory
-  case addr `unsafeShiftR` 13 of
-    0 -> pure ()
-    1 -> pure ()
-    2 -> pure ()
-    3 -> pure ()
-    4 -> liftIO (pokeElemOff (vram videoBuffer) ramOffset value)
-    5 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
-    6 -> liftIO (withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value)
-    7 -> liftIO $ if addr >= 0xFE00 && addr < 0xFEA0
-      then pokeElemOff (oam videoBuffer) oamOffset (fromIntegral value)
-      else if addr >= 0xFF40 && addr <= 0xFF4B
-        then pokeElemOff (registers videoBuffer) registerOffset (fromIntegral value)
-        else withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value
+  liftIO $ case addr `unsafeShiftR` 13 of
+    0 -> writeROM mbc addr value
+    1 -> writeROM mbc addr value
+    2 -> writeROM mbc addr value
+    3 -> writeROM mbc addr value
+    4 -> pokeElemOff (vram videoBuffer) ramOffset value
+    5 -> writeRAM mbc addr value
+    6 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value
+    7
+      | addr >= 0xFE00 && addr <= 0xFE9F -> pokeElemOff (oam videoBuffer)
+                                                        oamOffset
+                                                        (fromIntegral value)
+      | addr >= 0xFF40 && addr <= 0xFF4B -> pokeElemOff (registers videoBuffer)
+                                                        registerOffset
+                                                        (fromIntegral value)
+      | otherwise -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr ramOffset value
     x -> error ("Impossible coarse read address" ++ show x)
  where
   ramOffset      = fromIntegral addr - 0x8000
