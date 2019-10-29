@@ -3,7 +3,7 @@
 {-# LANGUAGE MultiWayIf #-}
 
 module GBC.ROM
-  ( ROM
+  ( ROM(..)
   , CGBSupport(..)
   , SGBSupport(..)
   , MBCType(..)

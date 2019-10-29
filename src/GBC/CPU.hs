@@ -117,6 +117,7 @@ instance Storable RegisterFile where
 data BusEvent = BusEvent {
    writeAddress :: ![Word16]
  , clockAdvance :: !Int
+ , currentMode :: !CPUMode
 } deriving (Eq, Ord, Show)
 
 -- | The current CPU mode.
@@ -500,25 +501,25 @@ cpuStep = do
       writePC (interruptVector nextInterrupt)
       clearIME
       writeByte IF (clearBit interrupts nextInterrupt)
-      pure (BusEvent [sp', sp' + 1] 28) -- TODO: Number of clocks here is just a guess
+      pure (BusEvent [sp', sp' + 1] 28 ModeNormal) -- TODO: Number of clocks here is just a guess
     else do
       modeRef <- asks (cpuMode . forCPUState)
       mode    <- liftIO (readIORef modeRef)
       if mode == ModeHalt
-        then pure (BusEvent [] 32)
+        then pure (BusEvent [] 32 ModeHalt)
         else executeInstruction =<< decodeAndAdvancePC decode
 
 {-# INLINE noWrite #-}
 noWrite :: Instruction -> BusEvent
-noWrite instruction = BusEvent [] (clocks instruction True)
+noWrite instruction = BusEvent [] (clocks instruction True) ModeNormal
 
 {-# INLINE noWriteLongClocks #-}
 noWriteLongClocks :: Instruction -> Bool -> BusEvent
-noWriteLongClocks instruction longClocks = BusEvent [] (clocks instruction longClocks)
+noWriteLongClocks instruction longClocks = BusEvent [] (clocks instruction longClocks) ModeNormal
 
 {-# INLINE didWrite #-}
 didWrite :: [Word16] -> Instruction -> BusEvent
-didWrite addrs instruction = BusEvent addrs (clocks instruction True)
+didWrite addrs instruction = BusEvent addrs (clocks instruction True) ModeNormal
 
 -- | Execute a single instruction.
 {-# INLINABLE executeInstruction #-}
@@ -943,11 +944,11 @@ executeInstruction instruction = case instruction of
   -- HALT
   HALT -> do
     setMode ModeHalt
-    pure (noWrite instruction)
+    pure (BusEvent [] (clocks instruction True) ModeHalt)
   -- STOP
   STOP -> do
     setMode ModeStop
-    pure (noWrite instruction)
+    pure (BusEvent [] (clocks instruction True) ModeStop)
   -- EI
   EI -> do
     setIME
@@ -976,10 +977,10 @@ doCall w16 numberOfClocks = do
   pc  <- readPC
   sp' <- push16 pc
   writePC w16
-  pure (BusEvent [sp', sp' + 1] numberOfClocks)
+  pure (BusEvent [sp', sp' + 1] numberOfClocks ModeNormal)
 
 {-# INLINE doRet #-}
 doRet :: HasCPU env => Int -> ReaderT env IO BusEvent
 doRet numberOfClocks = do
   writePC =<< pop16
-  pure (BusEvent [] numberOfClocks)
+  pure (BusEvent [] numberOfClocks ModeNormal)

@@ -20,7 +20,7 @@ import qualified Data.ByteString               as B
 import           Data.Foldable
 
 blankROM :: ROM
-blankROM = ROM $ B.replicate (32 * 1024 * 1024) 0
+blankROM = ROM (B.replicate (32 * 1024 * 1024) 0)
 
 data CPUTestState = CPUTestState {
     testCPU :: !CPUState
@@ -317,13 +317,13 @@ spec = do
     ev   <- executeInstruction HALT
     mode <- getMode
     liftIO $ do
-      ev `shouldBe` noWrite
+      ev `shouldBe` BusEvent [] 4 ModeHalt
       mode `shouldBe` ModeHalt
   describe "STOP" $ it "stops the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
     ev   <- executeInstruction STOP
     mode <- getMode
     liftIO $ do
-      ev `shouldBe` noWrite
+      ev `shouldBe` BusEvent [] 4 ModeStop
       mode `shouldBe` ModeStop
   describe "DI"
     $ it "disables the master interrupt flat"
@@ -367,13 +367,13 @@ spec = do
   describe "DAA"       testDAA
 
 didRead :: BusEvent
-didRead = BusEvent [] 8
+didRead = BusEvent [] 8 ModeNormal
 
 noWrite :: BusEvent
-noWrite = BusEvent [] 4
+noWrite = BusEvent [] 4 ModeNormal
 
 didWrite :: [Word16] -> BusEvent
-didWrite w = BusEvent w 8
+didWrite w = BusEvent w 8 ModeNormal
 
 expectClocks :: Int -> BusEvent -> BusEvent
 expectClocks c e = e { clockAdvance = c }
@@ -746,7 +746,7 @@ incdec instruction value expected expectedFlags = do
       ev <- executeInstruction $ instruction SmallHLI
       r  <- readByte 0xC000
       liftIO $ do
-        ev `shouldBe` BusEvent [0xC000] 12
+        ev `shouldBe` BusEvent [0xC000] 12 ModeNormal
         r `shouldBe` expected
 
 addHL :: Word16 -> Word16 -> Word16 -> Word8 -> Spec
@@ -850,7 +850,7 @@ shiftRotate instruction (carry, value) (expectedCarry, expected) = do
           ev <- executeInstruction $ instruction SmallHLI
           r  <- readByte 0xC000
           liftIO $ do
-            ev `shouldBe` BusEvent [0xC000] 16
+            ev `shouldBe` BusEvent [0xC000] 16 ModeNormal
             r `shouldBe` expected
           pure r
 
@@ -900,9 +900,9 @@ setReset instruction doSet = do
       $ withAllFlagCombos
       $ do
           writeR16 RegHL 0xC000
-          doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0) $ BusEvent [0xC000] 16
+          doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0) $ BusEvent [0xC000] 16 ModeNormal
           doTest SmallHLI bitIndex 0xFF (if doSet then 0xFF else complement (bit bitIndex))
-            $ BusEvent [0xC000] 16
+            $ BusEvent [0xC000] 16 ModeNormal
 
  where
   doTest op8 bitIndex value result expectedBusEvent = do
@@ -1092,7 +1092,7 @@ interrupt = do
       ev  <- cpuStep
       pc1 <- readPC
       liftIO $ do
-        ev `shouldBe` BusEvent [] 4
+        ev `shouldBe` BusEvent [] 4 ModeNormal
         pc1 `shouldBe` (pc + 1)
   testInterrupt :: Word8 -> Word8 -> Word16 -> IO ()
   testInterrupt fif fie vector =
@@ -1116,7 +1116,7 @@ interrupt = do
     sh  <- readByte 0xBFFF
     ime <- testIME
     liftIO $ do
-      ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28
+      ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28 ModeNormal
       pc1 `shouldBe` vector
       sp1 `shouldBe` 0xBFFE
       fromIntegral sl .|. (fromIntegral sh `shiftL` 8) `shouldBe` pc0

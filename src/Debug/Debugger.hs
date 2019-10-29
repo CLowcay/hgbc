@@ -192,7 +192,9 @@ doRun preConditions postConditions = clearBreakFlag >> go 0
         let ticks' = ticks + clockAdvance debugInfo
         breakFlag   <- isBreakFlagSet
         doPostBreak <- orM (fmap ($ debugInfo) postConditions)
-        if doPostBreak || breakFlag then pure ticks' else go ticks'
+        if doPostBreak || breakFlag || currentMode debugInfo == ModeStop
+          then pure ticks'
+          else go ticks'
 
 -- | Disassemble the next 4 instructions at the current PC.
 disassembleAtPC :: MonadDebug ()

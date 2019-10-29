@@ -149,7 +149,7 @@ modeBits ReadVRAM = 3
 
 {-# INLINABLE graphicsStep #-}
 graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()
-graphicsStep (BusEvent newWrites clocks) = do
+graphicsStep (BusEvent newWrites clocks _) = do
   GraphicsState {..}  <- asks forGraphicsState
   graphicsSync        <- asks forGraphicsSync
 
