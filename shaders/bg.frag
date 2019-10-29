@@ -26,6 +26,7 @@ const float BackgroundFrontLayer = 10240.0/20481.0;
 void main( )
 { 
   int characterDataOffset = (LCDC & 0x10) == 0 ? 256 : 0;
+  bool windowEnabled = (LCDC & 0x20) != 0;
 
   int x = int(pixelPos.x);
   int y = int(pixelPos.y);
@@ -33,7 +34,7 @@ void main( )
   int ox;
   int oy;
   int rawTile;
-  if ((x >= (WX - 7)) && (y >= WY)) {
+  if (windowEnabled && (x >= (WX - 7)) && (y >= WY)) {
     int px = x + 7 - WX;
     int py = y - WY;
     int tx = px >> 3;

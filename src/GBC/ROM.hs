@@ -148,9 +148,11 @@ getMBC rom =
 
 -- | A memory bank controller.
 data MBC = MBC {
-    readROM :: Word16 -> IO Word8
+    readROMLow :: Word16 -> IO Word8
+  , readROMHigh :: Word16 -> IO Word8
   , writeROM :: Word16 -> Word8 -> IO ()
-  , withROMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , withROMLowPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , withROMHighPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
   , readRAM :: Word16 -> IO Word8
   , writeRAM :: Word16 -> Word8 -> IO ()
   , withRAMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
@@ -161,15 +163,20 @@ nullMBC :: ROM -> IO MBC
 nullMBC (ROM romData) = do
   ram <- mallocForeignPtrBytes 0x2000
   pure MBC
-    { readROM        = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
-    , withROMPointer = \address action ->
-                         B.unsafeUseAsCString romData (action . (`plusPtr` fromIntegral address))
-    , writeROM       = \_ _ -> pure ()
+    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
+    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
+                             romData
+                             (action . (`plusPtr` fromIntegral address))
+    , readROMHigh = \address -> pure (romData `B.unsafeIndex` (fromIntegral address + 0x4000))
+    , withROMHighPointer = \address action -> B.unsafeUseAsCString
+                             romData
+                             (action . (`plusPtr` (fromIntegral address + 0x4000)))
+    , writeROM           = \_ _ -> pure ()
     , readRAM = \address -> withForeignPtr ram $ \ptr -> peekElemOff ptr (fromIntegral address)
-    , writeRAM       = \address value ->
-                         withForeignPtr ram $ \ptr -> pokeElemOff ptr (fromIntegral address) value
-    , withRAMPointer = \address action ->
-                         withForeignPtr ram (action . (`plusPtr` fromIntegral address))
+    , writeRAM           = \address value ->
+                             withForeignPtr ram $ \ptr -> pokeElemOff ptr (fromIntegral address) value
+    , withRAMPointer     = \address action ->
+                             withForeignPtr ram (action . (`plusPtr` fromIntegral address))
     }
 
 mbc1 :: ROM -> IO MBC
@@ -180,16 +187,14 @@ mbc1 (ROM romData) = do
   ramSelect <- newIORef False
   ram       <- mallocForeignPtrBytes 0x8000 :: IO (ForeignPtr Word8)
 
-  let getROMOffset address = if address < 0x4000
-        then pure 0
-        else do
-          noHighROM <- readIORef ramSelect
-          low       <- readIORef romOffset
-          if noHighROM
-            then pure (low `unsafeShiftL` 14)
-            else do
-              high <- readIORef ramOffset
-              pure (((high `unsafeShiftL` 5) .|. low) `unsafeShiftL` 14)
+  let getROMOffset = do
+        noHighROM <- readIORef ramSelect
+        low       <- readIORef romOffset
+        if noHighROM
+          then pure (low `unsafeShiftL` 14)
+          else do
+            high <- readIORef ramOffset
+            pure (((high `unsafeShiftL` 5) .|. low) `unsafeShiftL` 14)
   let getRAMOffset = do
         ramBanking <- readIORef ramSelect
         if ramBanking
@@ -199,31 +204,35 @@ mbc1 (ROM romData) = do
           else pure 0
 
   pure MBC
-    { readROM        = \address -> do
-                         offset <- getROMOffset address
-                         pure (romData `B.unsafeIndex` (offset + fromIntegral (address .&. 0x3FFF)))
-    , writeROM       = \address value -> if address < 0x2000
-                         then writeIORef enableRAM (value .&. 0x0F == 0x0A)
-                         else if address < 0x4000
-                           then
-                             let low = (fromIntegral value .&. 0x1F)
-                             in  writeIORef romOffset (if low == 0 then 1 else low)
-                           else if address < 0x6000
-                             then writeIORef ramOffset (fromIntegral value .&. 0x3)
-                             else writeIORef ramSelect (value /= 0)
-    , withROMPointer = \address action -> do
-                         offset <- getROMOffset address
-                         B.unsafeUseAsCString
-                           romData
-                           (action . (`plusPtr` (offset + fromIntegral address)))
-    , readRAM        = \address -> do
-                         offset <- getRAMOffset
-                         withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
-    , writeRAM       = \address value -> do
-                         offset <- getRAMOffset
-                         withForeignPtr ram
-                           $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
-    , withRAMPointer = \address action -> do
-                         offset <- getRAMOffset
-                         withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
+    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
+    , readROMHigh        = \address -> do
+                             offset <- getROMOffset
+                             pure (romData `B.unsafeIndex` (offset + fromIntegral address))
+    , writeROM           = \address value -> if address < 0x2000
+                             then writeIORef enableRAM (value .&. 0x0F == 0x0A)
+                             else if address < 0x4000
+                               then
+                                 let low = (fromIntegral value .&. 0x1F)
+                                 in  writeIORef romOffset (if low == 0 then 1 else low)
+                               else if address < 0x6000
+                                 then writeIORef ramOffset (fromIntegral value .&. 0x3)
+                                 else writeIORef ramSelect (value /= 0)
+    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
+                             romData
+                             (action . (`plusPtr` fromIntegral address))
+    , withROMHighPointer = \address action -> do
+                             offset <- getROMOffset
+                             B.unsafeUseAsCString
+                               romData
+                               (action . (`plusPtr` (offset + fromIntegral address)))
+    , readRAM            = \address -> do
+                             offset <- getRAMOffset
+                             withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
+    , writeRAM           = \address value -> do
+                             offset <- getRAMOffset
+                             withForeignPtr ram
+                               $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
+    , withRAMPointer     = \address action -> do
+                             offset <- getRAMOffset
+                             withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
     }
