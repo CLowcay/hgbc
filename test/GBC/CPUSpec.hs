@@ -144,10 +144,12 @@ spec = do
     ldhl 0xC000 0     False False
     ldhl 0xC000 1     False False
     ldhl 0xC000 42    False False
-    ldhl 0xC000 (-1)  True  False
-    ldhl 0xC000 (-42) True  False
-    ldhl 0xC0FF 1     False False
-    ldhl 0x8FFF 1     False True
+    ldhl 0xC000 (-1)  False False
+    ldhl 0xC000 (-42) False False
+    ldhl 0xC00F 1     False True
+    ldhl 0xC0F0 0x10  True False
+    ldhl 0xC0FF 1     True  True
+    ldhl 0x8FFF 1     True  True
     ldhl 0xFFFF 127   True  True
   describe "LDI16I_SP" ldi16i_sp
   describe "PUSH"      push
@@ -222,8 +224,8 @@ spec = do
   describe "ADDSP" $ do
     addSP 300    1    301    0
     addSP 300    (-1) 299    (flagCY .|. flagH)
-    addSP 0x00FF 1    0x0100 0
-    addSP 0x0FFF 1    0x1000 flagH
+    addSP 0x00FF 1    0x0100 (flagH .|. flagCY)
+    addSP 0x000F 1    0x0010 flagH
     addSP 0xFFFF 1    0x0000 (flagH .|. flagCY)
   describe "INC16" $ do
     incdec16 INC16 0      1
@@ -900,7 +902,8 @@ setReset instruction doSet = do
       $ withAllFlagCombos
       $ do
           writeR16 RegHL 0xC000
-          doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0) $ BusEvent [0xC000] 16 ModeNormal
+          doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0)
+            $ BusEvent [0xC000] 16 ModeNormal
           doTest SmallHLI bitIndex 0xFF (if doSet then 0xFF else complement (bit bitIndex))
             $ BusEvent [0xC000] 16 ModeNormal
 

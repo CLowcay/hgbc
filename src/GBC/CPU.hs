@@ -252,10 +252,10 @@ writeSmallOperand8 SmallHLI           value = do
 
 type Flag = Word8
 flagZ, flagN, flagH, flagCY :: Flag
-flagZ = 0x10
-flagN = 0x20
-flagH = 0x40
-flagCY = 0x80
+flagZ = 0x80
+flagN = 0x40
+flagH = 0x20
+flagCY = 0x10
 
 -- Master interrupt enable flag
 {-# INLINABLE flagIME #-}
@@ -656,10 +656,10 @@ executeInstruction instruction = case instruction of
   -- LDHL SP im8
   LDHL i8 -> do
     sp <- fromIntegral <$> readR16 RegSP
-    let wi8     = fromIntegral i8 :: Word32
+    let wi8     = fromIntegral i8 :: Int32
     let wr      = sp + wi8
-    let carryH = (sp .&. 0x00001000) `xor` (wi8 .&. 0x00001000) /= (wr .&. 0x00001000)
-    let carryCY = (sp .&. 0x00010000) `xor` (wi8 .&. 0x00010000) /= (wr .&. 0x00010000)
+    let carryH = (sp .&. 0x00000010) `xor` (wi8 .&. 0x00000010) /= (wr .&. 0x00000010)
+    let carryCY = (sp .&. 0x00000100) `xor` (wi8 .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
     setFlags ((if carryCY then flagCY else 0) .|. (if carryH then flagH else 0))
     pure (noWrite instruction)
@@ -722,14 +722,14 @@ executeInstruction instruction = case instruction of
     value <- readSmallOperand8 so8
     let (r, flags) = inc8 OpAdd value
     wroteAddr <- writeSmallOperand8 so8 r
-    setFlags flags
+    setFlagsMask (flagH .|. flagN .|. flagZ) flags
     pure (didWrite wroteAddr instruction)
   -- DEC \<r8|(HL)\>
   DEC so8 -> do
     value <- readSmallOperand8 so8
     let (r, flags) = inc8 OpSub value
     wroteAddr <- writeSmallOperand8 so8 r
-    setFlags flags
+    setFlagsMask (flagH .|. flagN .|. flagZ) flags
     pure (didWrite wroteAddr instruction)
   -- ADD HL r16
   ADDHL r16 -> do
@@ -749,10 +749,10 @@ executeInstruction instruction = case instruction of
     sp <- readR16 RegSP
     let sp'     = fromIntegral sp
     let i8'     = fromIntegral i8
-    let wr      = i8' + sp' :: Word32
-    let carryH = (sp' .&. 0x00001000) `xor` (i8' .&. 0x00001000) /= (wr .&. 0x00001000)
-    let carryCY = (sp' .&. 0x00010000) `xor` (i8' .&. 0x00010000) /= (wr .&. 0x00010000)
-    writeR16 RegSP (fromIntegral wr)
+    let wr      = i8' + sp' :: Int32
+    let carryH = (sp' .&. 0x00000010) `xor` (i8' .&. 0x00000010) /= (wr .&. 0x00000010)
+    let carryCY = (sp' .&. 0x00000100) `xor` (i8' .&. 0x00000100) /= (wr .&. 0x00000100)
+    writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
     pure (noWrite instruction)
   -- INC16 r16
