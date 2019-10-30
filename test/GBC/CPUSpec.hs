@@ -590,7 +590,7 @@ pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest)
     liftIO $ do
       sp' `shouldBe` 0xFFF2
       ev `shouldBe` (noWrite & expectClocks 12)
-      r `shouldBe` 0x0102
+      r `shouldBe` (if dest == RegSP then 0x0100 else 0x0102)
  where
   specialPreserving16 RegSP computation = do
     a <- readR8 RegA

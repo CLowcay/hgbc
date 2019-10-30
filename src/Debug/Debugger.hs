@@ -56,6 +56,9 @@ data Command = ShowHeader
              | AddBreakpoint MemAddress
              | DeleteBreakpoint MemAddress
              | DisableBreakpiont MemAddress
+             | AddWriteBreakpoint MemAddress
+             | DeleteWriteBreakpoint MemAddress
+             | DisableWriteBreakpiont MemAddress
              | ListBreakpoints
              | AddSymbol String Word16
              | DeleteSymbol String
@@ -74,7 +77,8 @@ data DebugState = DebugState {
   , timerState :: !TimerState
   , romFile :: !FilePath
   , codeMap :: !(IORef SymbolTable)
-  , breakpoints :: !BreakpointTable
+  , executeBreakpoints :: !BreakpointTable
+  , writeBreakpoints :: !BreakpointTable
 }
 
 instance HasMemory DebugState where
@@ -108,13 +112,14 @@ type MonadDebug a = ReaderT DebugState IO a
 -- | Initialise the debugger.
 initDebug :: FilePath -> CPUState -> Memory -> GraphicsSync -> IO DebugState
 initDebug romFile cpu memory graphicsSync = do
-  codeMap       <- newIORef =<< initMap romFile
-  breakpoints   <- initBreakpointTable
-  bus           <- initBusState
-  graphicsState <- initGraphics
-  keypadState   <- initKeypadState
-  lcdEnabled    <- newIORef True
-  timerState    <- initTimerState
+  codeMap            <- newIORef =<< initMap romFile
+  executeBreakpoints <- initBreakpointTable
+  writeBreakpoints   <- initBreakpointTable
+  bus                <- initBusState
+  graphicsState      <- initGraphics
+  keypadState        <- initKeypadState
+  lcdEnabled         <- newIORef True
+  timerState         <- initTimerState
   pure DebugState { .. }
 
 getCodeMap :: MonadDebug SymbolTable
@@ -130,7 +135,7 @@ makeDecorator = do
   DebugState {..} <- ask
   pc              <- readPC
   pure $ \addr -> do
-    bp <- getBreakpoint breakpoints addr <&> \case
+    bp <- getBreakpoint executeBreakpoints addr <&> \case
       Nothing    -> ' '
       Just True  -> '*'
       Just False -> '-'
@@ -160,7 +165,10 @@ breakOnCountOf n0 = do
 breakOnBreakpoints :: MonadDebug BreakPostCondition
 breakOnBreakpoints = do
   DebugState {..} <- ask
-  pure (const (shouldBreak breakpoints))
+  pure $ \event -> do
+    breakOnExecute <- shouldBreakOnExecute executeBreakpoints
+    breakOnWrite   <- shouldBreakOnWrite writeBreakpoints event
+    pure (breakOnExecute || breakOnWrite)
 
 -- | Break when the PC equals a certain value.
 breakOnPC :: Word16 -> BreakPostCondition
@@ -254,7 +262,7 @@ doCommand StepOut = do
   postConditions <- sequence [breakOnBreakpoints]
   reportingClockStats (doRun [breakOnRet sp] postConditions)
   DebugState {..} <- ask
-  wasBreakpoint   <- shouldBreak breakpoints
+  wasBreakpoint   <- shouldBreakOnExecute executeBreakpoints
   unless wasBreakpoint (void busStep)
   disassembleAtPC
 doCommand Run = do
@@ -271,20 +279,32 @@ doCommand (PokeR8  reg  value) = writeR8 reg value
 doCommand (PokeR16 reg  value) = writeR16 reg value
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
   DebugState {..} <- ask
-  liftIO (setBreakpoint breakpoints breakAddr True)
+  liftIO (setBreakpoint executeBreakpoints breakAddr True)
 doCommand (DeleteBreakpoint addr) = withAddress addr $ \breakAddr -> do
   DebugState {..} <- ask
-  liftIO (clearBreakpoint breakpoints breakAddr)
+  liftIO (clearBreakpoint executeBreakpoints breakAddr)
 doCommand (DisableBreakpiont addr) = withAddress addr $ \breakAddr -> do
   DebugState {..} <- ask
-  liftIO (setBreakpoint breakpoints breakAddr False)
+  liftIO (setBreakpoint executeBreakpoints breakAddr False)
+doCommand (AddWriteBreakpoint addr) = withAddress addr $ \breakAddr -> do
+  DebugState {..} <- ask
+  liftIO (setBreakpoint writeBreakpoints breakAddr True)
+doCommand (DeleteWriteBreakpoint addr) = withAddress addr $ \breakAddr -> do
+  DebugState {..} <- ask
+  liftIO (clearBreakpoint writeBreakpoints breakAddr)
+doCommand (DisableWriteBreakpiont addr) = withAddress addr $ \breakAddr -> do
+  DebugState {..} <- ask
+  liftIO (setBreakpoint writeBreakpoints breakAddr False)
 doCommand ListBreakpoints = do
   DebugState {..} <- ask
   liftIO $ do
-    allBreakpoints <- listBreakpoints breakpoints
-    when (null allBreakpoints) $ putStrLn "No breakpoints set"
-    for_ allBreakpoints
+    allExecuteBreakpoints <- listBreakpoints executeBreakpoints
+    allWriteBreakpoints   <- listBreakpoints writeBreakpoints
+    when (null allExecuteBreakpoints && null allWriteBreakpoints) $ putStrLn "No breakpoints set"
+    for_ allExecuteBreakpoints
       $ \(addr, enabled) -> putStrLn (formatHex addr ++ if not enabled then " (disabled)" else "")
+    for_ allWriteBreakpoints $ \(addr, enabled) ->
+      putStrLn ("On write to " ++ formatHex addr ++ if not enabled then " (disabled)" else "")
 doCommand (AddSymbol symbol value) = do
   DebugState {..} <- ask
   codeMap'        <- addToMap (symbol, value) <$> getCodeMap

@@ -43,7 +43,7 @@ symbol :: T.Text -> Parser T.Text
 symbol s = lexeme $ string' s
 
 address :: Parser MemAddress
-address = (ConstAddress <$> lexeme L.hexadecimal) <|> (LabelAddress <$> labelValue)
+address =  try ( LabelAddress <$> labelValue) <|> (ConstAddress <$> lexeme L.hexadecimal)
 
 value :: Parser Word8
 value = lexeme L.hexadecimal
@@ -77,9 +77,16 @@ command =
     <|> (StepOut <$ try (symbol "step" *> symbol "out"))
     <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
+    <|> (AddWriteBreakpoint <$> try (symbol "break" *> symbol "write" *> address))
     <|> (AddBreakpoint <$> try (symbol "break" *> address))
+    <|> (   DisableWriteBreakpiont
+        <$> try (symbol "disable" *> symbol "write" *> symbol "break" *> address)
+        )
     <|> (DisableBreakpiont <$> try (symbol "disable" *> symbol "break" *> address))
     <|> (ListBreakpoints <$ symbol "breakpoints")
+    <|> (   DeleteWriteBreakpoint
+        <$> try (symbol "delete" *> symbol "write" *> symbol "break" *> address)
+        )
     <|> (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
     <|> (DeleteSymbol <$> try (symbol "delete" *> symbol "symbol" *> labelValue))
 

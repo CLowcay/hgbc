@@ -339,7 +339,7 @@ reset = do
   writeR16 RegSP 0xFFFE
   writeRegister offsetHidden (0 :: Word8)
   setIME
-  writePC 0x150
+  writePC 0x100
 
   writeByte TIMA 0x00
   writeByte TMA  0x00
@@ -485,29 +485,35 @@ arithOp8 op o8 carry = do
 {-# INLINABLE cpuStep #-}
 cpuStep :: HasCPU env => ReaderT env IO BusEvent
 cpuStep = do
+
   -- Check if we have an interrupt
   interrupts <- pendingEnabledInterrupts
   ime        <- testIME
 
-  if interrupts /= 0 && ime
-    then do
-      modeRef <- asks (cpuMode . forCPUState)
-      liftIO (writeIORef modeRef ModeNormal)
+  -- Deal with HALT mode
+  modeRef    <- asks (cpuMode . forCPUState)
+  mode       <- liftIO (readIORef modeRef)
+  case mode of
+    ModeNormal -> if interrupts /= 0 && ime
+      then handleInterrupt interrupts
+      else executeInstruction =<< decodeAndAdvancePC decode
+    ModeHalt -> if interrupts /= 0
+      then do
+        liftIO (writeIORef modeRef ModeNormal)
+        cpuStep
+      else pure (BusEvent [] 32 ModeHalt)
+    ModeStop -> pure (BusEvent [] 32 ModeStop)
 
-      -- Handle an interrupt
-      let nextInterrupt = getNextInterrupt interrupts
-      pc  <- readPC
-      sp' <- push16 pc
-      writePC (interruptVector nextInterrupt)
-      clearIME
-      writeByte IF (clearBit interrupts nextInterrupt)
-      pure (BusEvent [sp', sp' + 1] 28 ModeNormal) -- TODO: Number of clocks here is just a guess
-    else do
-      modeRef <- asks (cpuMode . forCPUState)
-      mode    <- liftIO (readIORef modeRef)
-      if mode == ModeHalt
-        then pure (BusEvent [] 32 ModeHalt)
-        else executeInstruction =<< decodeAndAdvancePC decode
+ where
+  handleInterrupt interrupts = do
+    -- Handle an interrupt
+    let nextInterrupt = getNextInterrupt interrupts
+    pc  <- readPC
+    sp' <- push16 pc
+    writePC (interruptVector nextInterrupt)
+    clearIME
+    writeByte IF (clearBit interrupts nextInterrupt)
+    pure (BusEvent [sp', sp' + 1] 28 ModeNormal) -- TODO: Number of clocks here is just a guess
 
 {-# INLINE noWrite #-}
 noWrite :: Instruction -> BusEvent
@@ -645,7 +651,7 @@ executeInstruction instruction = case instruction of
   -- POP r16
   POP r16 -> do
     value <- pop16
-    if r16 == RegSP then writeAF value else writeR16 r16 value
+    if r16 == RegSP then writeAF (value .&. 0xFFF0) else writeR16 r16 value
     pure (noWrite instruction)
   -- LDHL SP im8
   LDHL i8 -> do
@@ -916,22 +922,24 @@ executeInstruction instruction = case instruction of
   DAA -> do
     flags <- readF
     a     <- readR8 RegA
+    let isH   = isFlagSet flagH flags
+    let isN   = isFlagSet flagN flags
+    let isCy  = isFlagSet flagCY flags
+    let aWide = fromIntegral a :: Int
 
-    let op = if isFlagSet flagN flags then OpSub else OpAdd
-    let (ir, flags') =
-          if a .&. 0x0F > 9 || isFlagSet flagH flags then adder8 op a 0x06 False else (a, flags)
-    let (r, flagsFinal) =
-          if ir `unsafeShiftR` 4 > 9 || isFlagSet flagCY flags' || isFlagSet flagCY flags
-            then adder8 op ir 0x60 False
-            else (ir, flags)
+    let rWide = if isN
+          then
+            let aWide' = if isH then (aWide - 0x06) .&. 0xFF else aWide
+            in  if isCy then aWide' - 0x60 else aWide'
+          else
+            let aWide' = if isH || aWide .&. 0x0F > 9 then aWide + 0x06 else aWide
+            in  if isCy || aWide' > 0x9F then aWide' + 0x60 else aWide'
 
+    let r = fromIntegral (rWide .&. 0xFF)
     writeR8 RegA r
     setFlagsMask
       (flagCY .|. flagZ .|. flagH)
-      ((flagsFinal .&. flagCY) .|. (flags' .&. flagCY) .|. (flags .&. flagCY) .|. if r == 0
-        then flagZ
-        else 0
-      )
+      ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     pure (noWrite instruction)
   -- CPL
   CPL -> do

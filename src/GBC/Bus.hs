@@ -95,4 +95,5 @@ busStep = do
     liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
   graphicsStep busEvent
+  updateTimer (clockAdvance busEvent)
   pure busEvent

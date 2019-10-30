@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 module GBC.Timer
   ( TimerState
   , initTimerState
@@ -11,64 +12,68 @@ import           GBC.Memory
 import           GBC.CPU
 import           GBC.Registers
 import           Common
-import           Control.Exception              ( assert )
 import           Control.Monad.Reader
 import           Data.Word
 import           Data.Bits
 
 -- | Number of clocks until the next timer tick
-type TimerState = IORef Word16
+data TimerState = TimerState {
+    clockCounter :: IORef Word16
+  , timerCounter :: IORef Word16
+}
 
 -- | Create the initial timer state.
 initTimerState :: IO TimerState
-initTimerState = newIORef 0
+initTimerState = TimerState <$> newIORef 0 <*> newIORef 0
 
 class HasMemory env => HasTimer env where
   forTimerState :: env -> TimerState
 
 -- | Select the relevant bits from the timer state given the low 2 bits of the
 -- TAC register.
-clockControlMask :: Word8 -> Word16
-clockControlMask 0 = 0xFC00
-clockControlMask 1 = 0xFFF0
-clockControlMask 2 = 0xFFC0
-clockControlMask 3 = 0xFF00
-clockControlMask x = error ("Unknown clock control pattern " ++ formatHex x)
+timerModulus :: Word8 -> Word16
+timerModulus 0 = 1024
+timerModulus 1 = 16
+timerModulus 2 = 64
+timerModulus 3 = 256
+timerModulus x = error ("Unknown clock control pattern " ++ formatHex x)
 
 -- | Check the timer stop flag for the TAC register.
-testTimerStop :: Word8 -> Bool
-testTimerStop = (`testBit` 2)
+timerStarted :: Word8 -> Bool
+timerStarted = (`testBit` 2)
 
 -- | Update the timer state.
 {-# INLINABLE updateTimer #-}
 updateTimer :: HasTimer env => Int -> ReaderT env IO ()
 updateTimer advance = do
   -- Update the internal clock count
-  timer  <- asks forTimerState
-  clocks <- liftIO (readIORef timer)
+  TimerState {..} <- asks forTimerState
+  clocks          <- liftIO (readIORef clockCounter)
   let clocks' = clocks + fromIntegral advance
-  liftIO (writeIORef timer clocks')
+  liftIO (writeIORef clockCounter clocks')
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
     $ writeByte DIV (fromIntegral (clocks' `unsafeShiftR` 8) :: Word8)
 
   -- Update the TIMA register
-  when (clocks .&. 0xFFF0 /= clocks' .&. 0xFFF0) $ do
-    tac <- readByte TAC
-    let mask = clockControlMask (tac .&. 0x03)
+  tac <- readByte TAC
+  when (timerStarted tac) $ do
+    timer <- liftIO (readIORef timerCounter)
+    -- liftIO (print timer)
+    let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus (tac .&. 3)
+    liftIO (writeIORef timerCounter timer')
 
     -- Update required
-    when (not (testTimerStop tac) && (clocks .&. mask /= clocks' .&. mask)) $ do
-      assert
-        (abs (fromIntegral (clocks .&. mask) - fromIntegral (clocks' .&. mask)) == (1 :: Int))
-        (pure ())
-
+    when (timerAdvance > 0) $ do
       tima <- readByte TIMA
-      if tima < 0xFF
-        then writeByte TIMA (tima + 1)
+      let tima' = fromIntegral tima + timerAdvance
+      if tima' < 0xFF
+        then writeByte TIMA (fromIntegral tima')
         else do
           -- Handle overflow by loading from TMA
-          tma <- readByte TMA
-          writeByte TIMA tma
           raiseInterrupt 2
+          tma <- readByte TMA
+          if tma == 0xFF
+            then writeByte TIMA 0xFF
+            else writeByte TIMA (tma + ((fromIntegral timerAdvance - 1) `mod` (0xFF - tma)))
