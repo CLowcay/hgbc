@@ -8,6 +8,7 @@ module GBC.Graphics
   , Mode(..)
   , initGraphics
   , newGraphicsSync
+  , graphicsRegisters
   , graphicsStep
   , flagLCDEnable
   , flagWindowTileMap
@@ -146,6 +147,55 @@ modeBits HBlank   = 0
 modeBits VBlank   = 1
 modeBits ScanOAM  = 2
 modeBits ReadVRAM = 3
+
+-- | Prepare a status report on the graphics registers.
+graphicsRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
+graphicsRegisters = do
+  lcdc <- readByte LCDC
+  stat <- readByte STAT
+  sequence
+    [ pure (RegisterInfo LCDC "LCDC" lcdc (decodeLCDC lcdc))
+    , pure (RegisterInfo STAT "STAT" stat (decodeSTAT stat))
+    , RegisterInfo SCY "SCY" <$> readByte SCY <*> pure []
+    , RegisterInfo SCX "SCX" <$> readByte SCX <*> pure []
+    , RegisterInfo LY "LY" <$> readByte LY <*> pure []
+    , RegisterInfo LYC "LYC" <$> readByte LYC <*> pure []
+    , RegisterInfo DMA "DMA" <$> readByte DMA <*> pure []
+    , RegisterInfo BGP "BGP" <$> readByte BGP <*> pure []
+    , RegisterInfo OBP0 "OBP0" <$> readByte OBP0 <*> pure []
+    , RegisterInfo OBP1 "OBP1" <$> readByte OBP1 <*> pure []
+    , RegisterInfo WY "WY" <$> readByte WY <*> pure []
+    , RegisterInfo WX "WX" <$> readByte WX <*> pure []
+    , RegisterInfo VBK "VBK" <$> readByte VBK <*> pure []
+    ]
+ where
+  decodeLCDC lcdc =
+    [ ("LCD Enable"      , show $ 0 /= lcdc .&. flagLCDEnable)
+    , ("Window Code Area", if 0 == lcdc .&. flagWindowTileMap then "9800" else "9C00")
+    , ("Window Enable"   , show $ 0 /= lcdc .&. flagWindowEnable)
+    , ( "Background Character Data Base"
+      , if 0 == lcdc .&. flagTileDataSelect then "8800" else "8000"
+      )
+    , ("Background Code Area", if 0 == lcdc .&. flagBackgroundTileMap then "9800" else "9C00")
+    , ("OBJ Height"          , if 0 == lcdc .&. flagOBJSize then "8" else "16")
+    , ("OBJ Enable"          , show $ 0 /= lcdc .&. flagOBJEnable)
+    , ("Background Enable"   , show $ 0 /= lcdc .&. flagBackgroundEnable)
+    ]
+  decodeSTAT stat =
+    let mode = case stat .&. 0x03 of
+          0 -> "HBlank"
+          1 -> "VBlank"
+          2 -> "Scanning OAM"
+          3 -> "Reading VRAM"
+          _ -> error "Impossible stat mode"
+    in  [ ("Mode Flag"                , mode)
+        , ("LYC = LY"                 , show $ stat `testBit` matchBit)
+        , ("Interrupt on HBlank", show $ stat `testBit` interruptHBlank)
+        , ("Interrupt on VBlank", show $ stat `testBit` interruptVBlank)
+        , ("Interrupt on Scanning OAM", show $ stat `testBit` interruptOAM)
+        , ("Interrupt on LYC = LY", show $ stat `testBit` interruptCoincidence)
+        ]
+
 
 {-# INLINABLE graphicsStep #-}
 graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()

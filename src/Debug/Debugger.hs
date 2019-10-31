@@ -21,6 +21,7 @@ import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
 import           Data.Word
+import           Data.Bits
 import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
@@ -38,7 +39,7 @@ import qualified SDL.Time                      as SDL
 {-# SPECIALIZE readPC :: ReaderT DebugState IO Word16 #-}
 {-# SPECIALIZE busStep :: ReaderT DebugState IO BusEvent #-}
 
-data MemAddress = ConstAddress Word16 | LabelAddress String deriving (Eq, Ord, Show)
+data MemAddress = ConstAddress !Word16 | LabelAddress !String !(Maybe Word16) deriving (Eq, Ord, Show)
 
 -- | Debugger commands.
 data Command = ShowHeader
@@ -51,8 +52,16 @@ data Command = ShowHeader
              | RunTo MemAddress
              | Reset
              | Poke8 MemAddress Word8
+             | Poke16 MemAddress Word16
+             | Peek8 MemAddress
+             | Peek16 MemAddress
              | PokeR8 Register8 Word8
              | PokeR16 Register16 Word16
+             | ShowGraphics (Maybe String)
+             | ShowTimer (Maybe String)
+             | ShowAudio (Maybe String)
+             | ShowInternal (Maybe String)
+             | ShowMBC (Maybe String)
              | AddBreakpoint MemAddress
              | DeleteBreakpoint MemAddress
              | DisableBreakpiont MemAddress
@@ -213,12 +222,14 @@ disassembleAtPC = do
   dumpDisassembly decorator symbols pc 4
 
 withAddress :: MemAddress -> (Word16 -> MonadDebug ()) -> MonadDebug ()
-withAddress (ConstAddress addr ) action = action addr
-withAddress (LabelAddress label) action = do
+withAddress (ConstAddress addr              ) action = action addr
+withAddress (LabelAddress label maybeAddress) action = do
   symbols <- getCodeMap
   case lookupBySymbol symbols label of
     Just addr -> action addr
-    Nothing   -> liftIO (putStrLn ("Unknown symbol " ++ label))
+    Nothing   -> case maybeAddress of
+      Just address -> action address
+      Nothing      -> liftIO (putStrLn ("Unknown symbol " ++ label))
 
 reportingClockStats :: MonadIO m => m Int -> m ()
 reportingClockStats action = do
@@ -273,10 +284,22 @@ doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
   postConditions <- sequence [breakOnBreakpoints, pure (breakOnPC addr)]
   reportingClockStats (doRun [] postConditions)
   disassembleAtPC
-doCommand Reset                = reset
-doCommand (Poke8   addr value) = withAddress addr $ \actualAddr -> writeByte actualAddr value
-doCommand (PokeR8  reg  value) = writeR8 reg value
-doCommand (PokeR16 reg  value) = writeR16 reg value
+doCommand Reset               = reset
+doCommand (Poke8  addr value) = withAddress addr $ \actualAddr -> writeByte actualAddr value
+doCommand (Poke16 addr value) = withAddress addr $ \actualAddr -> writeWord actualAddr value
+doCommand (Peek8 addr) =
+  withAddress addr $ \actualAddr -> liftIO . putStrLn . formatHex =<< readByte actualAddr
+doCommand (Peek16 addr) = withAddress addr $ \actualAddr -> do
+  l <- readByte actualAddr
+  h <- readByte (actualAddr + 1)
+  liftIO . putStrLn $ formatHex ((fromIntegral h `shiftL` 8) .|. fromIntegral l :: Word16)
+doCommand (PokeR8  reg value ) = writeR8 reg value
+doCommand (PokeR16 reg value ) = writeR16 reg value
+doCommand (ShowGraphics  r   ) = dumpGraphics r
+doCommand (ShowTimer     r   ) = dumpTimer r
+doCommand (ShowAudio     r   ) = dumpAudio r
+doCommand (ShowInternal  r   ) = dumpInternal r
+doCommand (ShowMBC       r   ) = dumpMBC r
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
   DebugState {..} <- ask
   liftIO (setBreakpoint executeBreakpoints breakAddr True)

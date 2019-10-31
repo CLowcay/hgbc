@@ -3,6 +3,7 @@ module GBC.Timer
   ( TimerState
   , initTimerState
   , HasTimer(..)
+  , timerRegisters
   , updateTimer
   )
 where
@@ -41,6 +42,21 @@ timerModulus x = error ("Unknown clock control pattern " ++ formatHex x)
 -- | Check the timer stop flag for the TAC register.
 timerStarted :: Word8 -> Bool
 timerStarted = (`testBit` 2)
+
+-- | Prepare a status report on the timer registers.
+timerRegisters :: HasTimer env => ReaderT env IO [RegisterInfo]
+timerRegisters = do
+  tac <- readByte TAC
+  sequence
+    [ RegisterInfo DIV "DIV" <$> readByte DIV <*> pure []
+    , RegisterInfo TIMA "TIMA" <$> readByte TIMA <*> pure []
+    , pure (RegisterInfo TAC "TAC" tac (decodeTAC tac))
+    ]
+ where
+  decodeTAC tac =
+    let modulus   = timerModulus (tac .&. 3)
+        frequency = (4 * 1024 * 1024 :: Int) `div` fromIntegral modulus
+    in  [("Frequency", show frequency), ("Timer Started", show (timerStarted tac) ++ "Hz")]
 
 -- | Update the timer state.
 {-# INLINABLE updateTimer #-}

@@ -43,7 +43,15 @@ symbol :: T.Text -> Parser T.Text
 symbol s = lexeme $ string' s
 
 address :: Parser MemAddress
-address =  try ( LabelAddress <$> labelValue) <|> (ConstAddress <$> lexeme L.hexadecimal)
+address = do
+  maybeLabel   <- observing . try . lookAhead $ labelValue
+  maybeAddress <- observing . try . lookAhead $ value16
+
+  case (maybeLabel, maybeAddress) of
+    (Right l, Right a) -> LabelAddress l (Just a) <$ labelValue
+    (Right l, Left _ ) -> LabelAddress l Nothing <$ labelValue
+    (Left  _, Right a) -> ConstAddress a <$ value16
+    (Left  _, Left _ ) -> ConstAddress <$> value16
 
 value :: Parser Word8
 value = lexeme L.hexadecimal
@@ -64,12 +72,11 @@ command =
     <|> try (PokeR8 <$> ((symbol "reg" <|> symbol "r") *> register8) <*> (symbol "=" *> value))
     <|> try (PokeR16 <$> ((symbol "reg" <|> symbol "r") *> register16) <*> (symbol "=" *> value16))
     <|> (ShowRegs <$ (symbol "reg" <|> symbol "r"))
-    <|> try
-          (   Poke8
-          <$> ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address)
-          <*> (symbol "=" *> value)
-          )
-    <|> (ShowMem <$> ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address))
+    <|> try (Poke8 <$> ((symbol "byte" <|> symbol "b") *> address) <*> (symbol "=" *> value))
+    <|> try (Poke16 <$> ((symbol "word" <|> symbol "w") *> address) <*> (symbol "=" *> value16))
+    <|> (Peek8 <$> ((symbol "byte" <|> symbol "b") *> address))
+    <|> (Peek16 <$> ((symbol "word" <|> symbol "w") *> address))
+    <|> (ShowMem <$> try ((symbol "memory" <|> symbol "mem" <|> symbol "m") *> address))
     <|> (ShowDisassembly <$> (symbol "code" *> optional address))
     <|> (ShowDisassembly <$> (symbol "c" *> optional address))
     <|> (ListSymbols <$ symbol "symbols")
@@ -77,6 +84,11 @@ command =
     <|> (StepOut <$ try (symbol "step" *> symbol "out"))
     <|> (Step <$> (symbol "step" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
+    <|> (ShowGraphics <$> (symbol "graphics" *> optional labelValue))
+    <|> (ShowTimer <$> (symbol "timer" *> optional labelValue))
+    <|> (ShowAudio <$> (symbol "audio" *> optional labelValue))
+    <|> (ShowInternal <$> (symbol "internal" *> optional labelValue))
+    <|> (ShowMBC <$> (symbol "mbc" *> optional labelValue))
     <|> (AddWriteBreakpoint <$> try (symbol "break" *> symbol "write" *> address))
     <|> (AddBreakpoint <$> try (symbol "break" *> address))
     <|> (   DisableWriteBreakpiont

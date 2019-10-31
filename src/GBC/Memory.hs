@@ -7,6 +7,7 @@ module GBC.Memory
   , HasMemory(..)
   , initMemory
   , getROMHeader
+  , getMbcRegisters
   , dmaToOAM
   , readByte
   , writeByte
@@ -15,6 +16,7 @@ module GBC.Memory
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Foldable
@@ -59,6 +61,11 @@ initMemory rom videoBuffer = do
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = romHeader
+
+getMbcRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
+getMbcRegisters = do
+  Memory {..} <- asks forMemory
+  liftIO (mbcRegisters mbc)
 
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.

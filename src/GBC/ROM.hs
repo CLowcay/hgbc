@@ -20,6 +20,7 @@ where
 import           Control.Monad
 import           Data.Binary.Get
 import           Data.IORef
+import           Common
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
@@ -156,6 +157,7 @@ data MBC = MBC {
   , readRAM :: Word16 -> IO Word8
   , writeRAM :: Word16 -> Word8 -> IO ()
   , withRAMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , mbcRegisters :: IO [RegisterInfo]
 }
 
 -- | Simulate a cartridge with no memory bank controller.
@@ -177,6 +179,7 @@ nullMBC (ROM romData) = do
                              withForeignPtr ram $ \ptr -> pokeElemOff ptr (fromIntegral address) value
     , withRAMPointer     = \address action ->
                              withForeignPtr ram (action . (`plusPtr` fromIntegral address))
+    , mbcRegisters       = pure []
     }
 
 mbc1 :: ROM -> IO MBC
@@ -235,4 +238,19 @@ mbc1 (ROM romData) = do
     , withRAMPointer     = \address action -> do
                              offset <- getRAMOffset
                              withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
+    , mbcRegisters       =
+      do
+        r1 <- readIORef romOffset
+        r2 <- readIORef ramOffset
+        r0 <- readIORef enableRAM
+        r3 <- readIORef ramSelect
+        pure
+          [ RegisterInfo 0      "R0" (if r0 then 0x0A else 0) [("RAM enabled ", show r0)]
+          , RegisterInfo 0x2000 "R1" (fromIntegral r1)        []
+          , RegisterInfo 0x4000 "R2" (fromIntegral r2)        []
+          , RegisterInfo 0x6000
+                         "R3"
+                         (if r3 then 1 else 0)
+                         [("R2 is", if r3 then "RAM bank" else "ROM bank high bits")]
+          ]
     }

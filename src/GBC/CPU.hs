@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BinaryLiterals #-}
@@ -39,6 +40,7 @@ module GBC.CPU
   , raiseInterrupt
   , executeInstruction
   , cpuStep
+  , internalRegisters
   )
 where
 
@@ -48,6 +50,7 @@ import           Data.Bits
 import           Data.IORef
 import           Data.Int
 import           Data.Word
+import           Data.Maybe
 import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.Decode
@@ -992,3 +995,33 @@ doRet :: HasCPU env => Int -> ReaderT env IO BusEvent
 doRet numberOfClocks = do
   writePC =<< pop16
   pure (BusEvent [] numberOfClocks ModeNormal)
+
+internalRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
+internalRegisters = do
+  p1   <- readByte P1
+  rif  <- readByte IF
+  rie  <- readByte IE
+  svbk <- readByte SVBK
+  key1 <- readByte KEY1
+  pure
+    [ RegisterInfo P1   "P1"   p1   []
+    , RegisterInfo IF   "IF"   rif  (decodeInterrupts rif "Pending")
+    , RegisterInfo IE   "IE"   rie  (decodeInterrupts rie "Enabled")
+    , RegisterInfo SVBK "SVBK" svbk (decodeSVBK svbk)
+    , RegisterInfo
+      KEY1
+      "KEY1"
+      key1
+      [ ("Double Speed"          , show $ key1 `testBit` 7)
+      , ("Enable Speed Switching", show $ key1 `testBit` 0)
+      ]
+    ]
+ where
+  decodeInterrupts i s = map (, s) $ catMaybes
+    [ if i `testBit` 0 then Just "Interrupt 40 VBlank" else Nothing
+    , if i `testBit` 1 then Just "Interrupt 48 LCDC Status" else Nothing
+    , if i `testBit` 2 then Just "Interrupt 50 Timer" else Nothing
+    , if i `testBit` 3 then Just "Interrupt 58 Serial Transfer" else Nothing
+    , if i `testBit` 4 then Just "Interrupt 60 Keypad" else Nothing
+    ]
+  decodeSVBK svbk = let bank = svbk .&. 7 in [("RAM Bank", show $ if bank == 0 then 1 else bank)]

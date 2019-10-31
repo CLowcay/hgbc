@@ -3,7 +3,9 @@ module Common
   , SymbolTable(..)
   , lookupByAddress
   , lookupBySymbol
+  , RegisterInfo(..)
   , Format(..)
+  , padLeft
   , formatHex
   )
 where
@@ -23,6 +25,8 @@ lookupByAddress (SymbolTable addrTable _) addr = HM.lookup addr addrTable
 lookupBySymbol :: SymbolTable -> String -> Maybe Word16
 lookupBySymbol (SymbolTable _ symbolTable) label = HM.lookup label symbolTable
 
+data RegisterInfo = RegisterInfo Word16 String Word8 [(String, String)]
+
 class Format c where
   format :: c -> String
   format = formatWithSymbolTable $ SymbolTable HM.empty HM.empty
@@ -30,12 +34,12 @@ class Format c where
   formatWithSymbolTable _ = format
 
 {-# INLINABLE padLeft #-}
-padLeft :: Int -> String -> String
-padLeft width s = reverse . take width $ reverse s ++ repeat '0'
+padLeft :: Int -> Char -> String -> String
+padLeft width c s = reverse . take width $ reverse s ++ repeat c
 
 {-# INLINABLE formatHex #-}
 formatHex :: (Show b, Num b, FiniteBits b) => b -> String
-formatHex n = padLeft width $ encodeHex . toHexit <$> reverse [0 .. lastHexit]
+formatHex n = padLeft width '0' $ encodeHex . toHexit <$> reverse [0 .. lastHexit]
  where
   width     = finiteBitSize n `div` 4
   lastHexit = (finiteBitSize n `div` 4) - 1

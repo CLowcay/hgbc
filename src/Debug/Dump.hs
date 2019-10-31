@@ -4,6 +4,11 @@ module Debug.Dump
   , dumpHeader
   , dumpDisassembly
   , dumpMem
+  , dumpGraphics
+  , dumpAudio
+  , dumpTimer
+  , dumpInternal
+  , dumpMBC
   )
 where
 
@@ -15,9 +20,11 @@ import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Decode
+import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM
+import           GBC.Timer
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 
@@ -102,8 +109,9 @@ dumpDisassembly decorator symbolTable base n = do
       ++ extraInfo addr instruction
  where
   extraInfo addr (JR e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo addr (JRCC _ e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo _    _        = ""
+  extraInfo addr (JRCC _ e) =
+    " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo _ _ = ""
 
 dumpMem :: HasMemory env => Word16 -> ReaderT env IO ()
 dumpMem base = for_ [0 .. 15]
@@ -119,3 +127,29 @@ hexDump base lineData = do
 
 toPrintable :: Char -> Char
 toPrintable c = if c <= ' ' || c >= '\DEL' then '.' else c
+
+dumpGraphics :: HasMemory env => Maybe String -> ReaderT env IO ()
+dumpGraphics register = liftIO . dumpRegisterInfo . filterRegister register =<< graphicsRegisters
+
+dumpAudio :: HasMemory env => Maybe String -> ReaderT env IO ()
+dumpAudio register = undefined
+
+dumpTimer :: HasTimer env => Maybe String -> ReaderT env IO ()
+dumpTimer register = liftIO . dumpRegisterInfo . filterRegister register =<< timerRegisters
+
+dumpInternal :: HasMemory env => Maybe String -> ReaderT env IO ()
+dumpInternal register = liftIO . dumpRegisterInfo . filterRegister register =<< internalRegisters
+
+dumpMBC :: HasMemory env => Maybe String -> ReaderT env IO ()
+dumpMBC register = liftIO . dumpRegisterInfo . filterRegister register =<< getMbcRegisters
+
+filterRegister :: Maybe String -> [RegisterInfo] -> [RegisterInfo]
+filterRegister Nothing  = id
+filterRegister (Just r) = filter isRegister where isRegister (RegisterInfo _ i _ _) = r == i
+
+dumpRegisterInfo :: [RegisterInfo] -> IO ()
+dumpRegisterInfo = traverse_ dumpRegister
+ where
+  dumpRegister (RegisterInfo address name value flags) = do
+    putStrLn (formatHex address ++ " " ++ padLeft 4 ' ' name ++ " = " ++ formatHex value)
+    for_ flags $ \(flag, status) -> putStrLn ("       " ++ flag ++ ": " ++ status)
