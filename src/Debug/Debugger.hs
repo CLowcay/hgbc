@@ -293,13 +293,13 @@ doCommand (Peek16 addr) = withAddress addr $ \actualAddr -> do
   l <- readByte actualAddr
   h <- readByte (actualAddr + 1)
   liftIO . putStrLn $ formatHex ((fromIntegral h `shiftL` 8) .|. fromIntegral l :: Word16)
-doCommand (PokeR8  reg value ) = writeR8 reg value
-doCommand (PokeR16 reg value ) = writeR16 reg value
-doCommand (ShowGraphics  r   ) = dumpGraphics r
-doCommand (ShowTimer     r   ) = dumpTimer r
-doCommand (ShowAudio     r   ) = dumpAudio r
-doCommand (ShowInternal  r   ) = dumpInternal r
-doCommand (ShowMBC       r   ) = dumpMBC r
+doCommand (PokeR8  reg value)  = writeR8 reg value
+doCommand (PokeR16 reg value)  = writeR16 reg value
+doCommand (ShowGraphics r)        = dumpGraphics r
+doCommand (ShowTimer    r )       = dumpTimer r
+doCommand (ShowAudio    r )       = dumpAudio r
+doCommand (ShowInternal r )       = dumpInternal r
+doCommand (ShowMBC      r )       = dumpMBC r
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
   DebugState {..} <- ask
   liftIO (setBreakpoint executeBreakpoints breakAddr True)

@@ -505,7 +505,11 @@ cpuStep = do
         liftIO (writeIORef modeRef ModeNormal)
         cpuStep
       else pure (BusEvent [] 32 ModeHalt)
-    ModeStop -> pure (BusEvent [] 32 ModeStop)
+    ModeStop -> if interrupts /= 0
+      then do
+        liftIO (writeIORef modeRef ModeNormal)
+        cpuStep
+      else pure (BusEvent [] 32 ModeHalt)
 
  where
   handleInterrupt interrupts = do
@@ -958,8 +962,13 @@ executeInstruction instruction = case instruction of
     pure (BusEvent [] (clocks instruction True) ModeHalt)
   -- STOP
   STOP -> do
-    setMode ModeStop
-    pure (BusEvent [] (clocks instruction True) ModeStop)
+    key1 <- readByte KEY1
+    if key1 `testBit` 0 then do
+      writeByte KEY1 0
+      pure (BusEvent [] (clocks instruction True) ModeNormal)
+    else do
+      setMode ModeStop
+      pure (BusEvent [] (clocks instruction True) ModeStop)
   -- EI
   EI -> do
     setIME
