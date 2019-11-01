@@ -8,11 +8,15 @@ import           Data.Word
 import           Common
 
 data Fault = InvalidInstruction Word8
-           | WriteToDisabledRAM Word16
-           | ReadFromDisabledRAM Word16
+           | InvalidWrite Word16
+           | InvalidRead Word16
+           | InvalidAccess Word16
+           | InvalidSourceForDMA Word16
            deriving (Eq, Ord, Show)
 
 instance Exception Fault where
   displayException (InvalidInstruction  w8  ) = "Invalid instruction " ++ formatHex w8
-  displayException (WriteToDisabledRAM  addr) = "Write to invalid RAM address " ++ formatHex addr
-  displayException (ReadFromDisabledRAM addr) = "Read from invalid RAM address " ++ formatHex addr
+  displayException (InvalidWrite  addr) = "Write to invalid RAM address " ++ formatHex addr
+  displayException (InvalidRead addr) = "Read from invalid RAM address " ++ formatHex addr
+  displayException (InvalidAccess addr) = "Read or Write at invalid RAM address " ++ formatHex addr
+  displayException (InvalidSourceForDMA addr) = "Invalid source address for DMG DMA" ++ formatHex addr

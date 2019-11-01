@@ -7,6 +7,7 @@
 module Debug.Debugger
   ( Command(..)
   , MemAddress(..)
+  , Option(..)
   , DebugState
   , bus
   , initDebug
@@ -42,6 +43,8 @@ import qualified SDL.Time                      as SDL
 
 data MemAddress = ConstAddress !Word16 | LabelAddress !String !(Maybe Word16) deriving (Eq, Ord, Show)
 
+data Option = CheckRAMAccess deriving (Eq, Ord, Show)
+
 -- | Debugger commands.
 data Command = ShowHeader
              | ShowRegs
@@ -73,6 +76,8 @@ data Command = ShowHeader
              | AddSymbol String Word16
              | DeleteSymbol String
              | ListSymbols
+             | EnableOption Option
+             | DisableOption Option
              deriving (Eq, Ord, Show)
 
 -- | The current state of the debugger.
@@ -341,4 +346,6 @@ doCommand (DeleteSymbol symbol) = lift $ do
   setCodeMap codeMap'
 doCommand ListSymbols = do
   symbols <- lift (listSymbols <$> getCodeMap)
-  for_ symbols $ \(label, value) -> (outputStrLn (label ++ ": " ++ formatHex value))
+  for_ symbols $ \(label, value) -> outputStrLn (label ++ ": " ++ formatHex value)
+doCommand (EnableOption  CheckRAMAccess) = lift (shouldCheckRAMAccess True)
+doCommand (DisableOption CheckRAMAccess) = lift (shouldCheckRAMAccess False)

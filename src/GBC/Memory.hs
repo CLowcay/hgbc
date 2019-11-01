@@ -7,6 +7,7 @@ module GBC.Memory
   , HasMemory(..)
   , initMemory
   , getROMHeader
+  , shouldCheckRAMAccess
   , getMbcRegisters
   , dmaToOAM
   , readByte
@@ -17,14 +18,17 @@ module GBC.Memory
 where
 
 import           Common
+import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Foldable
+import           Data.IORef
 import           Data.Int
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
 import           Foreign.Storable
+import           GBC.Errors
 import           GBC.ROM
 import qualified Data.ByteString               as B
 
@@ -40,6 +44,7 @@ data Memory = Memory {
   , memRam :: !(ForeignPtr Word8)
   , memHigh :: !(ForeignPtr Word8)
   , videoBuffer :: !VideoBuffers
+  , checkRAMAccess :: !(IORef Bool)
 }
 
 class HasMemory env where
@@ -53,14 +58,21 @@ instance HasMemory Memory where
 initMemory :: ROM -> VideoBuffers -> IO Memory
 initMemory rom videoBuffer = do
   let romHeader = extractHeader rom
-  memRam  <- mallocForeignPtrArray 0x2000
-  memHigh <- mallocForeignPtrArray 0x100
-  mbc     <- getMBC rom
+  memRam         <- mallocForeignPtrArray 0x2000
+  memHigh        <- mallocForeignPtrArray 0x100
+  mbc            <- getMBC rom
+  checkRAMAccess <- newIORef False
   pure Memory { .. }
 
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = romHeader
+
+-- | Check that RAM access operations are valid.
+shouldCheckRAMAccess :: HasMemory env => Bool -> ReaderT env IO ()
+shouldCheckRAMAccess check = do
+  Memory {..} <- asks forMemory
+  liftIO (writeIORef checkRAMAccess check)
 
 getMbcRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
 getMbcRegisters = do
@@ -82,9 +94,11 @@ dmaToOAM source = do
     2 -> withROMHighPointer mbc (source - 0x4000) copyOAM
     3 -> withROMHighPointer mbc (source - 0x4000) copyOAM
     4 -> copyOAM (vram videoBuffer `plusPtr` offset 0x8000)
-    5 -> withRAMPointer mbc (source - 0xA000) copyOAM
+    5 -> do
+      check <- liftIO (readIORef checkRAMAccess)
+      withRAMPointer mbc check (source - 0xA000) copyOAM
     6 -> withForeignPtr memRam $ \ram -> copyOAM (ram `plusPtr` offset 0xC000)
-    _ -> error ("Invalid source for DMA " ++ show source)
+    _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
 
 -- | Read a byte from memory.
@@ -98,14 +112,18 @@ readByte addr = do
     2 -> readROMHigh mbc (addr - 0x4000)
     3 -> readROMHigh mbc (addr - 0x4000)
     4 -> peekElemOff (vram videoBuffer) (offset 0x8000)
-    5 -> readRAM mbc (addr - 0xA000)
+    5 -> do
+      check <- liftIO (readIORef checkRAMAccess)
+      readRAM mbc check (addr - 0xA000)
     6 -> withForeignPtr memRam (`peekElemOff` offset 0xC000)
     7
       | addr < 0xFE00 -> withForeignPtr memRam (`peekElemOff` offset 0xE000)
       | addr < 0xFEA0 -> do
         value <- peekElemOff (oam videoBuffer) (offset 0xFE00)
         pure (fromIntegral value)
-      | addr < 0xFF00 -> pure 0xFF
+      | addr < 0xFF00 -> liftIO $ do
+        check <- readIORef checkRAMAccess
+        if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
       | addr >= 0xFF40 && addr <= 0xFF4B -> do
         value <- peekElemOff (registers videoBuffer) (offset 0xFF40)
         pure (fromIntegral value)
@@ -130,12 +148,16 @@ writeByte addr value = do
     2 -> writeROM mbc addr value
     3 -> writeROM mbc addr value
     4 -> pokeElemOff (vram videoBuffer) (offset 0x8000) value
-    5 -> writeRAM mbc (addr - 0xA000) value
+    5 -> do
+      check <- liftIO (readIORef checkRAMAccess)
+      writeRAM mbc check (addr - 0xA000) value
     6 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xC000) value
     7
       | addr < 0xFE00 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xE000) value
       | addr < 0xFEA0 -> pokeElemOff (oam videoBuffer) (offset 0xFE00) (fromIntegral value)
-      | addr < 0xFF00 -> pure ()
+      | addr < 0xFF00 -> do
+        check <- readIORef checkRAMAccess
+        if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
       | addr >= 0xFF40 && addr <= 0xFF4B -> pokeElemOff (registers videoBuffer)
                                                         (offset 0xFF40)
                                                         (fromIntegral value)

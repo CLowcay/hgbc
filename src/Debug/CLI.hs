@@ -99,6 +99,11 @@ command =
     <|> try (DeleteWriteBreakpoint <$> try (symbol "delete" *> symbol "watch" *> address))
     <|> try (DeleteBreakpoint <$> try (symbol "delete" *> symbol "break" *> address))
     <|> try (DeleteSymbol <$> try (symbol "delete" *> symbol "symbol" *> labelValue))
+    <|> try (EnableOption <$> try (symbol "enable" *> optionName))
+    <|> try (DisableOption <$> try (symbol "disable" *> optionName))
+
+optionName :: Parser Option
+optionName = CheckRAMAccess <$ symbol "checkRAMAccess"
 
 register8 :: Parser Register8
 register8 = register <?> "8-bit register"

@@ -158,9 +158,9 @@ data MBC = MBC {
   , writeROM :: Word16 -> Word8 -> IO ()
   , withROMLowPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
   , withROMHighPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
-  , readRAM :: Word16 -> IO Word8
-  , writeRAM :: Word16 -> Word8 -> IO ()
-  , withRAMPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , readRAM :: Bool -> Word16 -> IO Word8
+  , writeRAM :: Bool -> Word16 -> Word8 -> IO ()
+  , withRAMPointer :: forall a. Bool -> Word16 -> (Ptr Word8 -> IO a) -> IO a
   , mbcRegisters :: IO [RegisterInfo]
 }
 
@@ -178,10 +178,10 @@ nullMBC (ROM romData) = do
                              romData
                              (action . (`plusPtr` (fromIntegral address + 0x4000)))
     , writeROM           = \_ _ -> pure ()
-    , readRAM = \address -> withForeignPtr ram $ \ptr -> peekElemOff ptr (fromIntegral address)
-    , writeRAM           = \address value ->
+    , readRAM = \_ address -> withForeignPtr ram $ \ptr -> peekElemOff ptr (fromIntegral address)
+    , writeRAM           = \_ address value ->
                              withForeignPtr ram $ \ptr -> pokeElemOff ptr (fromIntegral address) value
-    , withRAMPointer     = \address action ->
+    , withRAMPointer     = \_ address action ->
                              withForeignPtr ram (action . (`plusPtr` fromIntegral address))
     , mbcRegisters       = pure []
     }
@@ -232,20 +232,23 @@ mbc1 (ROM romData) = do
                              B.unsafeUseAsCString
                                romData
                                (action . (`plusPtr` (offset + fromIntegral address)))
-    , readRAM            = \address -> do
-                             liftIO $ do
+    , readRAM            = \check address -> do
+                             when check $ liftIO $ do
                                enabled <- readIORef enableRAM
-                               unless enabled (throwIO (ReadFromDisabledRAM (address + 0xA000)))
+                               unless enabled (throwIO (InvalidRead (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
-    , writeRAM           = \address value -> do
-                             liftIO $ do
+    , writeRAM           =
+      \check address value -> do
+        when check $ liftIO $ do
+          enabled <- readIORef enableRAM
+          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
+        offset <- getRAMOffset
+        withForeignPtr ram $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
+    , withRAMPointer     = \check address action -> do
+                             when check $ liftIO $ do
                                enabled <- readIORef enableRAM
-                               unless enabled (throwIO (WriteToDisabledRAM (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram
-                               $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
-    , withRAMPointer     = \address action -> do
+                               unless enabled (throwIO (InvalidAccess (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
     , mbcRegisters       =
@@ -303,20 +306,23 @@ mbc5 (ROM romData) = do
                              B.unsafeUseAsCString
                                romData
                                (action . (`plusPtr` (offset + fromIntegral address)))
-    , readRAM            = \address -> do
-                             liftIO $ do
+    , readRAM            = \check address -> do
+                             when check $ liftIO $ do
                                enabled <- readIORef ramG
-                               unless enabled (throwIO (ReadFromDisabledRAM (address + 0xA000)))
+                               unless enabled (throwIO (InvalidRead (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
-    , writeRAM           = \address value -> do
-                             liftIO $ do
+    , writeRAM           =
+      \check address value -> do
+        when check $ liftIO $ do
+          enabled <- readIORef ramG
+          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
+        offset <- getRAMOffset
+        withForeignPtr ram $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
+    , withRAMPointer     = \check address action -> do
+                             when check $ liftIO $ do
                                enabled <- readIORef ramG
-                               unless enabled (throwIO (WriteToDisabledRAM (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram
-                               $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
-    , withRAMPointer     = \address action -> do
+                               unless enabled (throwIO (InvalidWrite (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
     , mbcRegisters       = do
