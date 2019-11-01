@@ -1,5 +1,4 @@
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE MultiWayIf #-}
 
 module GBC.ROM
@@ -17,21 +16,12 @@ module GBC.ROM
   )
 where
 
-import           Common
-import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Data.Binary.Get
-import           Data.Bits
-import           Data.IORef
 import           Data.Word
-import           Foreign.ForeignPtr
-import           Foreign.Ptr
-import           Foreign.Storable
-import           GBC.Errors
+import           GBC.MBC
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
-import qualified Data.ByteString.Unsafe        as B
 
 newtype ROM = ROM B.ByteString deriving (Eq, Ord, Show)
 
@@ -143,197 +133,10 @@ extractHeader (ROM rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.dro
 
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
-getMBC rom =
+getMBC rom@(ROM romData) =
   let cType = cartridgeType (extractHeader rom)
   in  case mbcType cType of
-        Nothing   -> nullMBC rom
-        Just MBC1 -> mbc1 rom
-        Just MBC5 -> mbc5 rom
-        Just x    -> error ("Unsupported " ++ show x)
-
--- | A memory bank controller.
-data MBC = MBC {
-    readROMLow :: Word16 -> IO Word8
-  , readROMHigh :: Word16 -> IO Word8
-  , writeROM :: Word16 -> Word8 -> IO ()
-  , withROMLowPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
-  , withROMHighPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
-  , readRAM :: Bool -> Word16 -> IO Word8
-  , writeRAM :: Bool -> Word16 -> Word8 -> IO ()
-  , withRAMPointer :: forall a. Bool -> Word16 -> (Ptr Word8 -> IO a) -> IO a
-  , mbcRegisters :: IO [RegisterInfo]
-}
-
--- | Simulate a cartridge with no memory bank controller.
-nullMBC :: ROM -> IO MBC
-nullMBC (ROM romData) = do
-  ram <- mallocForeignPtrBytes 0x2000
-  pure MBC
-    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
-    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
-                             romData
-                             (action . (`plusPtr` fromIntegral address))
-    , readROMHigh = \address -> pure (romData `B.unsafeIndex` (fromIntegral address + 0x4000))
-    , withROMHighPointer = \address action -> B.unsafeUseAsCString
-                             romData
-                             (action . (`plusPtr` (fromIntegral address + 0x4000)))
-    , writeROM           = \_ _ -> pure ()
-    , readRAM = \_ address -> withForeignPtr ram $ \ptr -> peekElemOff ptr (fromIntegral address)
-    , writeRAM           = \_ address value ->
-                             withForeignPtr ram $ \ptr -> pokeElemOff ptr (fromIntegral address) value
-    , withRAMPointer     = \_ address action ->
-                             withForeignPtr ram (action . (`plusPtr` fromIntegral address))
-    , mbcRegisters       = pure []
-    }
-
-mbc1 :: ROM -> IO MBC
-mbc1 (ROM romData) = do
-  romOffset <- newIORef 1
-  ramOffset <- newIORef 0
-  enableRAM <- newIORef False
-  ramSelect <- newIORef False
-  ram       <- mallocForeignPtrBytes 0x8000 :: IO (ForeignPtr Word8)
-
-  let getROMOffset = do
-        noHighROM <- readIORef ramSelect
-        low       <- readIORef romOffset
-        if noHighROM
-          then pure (low `unsafeShiftL` 14)
-          else do
-            high <- readIORef ramOffset
-            pure (((high `unsafeShiftL` 5) .|. low) `unsafeShiftL` 14)
-  let getRAMOffset = do
-        ramBanking <- readIORef ramSelect
-        if ramBanking
-          then do
-            offset <- readIORef ramOffset
-            pure (offset `unsafeShiftL` 13)
-          else pure 0
-
-  pure MBC
-    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
-    , readROMHigh        = \address -> do
-                             offset <- getROMOffset
-                             pure (romData `B.unsafeIndex` (offset + fromIntegral address))
-    , writeROM           = \address value -> if address < 0x2000
-                             then writeIORef enableRAM (value .&. 0x0F == 0x0A)
-                             else if address < 0x4000
-                               then
-                                 let low = (fromIntegral value .&. 0x1F)
-                                 in  writeIORef romOffset (if low == 0 then 1 else low)
-                               else if address < 0x6000
-                                 then writeIORef ramOffset (fromIntegral value .&. 0x3)
-                                 else writeIORef ramSelect (value /= 0)
-    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
-                             romData
-                             (action . (`plusPtr` fromIntegral address))
-    , withROMHighPointer = \address action -> do
-                             offset <- getROMOffset
-                             B.unsafeUseAsCString
-                               romData
-                               (action . (`plusPtr` (offset + fromIntegral address)))
-    , readRAM            = \check address -> do
-                             when check $ liftIO $ do
-                               enabled <- readIORef enableRAM
-                               unless enabled (throwIO (InvalidRead (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
-    , writeRAM           =
-      \check address value -> do
-        when check $ liftIO $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-        offset <- getRAMOffset
-        withForeignPtr ram $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
-    , withRAMPointer     = \check address action -> do
-                             when check $ liftIO $ do
-                               enabled <- readIORef enableRAM
-                               unless enabled (throwIO (InvalidAccess (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
-    , mbcRegisters       =
-      do
-        r1 <- readIORef romOffset
-        r2 <- readIORef ramOffset
-        r0 <- readIORef enableRAM
-        r3 <- readIORef ramSelect
-        pure
-          [ RegisterInfo 0      "R0" (if r0 then 0x0A else 0) [("RAM enabled ", show r0)]
-          , RegisterInfo 0x2000 "R1" (fromIntegral r1)        []
-          , RegisterInfo 0x4000 "R2" (fromIntegral r2)        []
-          , RegisterInfo 0x6000
-                         "R3"
-                         (if r3 then 1 else 0)
-                         [("R2 is", if r3 then "RAM bank" else "ROM bank high bits")]
-          ]
-    }
-
-mbc5 :: ROM -> IO MBC
-mbc5 (ROM romData) = do
-  ramG  <- newIORef False
-  romB0 <- newIORef 1
-  romB1 <- newIORef 0
-  ramB  <- newIORef 0
-  ram   <- mallocForeignPtrBytes 0x40000 :: IO (ForeignPtr Word8)
-
-  let getROMOffset = do
-        low  <- readIORef romB0
-        high <- readIORef romB1
-        pure (high `unsafeShiftL` 24 .|. low `unsafeShiftL` 14)
-  let getRAMOffset = do
-        bank <- readIORef ramB
-        pure (bank `unsafeShiftL` 13)
-
-  pure MBC
-    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
-    , readROMHigh        = \address -> do
-                             offset <- getROMOffset
-                             pure (romData `B.unsafeIndex` (offset + fromIntegral address))
-    , writeROM           = \address value -> if address < 0x2000
-                             then writeIORef ramG (value .&. 0x0F == 0x0A)
-                             else if address < 0x3000
-                               then writeIORef romB0 (fromIntegral value)
-                               else if address < 0x4000
-                                 then writeIORef romB1 (fromIntegral value .&. 1)
-                                 else if address < 0x6000
-                                   then writeIORef ramB (fromIntegral value .&. 0xF)
-                                   else pure ()
-    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
-                             romData
-                             (action . (`plusPtr` fromIntegral address))
-    , withROMHighPointer = \address action -> do
-                             offset <- getROMOffset
-                             B.unsafeUseAsCString
-                               romData
-                               (action . (`plusPtr` (offset + fromIntegral address)))
-    , readRAM            = \check address -> do
-                             when check $ liftIO $ do
-                               enabled <- readIORef ramG
-                               unless enabled (throwIO (InvalidRead (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
-    , writeRAM           =
-      \check address value -> do
-        when check $ liftIO $ do
-          enabled <- readIORef ramG
-          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-        offset <- getRAMOffset
-        withForeignPtr ram $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
-    , withRAMPointer     = \check address action -> do
-                             when check $ liftIO $ do
-                               enabled <- readIORef ramG
-                               unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-                             offset <- getRAMOffset
-                             withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
-    , mbcRegisters       = do
-                             g    <- readIORef ramG
-                             b0   <- readIORef romB0
-                             b1   <- readIORef romB1
-                             ramb <- readIORef ramB
-                             pure
-                               [ RegisterInfo 0 "ROMG" (if g then 0x0A else 0) [("RAM enabled ", show g)]
-                               , RegisterInfo 0x2000 "ROMB0" (fromIntegral b0)       []
-                               , RegisterInfo 0x3000 "ROMB1" (fromIntegral b1)       []
-                               , RegisterInfo 0x4000 "RAMB"  (fromIntegral ramb)     []
-                               ]
-    }
+        Nothing   -> nullMBC romData
+        Just MBC1 -> mbc1 romData
+        Just MBC5 -> mbc5 romData
+        Just _    -> nullMBC romData
