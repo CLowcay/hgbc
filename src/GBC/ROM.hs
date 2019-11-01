@@ -148,6 +148,7 @@ getMBC rom =
   in  case mbcType cType of
         Nothing   -> nullMBC rom
         Just MBC1 -> mbc1 rom
+        Just MBC5 -> mbc5 rom
         Just x    -> error ("Unsupported " ++ show x)
 
 -- | A memory bank controller.
@@ -262,4 +263,71 @@ mbc1 (ROM romData) = do
                          (if r3 then 1 else 0)
                          [("R2 is", if r3 then "RAM bank" else "ROM bank high bits")]
           ]
+    }
+
+mbc5 :: ROM -> IO MBC
+mbc5 (ROM romData) = do
+  ramG  <- newIORef False
+  romB0 <- newIORef 1
+  romB1 <- newIORef 0
+  ramB  <- newIORef 0
+  ram   <- mallocForeignPtrBytes 0x40000 :: IO (ForeignPtr Word8)
+
+  let getROMOffset = do
+        low  <- readIORef romB0
+        high <- readIORef romB1
+        pure (high `unsafeShiftL` 24 .|. low `unsafeShiftL` 14)
+  let getRAMOffset = do
+        bank <- readIORef ramB
+        pure (bank `unsafeShiftL` 13)
+
+  pure MBC
+    { readROMLow         = \address -> pure (romData `B.unsafeIndex` fromIntegral address)
+    , readROMHigh        = \address -> do
+                             offset <- getROMOffset
+                             pure (romData `B.unsafeIndex` (offset + fromIntegral address))
+    , writeROM           = \address value -> if address < 0x2000
+                             then writeIORef ramG (value .&. 0x0F == 0x0A)
+                             else if address < 0x3000
+                               then writeIORef romB0 (fromIntegral value)
+                               else if address < 0x4000
+                                 then writeIORef romB1 (fromIntegral value .&. 1)
+                                 else if address < 0x6000
+                                   then writeIORef ramB (fromIntegral value .&. 0xF)
+                                   else pure ()
+    , withROMLowPointer  = \address action -> B.unsafeUseAsCString
+                             romData
+                             (action . (`plusPtr` fromIntegral address))
+    , withROMHighPointer = \address action -> do
+                             offset <- getROMOffset
+                             B.unsafeUseAsCString
+                               romData
+                               (action . (`plusPtr` (offset + fromIntegral address)))
+    , readRAM            = \address -> do
+                             liftIO $ do
+                               enabled <- readIORef ramG
+                               unless enabled (throwIO (ReadFromDisabledRAM (address + 0xA000)))
+                             offset <- getRAMOffset
+                             withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
+    , writeRAM           = \address value -> do
+                             liftIO $ do
+                               enabled <- readIORef ramG
+                               unless enabled (throwIO (WriteToDisabledRAM (address + 0xA000)))
+                             offset <- getRAMOffset
+                             withForeignPtr ram
+                               $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value
+    , withRAMPointer     = \address action -> do
+                             offset <- getRAMOffset
+                             withForeignPtr ram (action . (`plusPtr` (offset + fromIntegral address)))
+    , mbcRegisters       = do
+                             g    <- readIORef ramG
+                             b0   <- readIORef romB0
+                             b1   <- readIORef romB1
+                             ramb <- readIORef ramB
+                             pure
+                               [ RegisterInfo 0 "ROMG" (if g then 0x0A else 0) [("RAM enabled ", show g)]
+                               , RegisterInfo 0x2000 "ROMB0" (fromIntegral b0)       []
+                               , RegisterInfo 0x3000 "ROMB1" (fromIntegral b1)       []
+                               , RegisterInfo 0x4000 "RAMB"  (fromIntegral ramb)     []
+                               ]
     }

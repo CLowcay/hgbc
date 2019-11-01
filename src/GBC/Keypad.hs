@@ -69,7 +69,7 @@ refreshKeypad = do
   let p1' = case (p1 `testBit` 4, p1 `testBit` 5) of
         (True , False) -> (p1 .&. 0xF0) .|. (complement keypad .&. 0x0F)
         (False, True ) -> (p1 .&. 0xF0) .|. (complement (keypad `unsafeShiftR` 4) .&. 0x0F)
-        _              -> p1
+        _ -> p1 .&. 0xF0
   writeByte P1 p1'
   when (0 /= 0x0F .&. p1 .&. complement p1') (raiseInterrupt 4)
 
