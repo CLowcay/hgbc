@@ -1,13 +1,8 @@
 module Main where
 
-import           Control.Concurrent
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Loops
 import           Control.Monad.Reader
 import           Debug.CLI
 import           Debug.Debugger
-import           GBC.Bus
 import           GBC.CPU
 import           GBC.Graphics
 import           GBC.GraphicsOutput
@@ -15,9 +10,9 @@ import           GBC.Memory
 import           GBC.ROM
 import           System.Environment
 import           System.Exit
-import           System.IO
 import qualified Data.ByteString               as B
 import qualified SDL
+import qualified System.Console.Haskeline      as Haskeline
 
 main :: IO ()
 main = do
@@ -35,24 +30,4 @@ main = do
       cpuState          <- initCPU
       debugState        <- initDebug romFile cpuState mem sync
       runReaderT reset debugState
-      runDebugger debugState
-
-runDebugger :: DebugState -> IO ()
-runDebugger debugState = do
-  channel     <- newEmptyMVar
-  commandDone <- newEmptyMVar
-  hSetBuffering stdout NoBuffering
-  let commandRunner = do
-        mcommand <- liftIO (tryTakeMVar channel)
-        case mcommand of
-          Nothing -> do
-            liftIO $ threadDelay 10000
-            handleEvents
-          Just command -> do
-            doCommand command
-            liftIO $ do
-              hFlush stdout
-              putMVar commandDone ()
-        commandRunner
-  void (forkIO (runReaderT commandRunner debugState))
-  whileJust_ nextCommand $ \cmd -> putMVar channel cmd >> takeMVar commandDone
+      runReaderT (Haskeline.runInputT Haskeline.defaultSettings cli) debugState

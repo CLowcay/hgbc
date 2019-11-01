@@ -13,9 +13,9 @@ module Debug.Dump
 where
 
 import           Common
-import           Control.Monad
 import           Control.Monad.Reader
 import           Data.Bits
+import           System.Console.Haskeline
 import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
@@ -28,30 +28,32 @@ import           GBC.Timer
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 
-dumpRegisters :: RegisterFile -> IO ()
-dumpRegisters RegisterFile {..} = do
-  putStrLn $ "F=" ++ formatHex regF ++ " A=" ++ formatHex regA ++ " AF=" ++ formatHex
-    (assemble regA regF)
-  putStrLn $ "B=" ++ formatHex regB ++ " C=" ++ formatHex regC ++ " BC=" ++ formatHex
-    (assemble regB regC)
-  putStrLn $ "D=" ++ formatHex regD ++ " E=" ++ formatHex regE ++ " DE=" ++ formatHex
-    (assemble regD regE)
-  putStrLn $ "H=" ++ formatHex regH ++ " L=" ++ formatHex regL ++ " HL=" ++ formatHex
-    (assemble regH regL)
-  putStrLn $ "PC=" ++ formatHex regPC ++ "   SP=" ++ formatHex regSP
-  putStrLn
-    $  "flags="
+dumpRegisters :: HasCPU env => InputT (ReaderT env IO) ()
+dumpRegisters = do
+  RegisterFile {..} <- lift getRegisterFile
+  outputStrLn
+    ("F=" ++ formatHex regF ++ " A=" ++ formatHex regA ++ " AF=" ++ formatHex (assemble regA regF))
+  outputStrLn
+    ("B=" ++ formatHex regB ++ " C=" ++ formatHex regC ++ " BC=" ++ formatHex (assemble regB regC))
+  outputStrLn
+    ("D=" ++ formatHex regD ++ " E=" ++ formatHex regE ++ " DE=" ++ formatHex (assemble regD regE))
+  outputStrLn
+    ("H=" ++ formatHex regH ++ " L=" ++ formatHex regL ++ " HL=" ++ formatHex (assemble regH regL))
+  outputStrLn ("PC=" ++ formatHex regPC ++ "   SP=" ++ formatHex regSP)
+  outputStrLn
+    (  "flags="
     ++ [ if regF .&. flagZ /= 0 then 'Z' else 'z'
        , if regF .&. flagN /= 0 then 'N' else 'n'
        , if regF .&. flagH /= 0 then 'H' else 'h'
        , if regF .&. flagCY /= 0 then 'C' else 'c'
        , if regHidden .&. flagIME /= 0 then 'I' else 'i'
        ]
+    )
   where assemble h l = (fromIntegral h `unsafeShiftL` 8 .|. fromIntegral l) :: Word16
 
-dumpHeader :: Header -> IO ()
+dumpHeader :: Header -> InputT (ReaderT env IO) ()
 dumpHeader Header {..} = do
-  putStrLn
+  outputStrLn
     $  take 11 (BC.unpack gameTitle ++ repeat ' ')
     ++ BC.unpack gameCode
     ++ " "
@@ -59,32 +61,35 @@ dumpHeader Header {..} = do
          Japan    -> " (JAPAN)"
          Overseas -> " (INTERNATIONAL)"
 
-  putStrLn $ "Version: " ++ show maskROMVersion
+  outputStrLn ("Version: " ++ show maskROMVersion)
+  outputStrLn ("Maker: " ++ formatHex oldLicenseCode ++ " " ++ BC.unpack makerCode)
 
-  putStrLn $ "Maker: " ++ formatHex oldLicenseCode ++ " " ++ BC.unpack makerCode
-
-  putStr $ "Console support: " ++ case cgbSupport of
+  outputStrLn $ "Console support: " ++ case cgbSupport of
     CGBIncompatible -> "GB"
     CGBCompatible   -> "GB+CGB"
     CGBExclusive    -> "CGB"
-  putStrLn $ case sgbSupport of
+  outputStrLn $ case sgbSupport of
     GBOnly  -> ""
     UsesSGB -> "+SGB"
 
-  putStr $ "Cartridge: " ++ case mbcType cartridgeType of
-    Nothing      -> "No MBC"
-    Just MBC1    -> "MBC1"
-    Just MBC2    -> "MBC2"
-    Just MBC3    -> "MBC3"
-    Just MBC3RTC -> "MBC3+RTC"
-    Just MBC5    -> "MBC5"
-  when (hasSRAM cartridgeType) $ putStr "+SRAM"
-  when (hasBackupBattery cartridgeType) $ putStr "+Battery"
-  putStr $ " (" ++ formatByteCount romSize ++ " ROM)"
-  when (externalRAM > 0) $ putStr $ " + " ++ formatByteCount externalRAM ++ " RAM"
-  putStrLn ""
+  let cartridge = "Cartridge: " ++ case mbcType cartridgeType of
+        Nothing      -> "No MBC"
+        Just MBC1    -> "MBC1"
+        Just MBC2    -> "MBC2"
+        Just MBC3    -> "MBC3"
+        Just MBC3RTC -> "MBC3+RTC"
+        Just MBC5    -> "MBC5"
+  outputStrLn
+    (  cartridge
+    ++ (if hasSRAM cartridgeType then "+SRAM" else "")
+    ++ (if hasBackupBattery cartridgeType then "+Battery" else "")
+    ++ " ("
+    ++ formatByteCount romSize
+    ++ " ROM)"
+    ++ (if externalRAM > 0 then " + " ++ formatByteCount externalRAM ++ " RAM" else "")
+    )
 
-  putStrLn $ "Start address: " ++ formatHex startAddress
+  outputStrLn ("Start address: " ++ formatHex startAddress)
 
 formatByteCount :: Int -> String
 formatByteCount b | b < 1024        = show b
@@ -92,64 +97,69 @@ formatByteCount b | b < 1024        = show b
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
 dumpDisassembly
-  :: HasMemory env => (Word16 -> IO String) -> SymbolTable -> Word16 -> Int -> ReaderT env IO ()
+  :: HasMemory env
+  => (Word16 -> IO String)
+  -> SymbolTable
+  -> Word16
+  -> Int
+  -> InputT (ReaderT env IO) ()
 dumpDisassembly decorator symbolTable base n = do
-  instructions <- decodeN base n
+  instructions <- lift (decodeN base n)
   for_ instructions $ \(addr, instruction) -> do
-    decoration <- liftIO $ decorator addr
+    decoration <- liftIO (decorator addr)
     case lookupByAddress symbolTable addr of
       Nothing    -> pure ()
-      Just label -> liftIO $ putStrLn $ (' ' <$ decoration) ++ label ++ ":"
-    liftIO
-      $  putStrLn
-      $  decoration
+      Just label -> outputStrLn ((' ' <$ decoration) ++ label ++ ":")
+    outputStrLn
+      (  decoration
       ++ formatHex addr
       ++ ": "
       ++ formatWithSymbolTable symbolTable instruction
       ++ extraInfo addr instruction
+      )
  where
   extraInfo addr (JR e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
   extraInfo addr (JRCC _ e) =
     " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
   extraInfo _ _ = ""
 
-dumpMem :: HasMemory env => Word16 -> ReaderT env IO ()
-dumpMem base = for_ [0 .. 15]
-  $ \line -> let offset = base + line * 16 in liftIO . hexDump offset =<< readChunk offset 16
+dumpMem :: HasMemory env => Word16 -> InputT (ReaderT env IO) ()
+dumpMem base = for_ [0 .. 15] $ \line ->
+  let offset = base + line * 16 in outputStrLn . hexDump offset =<< lift (readChunk offset 16)
 
-hexDump :: Word16 -> B.ByteString -> IO ()
-hexDump base lineData = do
-  putStr $ formatHex base
-  putStr ": "
-  putStr $ unwords $ formatHex <$> B.unpack lineData
-  putStr " "
-  putStrLn $ toPrintable <$> BC.unpack lineData
+hexDump :: Word16 -> B.ByteString -> String
+hexDump base lineData =
+  formatHex base
+    ++ ": "
+    ++ unwords (formatHex <$> B.unpack lineData)
+    ++ " "
+    ++ (toPrintable <$> BC.unpack lineData)
 
 toPrintable :: Char -> Char
 toPrintable c = if c <= ' ' || c >= '\DEL' then '.' else c
 
-dumpGraphics :: HasMemory env => Maybe String -> ReaderT env IO ()
-dumpGraphics register = liftIO . dumpRegisterInfo . filterRegister register =<< graphicsRegisters
+dumpGraphics :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
+dumpGraphics register = dumpRegisterInfo . filterRegister register =<< lift graphicsRegisters
 
-dumpAudio :: HasMemory env => Maybe String -> ReaderT env IO ()
+dumpAudio :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
 dumpAudio register = undefined
 
-dumpTimer :: HasTimer env => Maybe String -> ReaderT env IO ()
-dumpTimer register = liftIO . dumpRegisterInfo . filterRegister register =<< timerRegisters
+dumpTimer :: HasTimer env => Maybe String -> InputT (ReaderT env IO) ()
+dumpTimer register = dumpRegisterInfo . filterRegister register =<< lift timerRegisters
 
-dumpInternal :: HasMemory env => Maybe String -> ReaderT env IO ()
-dumpInternal register = liftIO . dumpRegisterInfo . filterRegister register =<< internalRegisters
+dumpInternal :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
+dumpInternal register = dumpRegisterInfo . filterRegister register =<< lift internalRegisters
 
-dumpMBC :: HasMemory env => Maybe String -> ReaderT env IO ()
-dumpMBC register = liftIO . dumpRegisterInfo . filterRegister register =<< getMbcRegisters
+dumpMBC :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
+dumpMBC register = dumpRegisterInfo . filterRegister register =<< lift getMbcRegisters
 
 filterRegister :: Maybe String -> [RegisterInfo] -> [RegisterInfo]
 filterRegister Nothing  = id
 filterRegister (Just r) = filter isRegister where isRegister (RegisterInfo _ i _ _) = r == i
 
-dumpRegisterInfo :: [RegisterInfo] -> IO ()
+dumpRegisterInfo :: MonadIO m => [RegisterInfo] -> InputT m ()
 dumpRegisterInfo = traverse_ dumpRegister
  where
   dumpRegister (RegisterInfo address name value flags) = do
-    putStrLn (formatHex address ++ " " ++ padLeft 4 ' ' name ++ " = " ++ formatHex value)
-    for_ flags $ \(flag, status) -> putStrLn ("       " ++ flag ++ ": " ++ status)
+    outputStrLn (formatHex address ++ " " ++ padLeft 4 ' ' name ++ " = " ++ formatHex value)
+    for_ flags $ \(flag, status) -> outputStrLn ("       " ++ flag ++ ": " ++ status)

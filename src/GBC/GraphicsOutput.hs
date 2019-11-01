@@ -55,7 +55,7 @@ startOutput sync = do
     printDisplayModeInfo
 
     void (SDL.glCreateContext window)
-    SDL.swapInterval $= SDL.SynchronizedUpdates
+    SDL.swapInterval $= SDL.SynchronizedUpdates 
     (glState, buffers) <- setUpOpenGL
     putMVar videoBuffers buffers
 

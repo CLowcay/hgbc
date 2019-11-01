@@ -21,10 +21,9 @@ description:         Please see the README on GitHub at <https://github.com/CLow
 
 dependencies:
 - OpenGLRaw
+- StateVar
 - array
 - async
-- resourcet
-- StateVar
 - base >= 4.7 && < 5
 - binary
 - bytestring
@@ -34,9 +33,11 @@ dependencies:
 - filepath
 - hashable
 - hashtables
+- haskeline
 - megaparsec
 - monad-loops
 - mtl
+- resourcet
 - sdl2
 - text
 - unordered-containers

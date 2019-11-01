@@ -19,6 +19,7 @@ import           Control.Monad.Loops
 import           Control.Monad.Reader
 import           Data.Foldable
 import           Data.Functor
+import           System.Console.Haskeline
 import           Data.IORef
 import           Data.Word
 import           Data.Bits
@@ -86,8 +87,8 @@ data DebugState = DebugState {
   , timerState :: !TimerState
   , romFile :: !FilePath
   , codeMap :: !(IORef SymbolTable)
-  , executeBreakpoints :: !BreakpointTable
-  , writeBreakpoints :: !BreakpointTable
+  , breakpoints :: !BreakpointTable
+  , watchpoints :: !BreakpointTable
 }
 
 instance HasMemory DebugState where
@@ -117,18 +118,19 @@ instance HasBus DebugState where
   forBusState = bus
 
 type MonadDebug a = ReaderT DebugState IO a
+type MonadDebugger a = InputT (ReaderT DebugState IO) a
 
 -- | Initialise the debugger.
 initDebug :: FilePath -> CPUState -> Memory -> GraphicsSync -> IO DebugState
 initDebug romFile cpu memory graphicsSync = do
-  codeMap            <- newIORef =<< initMap romFile
-  executeBreakpoints <- initBreakpointTable
-  writeBreakpoints   <- initBreakpointTable
-  bus                <- initBusState
-  graphicsState      <- initGraphics
-  keypadState        <- initKeypadState
-  lcdEnabled         <- newIORef True
-  timerState         <- initTimerState
+  codeMap       <- newIORef =<< initMap romFile
+  breakpoints   <- initBreakpointTable
+  watchpoints   <- initBreakpointTable
+  bus           <- initBusState
+  graphicsState <- initGraphics
+  keypadState   <- initKeypadState
+  lcdEnabled    <- newIORef True
+  timerState    <- initTimerState
   pure DebugState { .. }
 
 getCodeMap :: MonadDebug SymbolTable
@@ -144,7 +146,7 @@ makeDecorator = do
   DebugState {..} <- ask
   pc              <- readPC
   pure $ \addr -> do
-    bp <- getBreakpoint executeBreakpoints addr <&> \case
+    bp <- getBreakpoint breakpoints addr <&> \case
       Nothing    -> ' '
       Just True  -> '*'
       Just False -> '-'
@@ -175,8 +177,8 @@ breakOnBreakpoints :: MonadDebug BreakPostCondition
 breakOnBreakpoints = do
   DebugState {..} <- ask
   pure $ \event -> do
-    breakOnExecute <- shouldBreakOnExecute executeBreakpoints
-    breakOnWrite   <- shouldBreakOnWrite writeBreakpoints event
+    breakOnExecute <- shouldBreakOnExecute breakpoints
+    breakOnWrite   <- shouldBreakOnWrite watchpoints event
     pure (breakOnExecute || breakOnWrite)
 
 -- | Break when the PC equals a certain value.
@@ -214,24 +216,24 @@ doRun preConditions postConditions = clearBreakFlag >> go 0
           else go ticks'
 
 -- | Disassemble the next 4 instructions at the current PC.
-disassembleAtPC :: MonadDebug ()
+disassembleAtPC :: MonadDebugger ()
 disassembleAtPC = do
-  symbols   <- getCodeMap
-  decorator <- makeDecorator
-  pc        <- readPC
+  symbols   <- lift getCodeMap
+  decorator <- lift makeDecorator
+  pc        <- lift readPC
   dumpDisassembly decorator symbols pc 4
 
-withAddress :: MemAddress -> (Word16 -> MonadDebug ()) -> MonadDebug ()
+withAddress :: MemAddress -> (Word16 -> MonadDebugger ()) -> MonadDebugger ()
 withAddress (ConstAddress addr              ) action = action addr
 withAddress (LabelAddress label maybeAddress) action = do
-  symbols <- getCodeMap
+  symbols <- lift getCodeMap
   case lookupBySymbol symbols label of
     Just addr -> action addr
     Nothing   -> case maybeAddress of
       Just address -> action address
       Nothing      -> liftIO (putStrLn ("Unknown symbol " ++ label))
 
-reportingClockStats :: MonadIO m => m Int -> m ()
+reportingClockStats :: MonadIO m => InputT m Int -> InputT m ()
 reportingClockStats action = do
   t0     <- SDL.ticks
   cycles <- action
@@ -240,104 +242,102 @@ reportingClockStats action = do
   let expectedCycles = (4194304.0 * fromIntegral duration) / 1000.0 :: Double
   let percentSpeed = (fromIntegral cycles / expectedCycles) * 100.0
 
-  when (duration > 0) $ liftIO $ do
-    putStrLn (show cycles ++ " cycles in " ++ show duration ++ "ms")
-    putStrLn ("Clock rate = " ++ show ((cycles * 1000) `div` fromIntegral duration) ++ "Hz")
-    putStrLn ("Relative to expected clock " ++ showFFloat (Just 2) percentSpeed "" ++ "% speed")
+  when (duration > 0) $ do
+    outputStrLn (show cycles ++ " cycles in " ++ show duration ++ "ms")
+    outputStrLn ("Clock rate = " ++ show ((cycles * 1000) `div` fromIntegral duration) ++ "Hz")
+    outputStrLn ("Relative to expected clock " ++ showFFloat (Just 2) percentSpeed "" ++ "% speed")
 
 -- | Execute a debugger command.
-doCommand :: Command -> MonadDebug ()
+doCommand :: Command -> MonadDebugger ()
 doCommand ShowHeader = do
-  mem <- asks forMemory
-  liftIO (dumpHeader (getROMHeader mem))
-doCommand ShowRegs = do
-  registerFile <- getRegisterFile
-  liftIO (dumpRegisters registerFile)
+  mem <- lift (asks forMemory)
+  dumpHeader (getROMHeader mem)
+doCommand ShowRegs                  = dumpRegisters
 doCommand (ShowMem         addr   ) = withAddress addr dumpMem
 doCommand (ShowDisassembly Nothing) = do
-  pc        <- readPC
-  decorator <- makeDecorator
-  symbols   <- getCodeMap
+  pc        <- lift readPC
+  decorator <- lift makeDecorator
+  symbols   <- lift getCodeMap
   dumpDisassembly decorator symbols pc 10
 doCommand (ShowDisassembly (Just addr)) = do
-  decorator <- makeDecorator
-  symbols   <- getCodeMap
+  decorator <- lift makeDecorator
+  symbols   <- lift getCodeMap
   withAddress addr $ \actualAddress -> dumpDisassembly decorator symbols actualAddress 10
 doCommand (Step n) = do
-  preConditions  <- sequence [breakOnCountOf n]
-  postConditions <- sequence [breakOnBreakpoints]
-  reportingClockStats (doRun preConditions postConditions)
+  preConditions  <- lift (sequence [breakOnCountOf n])
+  postConditions <- lift (sequence [breakOnBreakpoints])
+  reportingClockStats (lift (doRun preConditions postConditions))
   disassembleAtPC
 doCommand StepOut = do
-  sp             <- readR16 RegSP
-  postConditions <- sequence [breakOnBreakpoints]
-  reportingClockStats (doRun [breakOnRet sp] postConditions)
-  DebugState {..} <- ask
-  wasBreakpoint   <- shouldBreakOnExecute executeBreakpoints
-  unless wasBreakpoint (void busStep)
+  sp             <- lift (readR16 RegSP)
+  postConditions <- lift (sequence [breakOnBreakpoints])
+  reportingClockStats (lift (doRun [breakOnRet sp] postConditions))
+  lift $ do
+    DebugState {..} <- ask
+    wasBreakpoint   <- (shouldBreakOnExecute breakpoints)
+    unless wasBreakpoint (void busStep)
   disassembleAtPC
 doCommand Run = do
-  postConditions <- sequence [breakOnBreakpoints]
-  reportingClockStats (doRun [] postConditions)
+  postConditions <- lift (sequence [breakOnBreakpoints])
+  reportingClockStats (lift (doRun [] postConditions))
   disassembleAtPC
 doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
-  postConditions <- sequence [breakOnBreakpoints, pure (breakOnPC addr)]
-  reportingClockStats (doRun [] postConditions)
+  postConditions <- lift (sequence [breakOnBreakpoints, pure (breakOnPC addr)])
+  reportingClockStats (lift (doRun [] postConditions))
   disassembleAtPC
-doCommand Reset               = reset
-doCommand (Poke8  addr value) = withAddress addr $ \actualAddr -> writeByte actualAddr value
-doCommand (Poke16 addr value) = withAddress addr $ \actualAddr -> writeWord actualAddr value
+doCommand Reset               = lift reset
+doCommand (Poke8  addr value) = withAddress addr $ \actualAddr -> lift (writeByte actualAddr value)
+doCommand (Poke16 addr value) = withAddress addr $ \actualAddr -> lift (writeWord actualAddr value)
 doCommand (Peek8 addr) =
-  withAddress addr $ \actualAddr -> liftIO . putStrLn . formatHex =<< readByte actualAddr
+  withAddress addr $ \actualAddr -> liftIO . putStrLn . formatHex =<< lift (readByte actualAddr)
 doCommand (Peek16 addr) = withAddress addr $ \actualAddr -> do
-  l <- readByte actualAddr
-  h <- readByte (actualAddr + 1)
-  liftIO . putStrLn $ formatHex ((fromIntegral h `shiftL` 8) .|. fromIntegral l :: Word16)
-doCommand (PokeR8  reg value)  = writeR8 reg value
-doCommand (PokeR16 reg value)  = writeR16 reg value
-doCommand (ShowGraphics r)        = dumpGraphics r
-doCommand (ShowTimer    r )       = dumpTimer r
-doCommand (ShowAudio    r )       = dumpAudio r
-doCommand (ShowInternal r )       = dumpInternal r
-doCommand (ShowMBC      r )       = dumpMBC r
+  l <- lift (readByte actualAddr)
+  h <- lift (readByte (actualAddr + 1))
+  outputStrLn (formatHex ((fromIntegral h `shiftL` 8) .|. fromIntegral l :: Word16))
+doCommand (PokeR8  reg value ) = lift (writeR8 reg value)
+doCommand (PokeR16 reg value ) = lift (writeR16 reg value)
+doCommand (ShowGraphics  r   ) = dumpGraphics r
+doCommand (ShowTimer     r   ) = dumpTimer r
+doCommand (ShowAudio     r   ) = dumpAudio r
+doCommand (ShowInternal  r   ) = dumpInternal r
+doCommand (ShowMBC       r   ) = dumpMBC r
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (setBreakpoint executeBreakpoints breakAddr True)
+  DebugState {..} <- lift ask
+  liftIO (setBreakpoint breakpoints breakAddr True)
 doCommand (DeleteBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (clearBreakpoint executeBreakpoints breakAddr)
+  DebugState {..} <- lift ask
+  liftIO (clearBreakpoint breakpoints breakAddr)
 doCommand (DisableBreakpiont addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (setBreakpoint executeBreakpoints breakAddr False)
+  DebugState {..} <- lift ask
+  liftIO (setBreakpoint breakpoints breakAddr False)
 doCommand (AddWriteBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (setBreakpoint writeBreakpoints breakAddr True)
+  DebugState {..} <- lift ask
+  liftIO (setBreakpoint watchpoints breakAddr True)
 doCommand (DeleteWriteBreakpoint addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (clearBreakpoint writeBreakpoints breakAddr)
+  DebugState {..} <- lift ask
+  liftIO (clearBreakpoint watchpoints breakAddr)
 doCommand (DisableWriteBreakpiont addr) = withAddress addr $ \breakAddr -> do
-  DebugState {..} <- ask
-  liftIO (setBreakpoint writeBreakpoints breakAddr False)
+  DebugState {..} <- lift ask
+  liftIO (setBreakpoint watchpoints breakAddr False)
 doCommand ListBreakpoints = do
-  DebugState {..} <- ask
-  liftIO $ do
-    allExecuteBreakpoints <- listBreakpoints executeBreakpoints
-    allWriteBreakpoints   <- listBreakpoints writeBreakpoints
-    when (null allExecuteBreakpoints && null allWriteBreakpoints) $ putStrLn "No breakpoints set"
-    for_ allExecuteBreakpoints
-      $ \(addr, enabled) -> putStrLn (formatHex addr ++ if not enabled then " (disabled)" else "")
-    for_ allWriteBreakpoints $ \(addr, enabled) ->
-      putStrLn ("On write to " ++ formatHex addr ++ if not enabled then " (disabled)" else "")
-doCommand (AddSymbol symbol value) = do
+  DebugState {..}       <- lift ask
+  allExecuteBreakpoints <- liftIO (listBreakpoints breakpoints)
+  allWriteBreakpoints   <- liftIO (listBreakpoints watchpoints)
+  when (null allExecuteBreakpoints && null allWriteBreakpoints) $ outputStrLn "No breakpoints set"
+  for_ allExecuteBreakpoints $ \(addr, enabled) ->
+    outputStrLn (formatHex addr ++ if not enabled then " (disabled)" else "")
+  for_ allWriteBreakpoints $ \(addr, enabled) ->
+    outputStrLn ("On write to " ++ formatHex addr ++ if not enabled then " (disabled)" else "")
+doCommand (AddSymbol symbol value) = lift $ do
   DebugState {..} <- ask
   codeMap'        <- addToMap (symbol, value) <$> getCodeMap
   liftIO (saveMap (mapFileName romFile) codeMap')
   setCodeMap codeMap'
-doCommand (DeleteSymbol symbol) = do
+doCommand (DeleteSymbol symbol) = lift $ do
   DebugState {..} <- ask
   codeMap'        <- removeFromMap symbol <$> getCodeMap
   liftIO (saveMap (mapFileName romFile) codeMap')
   setCodeMap codeMap'
 doCommand ListSymbols = do
-  symbols <- listSymbols <$> getCodeMap
-  for_ symbols $ \(label, value) -> liftIO (putStrLn (label ++ ": " ++ formatHex value))
+  symbols <- lift (listSymbols <$> getCodeMap)
+  for_ symbols $ \(label, value) -> (outputStrLn (label ++ ": " ++ formatHex value))
