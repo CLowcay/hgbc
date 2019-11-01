@@ -17,24 +17,24 @@ where
 import           Common
 import           Control.Monad.Loops
 import           Control.Monad.Reader
+import           Data.Bits
 import           Data.Foldable
 import           Data.Functor
-import           System.Console.Haskeline
 import           Data.IORef
 import           Data.Word
-import           Data.Bits
 import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
 import           GBC.Bus
-import           GBC.Keypad
-import           GBC.Timer
 import           GBC.CPU
 import           GBC.Decode
 import           GBC.Graphics
 import           GBC.ISA
+import           GBC.Keypad
 import           GBC.Memory
+import           GBC.Timer
 import           Numeric
+import           System.Console.Haskeline
 import qualified SDL.Time                      as SDL
 
 {-# SPECIALIZE readPC :: ReaderT DebugState IO Word16 #-}
@@ -238,6 +238,7 @@ reportingClockStats action = do
   t0     <- SDL.ticks
   cycles <- action
   t1     <- SDL.ticks
+
   let duration       = t1 - t0
   let expectedCycles = (4194304.0 * fromIntegral duration) / 1000.0 :: Double
   let percentSpeed = (fromIntegral cycles / expectedCycles) * 100.0

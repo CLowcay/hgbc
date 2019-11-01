@@ -45,15 +45,17 @@ module GBC.CPU
 where
 
 import           Common
+import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
 import           Data.Int
-import           Data.Word
 import           Data.Maybe
+import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.Decode
+import           GBC.Errors
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.Registers
@@ -963,12 +965,13 @@ executeInstruction instruction = case instruction of
   -- STOP
   STOP -> do
     key1 <- readByte KEY1
-    if key1 `testBit` 0 then do
-      writeByte KEY1 0
-      pure (BusEvent [] (clocks instruction True) ModeNormal)
-    else do
-      setMode ModeStop
-      pure (BusEvent [] (clocks instruction True) ModeStop)
+    if key1 `testBit` 0
+      then do
+        writeByte KEY1 0
+        pure (BusEvent [] (clocks instruction True) ModeNormal)
+      else do
+        setMode ModeStop
+        pure (BusEvent [] (clocks instruction True) ModeStop)
   -- EI
   EI -> do
     setIME
@@ -987,9 +990,7 @@ executeInstruction instruction = case instruction of
     setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
     pure (noWrite instruction)
   -- INVALID instruction
-  INVALID w8 -> do
-    pc <- readPC
-    error ("Invalid instruction " ++ formatHex w8 ++ " at " ++ formatHex (pc - 1))
+  INVALID w8 -> liftIO (throwIO (InvalidInstruction w8))
 
 {-# INLINE doCall #-}
 doCall :: HasCPU env => Word16 -> Int -> ReaderT env IO BusEvent

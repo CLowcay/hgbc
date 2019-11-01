@@ -17,18 +17,21 @@ module GBC.ROM
   )
 where
 
-import           Control.Monad
-import           Data.Binary.Get
-import           Data.IORef
 import           Common
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Data.Binary.Get
+import           Data.Bits
+import           Data.IORef
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
 import           Foreign.Storable
+import           GBC.Errors
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Unsafe        as B
-import           Data.Bits
 
 newtype ROM = ROM B.ByteString deriving (Eq, Ord, Show)
 
@@ -229,9 +232,15 @@ mbc1 (ROM romData) = do
                                romData
                                (action . (`plusPtr` (offset + fromIntegral address)))
     , readRAM            = \address -> do
+                             liftIO $ do
+                               enabled <- readIORef enableRAM
+                               unless enabled (throwIO (ReadFromDisabledRAM (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram $ \ptr -> peekElemOff ptr (offset + fromIntegral address)
     , writeRAM           = \address value -> do
+                             liftIO $ do
+                               enabled <- readIORef enableRAM
+                               unless enabled (throwIO (WriteToDisabledRAM (address + 0xA000)))
                              offset <- getRAMOffset
                              withForeignPtr ram
                                $ \ptr -> pokeElemOff ptr (offset + fromIntegral address) value

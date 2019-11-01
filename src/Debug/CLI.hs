@@ -5,17 +5,19 @@ module Debug.CLI
   )
 where
 
+import           Control.Exception              ( displayException )
+import           Control.Monad.Reader
+import           Data.Char
 import           Data.Maybe
 import           Data.Void
-import           Control.Monad.Reader
 import           Data.Word
 import           Debug.Debugger
+import           GBC.Errors
 import           GBC.ISA
 import           System.Console.Haskeline
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Data.Text                     as T
-import           Data.Char
 import qualified Text.Megaparsec.Char.Lexer    as L
 
 cli :: InputT (ReaderT DebugState IO) ()
@@ -27,8 +29,9 @@ cli = do
       then cli
       else do
         case parse (space *> command <* eof) "CONSOLE" (T.pack line) of
-          Left  err -> outputStrLn (errorBundlePretty err)
-          Right cmd -> doCommand cmd
+          Left err -> outputStrLn (errorBundlePretty err)
+          Right cmd ->
+            doCommand cmd `catch` \fault -> outputStrLn (displayException (fault :: Fault))
         cli
 
 type Parser = Parsec Void T.Text
