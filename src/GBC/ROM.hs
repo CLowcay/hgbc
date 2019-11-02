@@ -136,7 +136,9 @@ getMBC :: ROM -> IO MBC
 getMBC rom@(ROM romData) =
   let cType = cartridgeType (extractHeader rom)
   in  case mbcType cType of
-        Nothing   -> nullMBC romData
-        Just MBC1 -> mbc1 romData
-        Just MBC5 -> mbc5 romData
-        Just _    -> nullMBC romData
+        Nothing      -> nullMBC romData
+        Just MBC1    -> mbc1 romData
+        Just MBC3    -> mbc3 romData
+        Just MBC3RTC -> mbc3 romData
+        Just MBC5    -> mbc5 romData
+        Just _       -> nullMBC romData
