@@ -23,7 +23,9 @@ import           GBC.MBC
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
 
-newtype ROM = ROM B.ByteString deriving (Eq, Ord, Show)
+data ROM = ROM { romFile :: String
+               , romContent :: B.ByteString
+               } deriving (Eq, Ord, Show)
 
 data CGBSupport = CGBIncompatible | CGBCompatible | CGBExclusive deriving (Eq, Ord, Show, Bounded, Enum)
 data SGBSupport = GBOnly | UsesSGB deriving (Eq, Ord, Show, Bounded, Enum)
@@ -52,16 +54,16 @@ data Header = Header {
   , maskROMVersion :: Int
 } deriving (Eq, Ord, Show)
 
-validateROM :: B.ByteString -> Either String ROM
-validateROM rom = do
+validateROM :: FilePath -> B.ByteString -> Either String ROM
+validateROM file rom = do
   when (rom `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
   when (rom `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"
   when (complementCheck rom /= 0) $ Left "Complement check failed"
-  pure $ ROM rom
+  pure $ ROM file rom
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
 
 extractHeader :: ROM -> Header
-extractHeader (ROM rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
+extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
  where
   getHeader :: Get Header
   getHeader = do
@@ -133,12 +135,13 @@ extractHeader (ROM rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.dro
 
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
-getMBC rom@(ROM romData) =
-  let cType = cartridgeType (extractHeader rom)
+getMBC rom@(ROM file romData) =
+  let cType     = cartridgeType (extractHeader rom)
+      allocator = if hasBackupBattery cType then savedRAM file else volatileRAM
   in  case mbcType cType of
         Nothing      -> nullMBC romData
-        Just MBC1    -> mbc1 romData
-        Just MBC3    -> mbc3 romData
-        Just MBC3RTC -> mbc3 romData
-        Just MBC5    -> mbc5 romData
+        Just MBC1    -> mbc1 allocator romData
+        Just MBC3    -> mbc3 allocator romData
+        Just MBC3RTC -> mbc3 allocator romData
+        Just MBC5    -> mbc5 allocator romData
         Just _       -> nullMBC romData

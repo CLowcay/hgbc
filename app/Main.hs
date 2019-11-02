@@ -17,17 +17,17 @@ import qualified System.Console.Haskeline      as Haskeline
 main :: IO ()
 main = do
   SDL.initializeAll
-  [romFile] <- getArgs
-  romData   <- B.readFile romFile
-  case validateROM romData of
+  [file]  <- getArgs
+  romData <- B.readFile file
+  case validateROM file romData of
     Left err -> do
-      putStrLn $ "Error validating ROM " ++ show romFile ++ ": " ++ err
+      putStrLn $ "Error validating ROM " ++ show file ++ ": " ++ err
       exitFailure
     Right rom -> do
       sync              <- newGraphicsSync
       (videoBuffers, _) <- startOutput sync
       mem               <- initMemory rom videoBuffers
       cpuState          <- initCPU
-      debugState        <- initDebug romFile cpuState mem sync
+      debugState        <- initDebug file cpuState mem sync
       runReaderT reset debugState
       runReaderT (Haskeline.runInputT Haskeline.defaultSettings cli) debugState

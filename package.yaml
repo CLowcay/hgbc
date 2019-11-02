@@ -35,6 +35,7 @@ dependencies:
 - hashtables
 - haskeline
 - megaparsec
+- mmap
 - monad-loops
 - mtl
 - resourcet
