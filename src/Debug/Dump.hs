@@ -64,7 +64,7 @@ dumpHeader Header {..} = do
   outputStrLn ("Version: " ++ show maskROMVersion)
   outputStrLn ("Maker: " ++ formatHex oldLicenseCode ++ " " ++ BC.unpack makerCode)
 
-  outputStrLn $ "Console support: " ++ case cgbSupport of
+  outputStr $ "Console support: " ++ case cgbSupport of
     CGBIncompatible -> "GB"
     CGBCompatible   -> "GB+CGB"
     CGBExclusive    -> "CGB"

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Debug.CLI
   ( cli
@@ -31,7 +32,11 @@ cli = do
         case parse (space *> command <* eof) "CONSOLE" (T.pack line) of
           Left err -> outputStrLn (errorBundlePretty err)
           Right cmd ->
-            doCommand cmd `catch` \fault -> outputStrLn (displayException (fault :: Fault))
+            withInterrupt
+              $         doCommand cmd
+              `catches` [ Handler $ \(fault :: Fault) -> outputStrLn (displayException fault)
+                        , Handler $ \(_ :: Interrupt) -> pure ()
+                        ]
         cli
 
 type Parser = Parsec Void T.Text
