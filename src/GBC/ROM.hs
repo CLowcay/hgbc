@@ -83,10 +83,9 @@ extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.d
     maskROMVersion        <- fromIntegral <$> getWord8
     pure Header { .. }
   decodeCGBSupport b = case b of
-    0x00 -> pure CGBIncompatible
     0x80 -> pure CGBCompatible
     0xC0 -> pure CGBExclusive
-    x    -> fail $ "unknown cgb support code " ++ show x
+    _    -> pure CGBIncompatible
   decodeSGBSupport b = case b of
     0x00 -> pure GBOnly
     0x03 -> pure UsesSGB
