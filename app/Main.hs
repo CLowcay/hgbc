@@ -5,7 +5,7 @@ import           Debug.CLI
 import           Debug.Debugger
 import           GBC.CPU
 import           GBC.Graphics
-import           GBC.GraphicsOutput
+import           GBC.GraphicsSync
 import           GBC.Memory
 import           GBC.ROM
 import           System.Environment

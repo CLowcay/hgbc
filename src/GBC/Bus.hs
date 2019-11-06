@@ -19,7 +19,7 @@ import           Data.Foldable
 import           Data.IORef
 import           Data.Word
 import           GBC.CPU
-import           GBC.Graphics
+import           GBC.GraphicsSync
 import           GBC.Keypad
 import           GBC.Memory
 import           GBC.Registers

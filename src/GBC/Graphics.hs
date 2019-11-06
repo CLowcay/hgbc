@@ -1,252 +1,171 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module GBC.Graphics
-  ( GraphicsState(..)
-  , GraphicsSync(..)
-  , HasGraphics(..)
-  , Mode(..)
-  , initGraphics
-  , newGraphicsSync
-  , graphicsRegisters
-  , graphicsStep
-  , flagLCDEnable
-  , flagWindowTileMap
-  , flagWindowEnable
-  , flagTileDataSelect
-  , flagBackgroundTileMap
-  , flagOBJSize
-  , flagOBJEnable
-  , flagBackgroundEnable
+  ( VideoBuffers(..)
+  , startOutput
   )
 where
 
-import           Common
-import           Control.Concurrent.MVar
-import           Control.Monad.Reader
-import           Data.Bits
-import           Data.Foldable
+import           Control.Concurrent
+import           Control.Monad
 import           Data.IORef
-import           Data.Word
-import           GBC.CPU
+import           Data.Int
+import           Data.StateVar
+import           Foreign.Marshal.Alloc
+import           Foreign.Ptr
+import           Foreign.Storable
+import           GBC.GraphicsSync
 import           GBC.Memory
-import           GBC.Registers
+import           GLUtils
+import           Graphics.GL.Core44
+import qualified Data.ByteString               as B
+import qualified SDL
+import qualified SDL.Raw
 
--- | The current status of the graphics system.
-data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
-
--- | The graphics state.
-data GraphicsState = GraphicsState {
-    lcdModeRef :: !(IORef Mode)
-  , clocksRemainingRef :: !(IORef Int)
-  , lcdLineRef :: !(IORef Word8)
-  , lineClocksRemainingRef :: !(IORef Int)
-  , lcdEnabledRef :: !(IORef Bool)
-} deriving Eq
-
--- | Graphics synchronization objects. It's a pair of MVars. The CPU thread
--- takes from start and puts to currentLine. The graphics output thread takes
--- from currentLine and puts to start. This keeps the threads moving in
--- lockstep.
-data GraphicsSync = GraphicsSync {
-    hblankStart :: !(MVar ())        -- Graphics output puts a () here when it is safe to enter HBlank.
-  , currentLine :: !(MVar Word8)     -- We put a line number here before we enter ScanOAM.
+data WindowContext = WindowContext {
+    window :: !SDL.Window
+  , sync :: !GraphicsSync
+  , glState :: !GLState
+  , lineCounter :: !(IORef Int)
+  , waitCounter :: !(IORef Int)
 }
 
--- | The initial graphics state.
-initGraphics :: IO GraphicsState
-initGraphics = do
-  lcdModeRef             <- newIORef VBlank
-  clocksRemainingRef     <- newIORef 153
-  lcdLineRef             <- newIORef 0
-  lineClocksRemainingRef <- newIORef 0
-  lcdEnabledRef          <- newIORef True
-  pure GraphicsState { .. }
+-- | OpenGL state variables.
+data GLState = GLState {
+    bgProgram :: !Program
+  , bgProjection :: !(StateVar GLmatrix4)
+  , bgScanline :: !VertexArrayObject
+  , oamProgram :: !Program
+  , oamBox :: !VertexArrayObject
+}
 
--- | Make a new Graphics sync object.
-newGraphicsSync :: IO GraphicsSync
-newGraphicsSync = do
-  hblankStart <- newEmptyMVar
-  currentLine <- newEmptyMVar
-  pure GraphicsSync { .. }
+startOutput :: GraphicsSync -> IO (VideoBuffers, SDL.Window)
+startOutput sync = do
+  let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
+  window <- SDL.createWindow
+    "Graphics output"
+    SDL.defaultWindow { SDL.windowInitialSize     = SDL.V2 160 144
+                      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
+                      }
 
-class HasMemory env => HasGraphics env where
-  forGraphicsState :: env -> GraphicsState
-  forGraphicsSync :: env -> GraphicsSync
+  videoBuffers <- newEmptyMVar
 
-oamClocks, readClocks, hblankClocks, vblankClocks, lineClocks :: Int
-oamClocks = 80
-readClocks = 172
-hblankClocks = 204
-vblankClocks = 4560
-lineClocks = oamClocks + readClocks + hblankClocks
+  void $ forkOS $ do
+    printDisplayModeInfo
 
-totalLines, visibleLines :: Word8
-totalLines = 154
-visibleLines = 144
+    void (SDL.glCreateContext window)
+    SDL.swapInterval $= SDL.SynchronizedUpdates 
+    (glState, buffers) <- setUpOpenGL
+    putMVar videoBuffers buffers
 
--- | Given a mode, the number of clocks remaining, and the number of elapsed
--- clocks, return the new mode and the new number of clocks remaining.
-{-# INLINE nextMode #-}
-nextMode :: Mode -> Int -> Int -> Word8 -> (Mode, Int)
-nextMode mode remaining clocks line =
-  let remaining' = remaining - clocks
-  in  if remaining' > 0
-        then (mode, remaining')
-        else case mode of
-          ScanOAM  -> (ReadVRAM, remaining' + readClocks)
-          ReadVRAM -> (HBlank, remaining' + hblankClocks)
-          HBlank   -> if line >= visibleLines
-            then (VBlank, remaining' + vblankClocks)
-            else (ScanOAM, remaining' + oamClocks)
-          VBlank -> (ScanOAM, remaining' + oamClocks)
+    lineCounter <- newIORef 0
+    waitCounter <- newIORef 0
 
--- | Get the next LCD line given the current line, the clocks until the next
--- line, and the number of elapsed clocks.
-{-# INLINE nextLine #-}
-nextLine :: Word8 -> Int -> Int -> (Word8, Int)
-nextLine line remaining clocks =
-  let remaining' = remaining - clocks
-      line'      = line + 1
-  in  if remaining' > 0
-        then (line, remaining')
-        else (if line' >= totalLines then 0 else line', remaining' + lineClocks)
+    eventLoop WindowContext { .. }
+    SDL.destroyWindow window
 
-flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
-  :: Word8
-flagLCDEnable = 0x80
-flagWindowTileMap = 0x40
-flagWindowEnable = 0x20
-flagTileDataSelect = 0x10
-flagBackgroundTileMap = 0x08
-flagOBJSize = 0x04
-flagOBJEnable = 0x02
-flagBackgroundEnable = 0x01
+  buffers <- takeMVar videoBuffers
+  pure (buffers, window)
 
-matchBit, interruptCoincidence, interruptOAM, interruptVBlank, interruptHBlank :: Int
-matchBit = 2
-interruptCoincidence = 6
-interruptOAM = 5
-interruptVBlank = 4
-interruptHBlank = 3
+printDisplayModeInfo :: IO ()
+printDisplayModeInfo = alloca $ \pDisplayMode -> do
+  void (SDL.Raw.getDesktopDisplayMode 0 pDisplayMode)
+  mode <- peek pDisplayMode
+  putStrLn
+    (  "Display mode "
+    ++ show (SDL.Raw.displayModeW mode)
+    ++ "x"
+    ++ show (SDL.Raw.displayModeH mode)
+    ++ " "
+    ++ show (SDL.Raw.displayModeRefreshRate mode)
+    ++ "Hz"
+    )
 
-maskMode :: Word8
-maskMode = 0x03
+eventLoop :: WindowContext -> IO ()
+eventLoop context@WindowContext {..} = do
 
--- | Modify some bits with a mask.
-modifyBits :: Word8 -> Word8 -> Word8 -> Word8
-modifyBits mask value source = value .|. (source .&. complement mask)
+  line <- takeMVar (currentLine sync)
 
--- | Set the LCD mode bits.
-setMode :: Word8 -> Mode -> Word8
-setMode v mode = modifyBits maskMode (modeBits mode) v
+  useProgram (oamProgram glState)
+  bindVertexArrayObject (oamBox glState)
+  glDrawElementsInstanced GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr 40
 
--- | Get the bit code corresponding to the LCD mode.
-modeBits :: Mode -> Word8
-modeBits HBlank   = 0
-modeBits VBlank   = 1
-modeBits ScanOAM  = 2
-modeBits ReadVRAM = 3
+  useProgram (bgProgram glState)
+  bindVertexArrayObject (bgScanline glState)
+  glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
 
--- | Prepare a status report on the graphics registers.
-graphicsRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
-graphicsRegisters = do
-  lcdc <- readByte LCDC
-  stat <- readByte STAT
-  sequence
-    [ pure (RegisterInfo LCDC "LCDC" lcdc (decodeLCDC lcdc))
-    , pure (RegisterInfo STAT "STAT" stat (decodeSTAT stat))
-    , RegisterInfo SCY "SCY" <$> readByte SCY <*> pure []
-    , RegisterInfo SCX "SCX" <$> readByte SCX <*> pure []
-    , RegisterInfo LY "LY" <$> readByte LY <*> pure []
-    , RegisterInfo LYC "LYC" <$> readByte LYC <*> pure []
-    , RegisterInfo DMA "DMA" <$> readByte DMA <*> pure []
-    , RegisterInfo BGP "BGP" <$> readByte BGP <*> pure []
-    , RegisterInfo OBP0 "OBP0" <$> readByte OBP0 <*> pure []
-    , RegisterInfo OBP1 "OBP1" <$> readByte OBP1 <*> pure []
-    , RegisterInfo WY "WY" <$> readByte WY <*> pure []
-    , RegisterInfo WX "WX" <$> readByte WX <*> pure []
-    , RegisterInfo VBK "VBK" <$> readByte VBK <*> pure []
-    ]
+  glFinish
+
+  putMVar (hblankStart sync) ()
+
+  when (line == 143) $ do
+    SDL.glSwapWindow window
+    glClear GL_DEPTH_BUFFER_BIT
+
+  unless (line == 255) $ eventLoop context
+
+-- | Position of the scanline.
+position :: Attribute
+position = Attribute "position" 2 Ints PerVertex KeepInteger
+
+-- | Configure OpenGL.
+setUpOpenGL :: IO (GLState, VideoBuffers)
+setUpOpenGL = do
+  glViewport 0 0 160 144
+  glEnable GL_DEPTH_TEST
+
+  gbVert    <- B.readFile "shaders/bg.vert"
+  gbFrag    <- B.readFile "shaders/bg.frag"
+  bgProgram <- compileShaders [(VertexShader, gbVert), (FragmentShader, gbFrag)]
+  useProgram bgProgram
+
+  bgProjection     <- linkUniform bgProgram "projection"
+  projectionMatrix <- makeMatrix
+    (join [[2.0 / 160, 0, 0, 0], [0, -2.0 / 144, 0, 0], [0, 0, 2 / 20481, 0], [-1, 1, -1, 1]])
+  bgProjection $= projectionMatrix
+
+  bgScanline <- genVertexArrayObject
+  bindVertexArrayObject bgScanline
+  void (makeVertexBuffer (join [[0, 0 :: Int32], [160, 0], [160, 1], [0, 1]]))
+  linkAttribute bgProgram position 0 8
+  void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
+
+  (vramBuffer, vram) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 0x2000
+  setUpTextureBuffer bgProgram "texCharacterData"  (TextureUnit 0) vramBuffer 0      0x1800
+  setUpTextureBuffer bgProgram "texBackgroundData" (TextureUnit 1) vramBuffer 0x1800 0x800
+
+  (registersBuffer, registers) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer 48
+  linkUniformBuffer bgProgram "Registers" registersBuffer 0
+
+  oamVert    <- B.readFile "shaders/oam.vert"
+  oamFrag    <- B.readFile "shaders/oam.frag"
+  oamProgram <- compileShaders [(VertexShader, oamVert), (FragmentShader, oamFrag)]
+  useProgram oamProgram
+
+  oamProjection <- linkUniform oamProgram "projection"
+  oamProjection $= projectionMatrix
+
+  oamTexCharacterData  <- linkUniform oamProgram "texCharacterData"
+  oamTexCharacterData $= TextureUnit 0
+
+  oamBox <- genVertexArrayObject
+  bindVertexArrayObject oamBox
+  void (makeVertexBuffer (join [[0, 0 :: Int32], [8, 0], [8, 8], [0, 8]]))
+  linkAttribute oamProgram position 0 8
+  void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
+
+  (oamBuffer, oam) <- makeWritablePersistentBuffer Coherent TextureBufferBuffer (40 * 4 * 4)
+  linkUniformBuffer oamProgram "Registers"    registersBuffer 0
+  linkUniformBuffer oamProgram "OAMRegisters" oamBuffer       1
+
+  pure (GLState { .. }, VideoBuffers { .. })
+
  where
-  decodeLCDC lcdc =
-    [ ("LCD Enable"      , show $ 0 /= lcdc .&. flagLCDEnable)
-    , ("Window Code Area", if 0 == lcdc .&. flagWindowTileMap then "9800" else "9C00")
-    , ("Window Enable"   , show $ 0 /= lcdc .&. flagWindowEnable)
-    , ( "Background Character Data Base"
-      , if 0 == lcdc .&. flagTileDataSelect then "8800" else "8000"
-      )
-    , ("Background Code Area", if 0 == lcdc .&. flagBackgroundTileMap then "9800" else "9C00")
-    , ("OBJ Height"          , if 0 == lcdc .&. flagOBJSize then "8" else "16")
-    , ("OBJ Enable"          , show $ 0 /= lcdc .&. flagOBJEnable)
-    , ("Background Enable"   , show $ 0 /= lcdc .&. flagBackgroundEnable)
-    ]
-  decodeSTAT stat =
-    let mode = case stat .&. 0x03 of
-          0 -> "HBlank"
-          1 -> "VBlank"
-          2 -> "Scanning OAM"
-          3 -> "Reading VRAM"
-          _ -> error "Impossible stat mode"
-    in  [ ("Mode Flag"                , mode)
-        , ("LYC = LY"                 , show $ stat `testBit` matchBit)
-        , ("Interrupt on HBlank", show $ stat `testBit` interruptHBlank)
-        , ("Interrupt on VBlank", show $ stat `testBit` interruptVBlank)
-        , ("Interrupt on Scanning OAM", show $ stat `testBit` interruptOAM)
-        , ("Interrupt on LYC = LY", show $ stat `testBit` interruptCoincidence)
-        ]
-
-
-{-# INLINABLE graphicsStep #-}
-graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()
-graphicsStep (BusEvent newWrites clocks _) = do
-  GraphicsState {..}  <- asks forGraphicsState
-  graphicsSync        <- asks forGraphicsSync
-
-  lcdEnabled          <- liftIO (readIORef lcdEnabledRef)
-  lcdMode             <- liftIO (readIORef lcdModeRef)
-  clocksRemaining     <- liftIO (readIORef clocksRemainingRef)
-  lcdLine             <- liftIO (readIORef lcdLineRef)
-  lineClocksRemaining <- liftIO (readIORef lineClocksRemainingRef)
-
-  let (mode', remaining')           = nextMode lcdMode clocksRemaining clocks lcdLine
-  let (line', lineClocksRemaining') = nextLine lcdLine lineClocksRemaining clocks
-
-  for_ newWrites $ \case
-    STAT -> do
-      stat <- readByte STAT
-      writeByte STAT (setMode stat (if lcdEnabled then mode' else lcdMode))
-    LCDC -> do
-      lcdc <- readByte LCDC
-      liftIO (writeIORef lcdEnabledRef (isFlagSet flagLCDEnable lcdc))
-    _ -> pure ()
-
-  when lcdEnabled $ do
-    when (lcdLine /= line') $ writeByte LY line'
-
-    liftIO $ do
-      writeIORef lcdModeRef             mode'
-      writeIORef clocksRemainingRef     remaining'
-      writeIORef lcdLineRef             line'
-      writeIORef lineClocksRemainingRef lineClocksRemaining'
-
-    when (lcdMode /= mode') $ do
-      stat <- readByte STAT
-
-      -- Update STAT register
-      lyc  <- readByte LYC
-      let matchFlag = if lyc == line' then bit matchBit else 0
-      writeByte STAT (modifyBits (bit matchBit .|. maskMode) (modeBits mode' .|. matchFlag) stat)
-
-      -- If we're entering ReadVRAM mode, then signal the graphics output.
-      when (mode' == ReadVRAM) $ liftIO (putMVar (currentLine graphicsSync) line')
-
-      -- Raise interrupts
-      when (stat `testBit` interruptCoincidence && lyc == line') (raiseInterrupt 1)
-      when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
-      when (stat `testBit` interruptVBlank && mode' == VBlank) (raiseInterrupt 1)
-      when (stat `testBit` interruptOAM && mode' == ScanOAM) (raiseInterrupt 1)
-      when (mode' == VBlank) (raiseInterrupt 0)
-
-      -- If we're entering HBlank mode, then sync
-      when (mode' == HBlank) $ liftIO (takeMVar (hblankStart graphicsSync))
+  setUpTextureBuffer program uniform textureUnit buffer offset size = do
+    activeTextureUnit textureUnit
+    sampler <- linkUniform program uniform
+    sampler $= textureUnit
+    texture <- genTexture
+    bindTexture TextureBuffer texture
+    linkTextureBufferRange buffer offset size

@@ -29,7 +29,7 @@ import           Debug.Map
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.Graphics
+import           GBC.GraphicsSync
 import           GBC.ISA
 import           GBC.Keypad
 import           GBC.Memory

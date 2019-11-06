@@ -15,16 +15,16 @@ where
 import           Common
 import           Control.Monad.Reader
 import           Data.Bits
-import           System.Console.Haskeline
 import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.Graphics
+import           GBC.GraphicsSync
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM
 import           GBC.Timer
+import           System.Console.Haskeline
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 
