@@ -21,11 +21,10 @@ import           Common
 import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
 import           Data.Bits
-import           Data.Foldable
 import           Data.IORef
-import           Data.Int
 import           Data.Word
 import           Foreign.ForeignPtr
+import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Errors
@@ -34,8 +33,7 @@ import qualified Data.ByteString               as B
 
 data VideoBuffers = VideoBuffers {
     vram :: !(Ptr Word8)
-  , oam :: !(Ptr Int32)
-  , registers :: !(Ptr Int32)
+  , oam :: !(Ptr Word8)
 }
 
 data Memory = Memory {
@@ -85,8 +83,7 @@ getMbcRegisters = do
 dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
-  let copyOAM from = for_ [0 .. 159] $ \off ->
-        pokeElemOff (oam videoBuffer) off . fromIntegral =<< peekElemOff (from :: Ptr Word8) off
+  let copyOAM from = moveArray (oam videoBuffer) from 160
 
   liftIO $ case source `unsafeShiftR` 13 of
     0 -> withROMLowPointer mbc source copyOAM
@@ -124,9 +121,6 @@ readByte addr = do
       | addr < 0xFF00 -> liftIO $ do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
-      | addr >= 0xFF40 && addr <= 0xFF4B -> do
-        value <- peekElemOff (registers videoBuffer) (offset 0xFF40)
-        pure (fromIntegral value)
       | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF00)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
@@ -158,9 +152,6 @@ writeByte addr value = do
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
-      | addr >= 0xFF40 && addr <= 0xFF4B -> pokeElemOff (registers videoBuffer)
-                                                        (offset 0xFF40)
-                                                        (fromIntegral value)
       | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base

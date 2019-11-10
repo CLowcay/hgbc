@@ -222,6 +222,7 @@ data BufferTarget = ArrayBuffer
                   | ElementArrayBuffer
                   | TextureBufferBuffer
                   | UniformBuffer
+                  | PixelUpload
                   deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Get the OpenGL enum for a 'BufferTarget'.
@@ -230,6 +231,7 @@ instance OpenGLEnum BufferTarget where
   toOpenGLEnum ElementArrayBuffer  = GL_ELEMENT_ARRAY_BUFFER
   toOpenGLEnum TextureBufferBuffer = GL_TEXTURE_BUFFER
   toOpenGLEnum UniformBuffer       = GL_UNIFORM_BUFFER
+  toOpenGLEnum PixelUpload         = GL_PIXEL_UNPACK_BUFFER
 
 -- | Generate an empty buffer object.
 {-# INLINE genBuffer #-}

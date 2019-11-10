@@ -24,10 +24,11 @@ main = do
       putStrLn $ "Error validating ROM " ++ show file ++ ": " ++ err
       exitFailure
     Right rom -> do
-      sync              <- newGraphicsSync
-      (videoBuffers, _) <- startOutput sync
-      mem               <- initMemory rom videoBuffers
-      cpuState          <- initCPU
-      debugState        <- initDebug file cpuState mem sync
+      videoBuffers <- initBuffers
+      mem          <- initMemory rom videoBuffers
+      sync         <- newGraphicsSync
+      void (startOutput mem videoBuffers sync)
+      cpuState   <- initCPU
+      debugState <- initDebug file cpuState mem sync
       runReaderT reset debugState
       runReaderT (Haskeline.runInputT Haskeline.defaultSettings cli) debugState
