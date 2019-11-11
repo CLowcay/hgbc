@@ -134,13 +134,13 @@ extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.d
 
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
-getMBC rom@(ROM file romData) =
+getMBC rom@(ROM file _) =
   let cType     = cartridgeType (extractHeader rom)
       allocator = if hasBackupBattery cType then savedRAM file else volatileRAM
   in  case mbcType cType of
-        Nothing      -> nullMBC romData
-        Just MBC1    -> mbc1 allocator romData
-        Just MBC3    -> mbc3 allocator romData
-        Just MBC3RTC -> mbc3 allocator romData
-        Just MBC5    -> mbc5 allocator romData
-        Just _       -> nullMBC romData
+        Nothing      -> nullMBC
+        Just MBC1    -> mbc1 allocator
+        Just MBC3    -> mbc3 allocator
+        Just MBC3RTC -> mbc3 allocator
+        Just MBC5    -> mbc5 allocator
+        Just _       -> nullMBC

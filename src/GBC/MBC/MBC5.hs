@@ -15,39 +15,29 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
-import qualified Data.ByteString               as B
-import qualified Data.ByteString.Unsafe        as B
 
-mbc5 :: RAMAllocator -> B.ByteString -> IO MBC
-mbc5 ramAllocator romData = do
+mbc5 :: RAMAllocator -> IO MBC
+mbc5 ramAllocator = do
   ramG                <- newIORef False
   romB0               <- newIORef 1
   romB1               <- newIORef 0
   ramB                <- newIORef 0
   (ram, ramPtrOffset) <- ramAllocator 0x40000
 
-  let getROMOffset = do
+  let bankOffset = do
         low  <- readIORef romB0
         high <- readIORef romB1
         pure (high `unsafeShiftL` 24 .|. low `unsafeShiftL` 14)
+
   let getRAMOffset = do
         bank <- readIORef ramB
         pure (bank `unsafeShiftL` 13)
 
-  let readROMLow address = pure (romData `B.unsafeIndex` fromIntegral address)
-  let readROMHigh address = do
-        offset <- getROMOffset
-        pure (romData `B.unsafeIndex` (offset + fromIntegral address))
   let writeROM address value | address < 0x2000 = writeIORef ramG (value .&. 0x0F == 0x0A)
                              | address < 0x3000 = writeIORef romB0 (fromIntegral value)
                              | address < 0x4000 = writeIORef romB1 (fromIntegral value .&. 1)
                              | address < 0x6000 = writeIORef ramB (fromIntegral value .&. 0xF)
                              | otherwise        = pure ()
-  let withROMLowPointer address action =
-        B.unsafeUseAsCString romData (action . (`plusPtr` fromIntegral address))
-  let withROMHighPointer address action = do
-        offset <- getROMOffset
-        B.unsafeUseAsCString romData (action . (`plusPtr` (offset + fromIntegral address)))
   let readRAM check address = do
         when check $ liftIO $ do
           enabled <- readIORef ramG

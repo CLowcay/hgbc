@@ -32,11 +32,8 @@ savedRAM filename size = do
 
 -- | A memory bank controller.
 data MBC = MBC {
-    readROMLow :: Word16 -> IO Word8
-  , readROMHigh :: Word16 -> IO Word8
+    bankOffset :: IO Int
   , writeROM :: Word16 -> Word8 -> IO ()
-  , withROMLowPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
-  , withROMHighPointer :: forall a. Word16 -> (Ptr Word8 -> IO a) -> IO a
   , readRAM :: Bool -> Word16 -> IO Word8
   , writeRAM :: Bool -> Word16 -> Word8 -> IO ()
   , withRAMPointer :: forall a. Bool -> Word16 -> (Ptr Word8 -> IO a) -> IO a

@@ -15,27 +15,21 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
-import qualified Data.ByteString               as B
-import qualified Data.ByteString.Unsafe        as B
 
-mbc3 :: RAMAllocator -> B.ByteString -> IO MBC
-mbc3 ramAllocator romData = do
+mbc3 :: RAMAllocator -> IO MBC
+mbc3 ramAllocator = do
   romOffset           <- newIORef 1
   ramOffset           <- newIORef 0
   enableRAM           <- newIORef False
   (ram, ramPtrOffset) <- ramAllocator 0x8000
 
-  let getROMOffset = do
+  let bankOffset = do
         offset <- readIORef romOffset
         pure (offset `unsafeShiftL` 14)
   let getRAMOffset = do
         offset <- readIORef ramOffset
         pure (offset `unsafeShiftL` 13)
 
-  let readROMLow address = pure (romData `B.unsafeIndex` fromIntegral address)
-  let readROMHigh address = do
-        offset <- getROMOffset
-        pure (romData `B.unsafeIndex` (offset + fromIntegral address))
   let writeROM address value
         | address < 0x2000
         = writeIORef enableRAM (value .&. 0x0F == 0x0A)
@@ -46,11 +40,6 @@ mbc3 ramAllocator romData = do
         = writeIORef ramOffset (fromIntegral value .&. 0x3)
         | otherwise
         = pure () -- TODO: latch RTC
-  let withROMLowPointer address action =
-        B.unsafeUseAsCString romData (action . (`plusPtr` fromIntegral address))
-  let withROMHighPointer address action = do
-        offset <- getROMOffset
-        B.unsafeUseAsCString romData (action . (`plusPtr` (offset + fromIntegral address)))
   let readRAM check address = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM

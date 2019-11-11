@@ -30,6 +30,7 @@ import           Foreign.Storable
 import           GBC.Errors
 import           GBC.ROM
 import qualified Data.ByteString               as B
+import qualified Data.ByteString.Unsafe        as B
 
 data VideoBuffers = VideoBuffers {
     vram :: !(Ptr Word8)
@@ -39,6 +40,7 @@ data VideoBuffers = VideoBuffers {
 data Memory = Memory {
     mbc :: !MBC
   , romHeader :: !Header
+  , rom :: !B.ByteString
   , memRam :: !(ForeignPtr Word8)
   , memHigh :: !(ForeignPtr Word8)
   , videoBuffer :: !VideoBuffers
@@ -54,11 +56,11 @@ instance HasMemory Memory where
 
 -- | The initial memory state.
 initMemory :: ROM -> VideoBuffers -> IO Memory
-initMemory rom videoBuffer = do
-  let romHeader = extractHeader rom
+initMemory romInfo@(ROM _ rom) videoBuffer = do
+  let romHeader = extractHeader romInfo
   memRam         <- mallocForeignPtrArray 0x2000
   memHigh        <- mallocForeignPtrArray 0x100
-  mbc            <- getMBC rom
+  mbc            <- getMBC romInfo
   checkRAMAccess <- newIORef False
   pure Memory { .. }
 
@@ -86,10 +88,14 @@ dmaToOAM source = do
   let copyOAM from = moveArray (oam videoBuffer) from 160
 
   liftIO $ case source `unsafeShiftR` 13 of
-    0 -> withROMLowPointer mbc source copyOAM
-    1 -> withROMLowPointer mbc source copyOAM
-    2 -> withROMHighPointer mbc (source - 0x4000) copyOAM
-    3 -> withROMHighPointer mbc (source - 0x4000) copyOAM
+    0 -> B.unsafeUseAsCString rom (copyOAM . (`plusPtr` fromIntegral source))
+    1 -> B.unsafeUseAsCString rom (copyOAM . (`plusPtr` fromIntegral source))
+    2 -> do
+      bank <- bankOffset mbc
+      B.unsafeUseAsCString rom (copyOAM . (`plusPtr` (bank + offset 0x4000)))
+    3 -> do
+      bank <- bankOffset mbc
+      B.unsafeUseAsCString rom (copyOAM . (`plusPtr` (bank + offset 0x4000)))
     4 -> copyOAM (vram videoBuffer `plusPtr` offset 0x8000)
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
@@ -104,10 +110,14 @@ readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
   liftIO $ case addr `unsafeShiftR` 13 of
-    0 -> readROMLow mbc addr
-    1 -> readROMLow mbc addr
-    2 -> readROMHigh mbc (addr - 0x4000)
-    3 -> readROMHigh mbc (addr - 0x4000)
+    0 -> pure $ rom `B.unsafeIndex` fromIntegral addr
+    1 -> pure $ rom `B.unsafeIndex` fromIntegral addr
+    2 -> do
+      bank <- bankOffset mbc
+      pure $ rom `B.unsafeIndex` (bank + offset 0x4000)
+    3 -> do
+      bank <- bankOffset mbc
+      pure $ rom `B.unsafeIndex` (bank + offset 0x4000)
     4 -> peekElemOff (vram videoBuffer) (offset 0x8000)
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
