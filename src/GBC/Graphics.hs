@@ -230,15 +230,24 @@ renderLine line VideoBuffers {..} assemblySpace priorityBuffer outputBase = do
         byte1 <- peekElemOff vram (fontLineOffset + 1)
 
         if hflip
-          then for_ [0 .. 7] $ \i -> blendSprite bgPriority
-                                                 (fromIntegral $ xOffset + i)
-                                                 (palette .|. decodePixel byte0 byte1 i)
-                                                 (xOffset + i)
-          else for_ [0 .. 7] $ \i -> blendSprite bgPriority
-                                                 (fromIntegral $ xOffset + i)
-                                                 (palette .|. decodePixel byte0 byte1 (7 - i))
-                                                 (xOffset + i)
+          then fastFor 0 8 $ \i -> blendSprite bgPriority
+                                               (fromIntegral xOffset)
+                                               (palette .|. decodePixel byte0 byte1 i)
+                                               (xOffset + i)
+          else fastFor 0 8 $ \i -> blendSprite bgPriority
+                                               (fromIntegral xOffset)
+                                               (palette .|. decodePixel byte0 byte1 (7 - i))
+                                               (xOffset + i)
         pure True
+
+  fastFor :: Int -> Int -> (Int -> IO ()) -> IO ()
+  fastFor i0 i1 action = go i0
+   where
+    go !i = if i == i1
+      then pure ()
+      else do
+        action i
+        go (i + 1)
 
   {-# INLINE blendSprite #-}
   blendSprite bgPriority priority pixel outOffset = do
