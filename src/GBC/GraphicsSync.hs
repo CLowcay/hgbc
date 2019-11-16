@@ -56,10 +56,10 @@ data GraphicsSync = GraphicsSync {
 -- | The initial graphics state.
 initGraphics :: IO GraphicsState
 initGraphics = do
-  lcdModeRef             <- newIORef VBlank
-  clocksRemainingRef     <- newIORef 153
+  lcdModeRef             <- newIORef ScanOAM
+  clocksRemainingRef     <- newIORef oamClocks
   lcdLineRef             <- newIORef 0
-  lineClocksRemainingRef <- newIORef 0
+  lineClocksRemainingRef <- newIORef lineClocks
   lcdEnabledRef          <- newIORef True
   pure GraphicsState { .. }
 
@@ -81,9 +81,9 @@ hblankClocks = 204
 vblankClocks = 4560
 lineClocks = oamClocks + readClocks + hblankClocks
 
-totalLines, visibleLines :: Word8
+totalLines, lastVisibleLine :: Word8
 totalLines = 154
-visibleLines = 144
+lastVisibleLine = 143
 
 -- | Given a mode, the number of clocks remaining, and the number of elapsed
 -- clocks, return the new mode and the new number of clocks remaining.
@@ -96,7 +96,7 @@ nextMode mode remaining clocks line =
         else case mode of
           ScanOAM  -> (ReadVRAM, remaining' + readClocks)
           ReadVRAM -> (HBlank, remaining' + hblankClocks)
-          HBlank   -> if line >= visibleLines
+          HBlank   -> if line >= lastVisibleLine
             then (VBlank, remaining' + vblankClocks)
             else (ScanOAM, remaining' + oamClocks)
           VBlank -> (ScanOAM, remaining' + oamClocks)
@@ -239,7 +239,7 @@ graphicsStep (BusEvent newWrites clocks _) = do
       writeByte STAT (modifyBits (bit matchBit .|. maskMode) (modeBits mode' .|. matchFlag) stat)
 
       -- If we're entering ReadVRAM mode, then signal the graphics output.
-      when (mode' == ReadVRAM) $ liftIO (putMVar (currentLine graphicsSync) line')
+      when (mode' == ReadVRAM) $ liftIO $ putMVar (currentLine graphicsSync) line'
 
       -- Raise interrupts
       when (stat `testBit` interruptCoincidence && lyc == line') (raiseInterrupt 1)

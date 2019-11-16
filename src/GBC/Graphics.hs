@@ -107,7 +107,7 @@ eventLoop context@WindowContext {..} = do
     bindTexture Texture2D (frameTexture glState)
     glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGB GL_UNSIGNED_BYTE nullPtr
     glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-    glFinish  
+    glFinish
     SDL.glSwapWindow window
 
   unless (line == 255) $ eventLoop context
@@ -127,7 +127,7 @@ renderLine line VideoBuffers {..} assemblySpace priorityBuffer outputBase = do
 
   let windowStart    = if windowEnabled then fromIntegral wx - 7 else 160
 
-  -- Render sprite data to the assembly area.
+  -- Render window data to the assembly area.
   when bgEnabled $ do
     let yTile      = fromIntegral $ (line + scy) `unsafeShiftR` 3
     let yOffset    = fromIntegral $ (line + scy) .&. 0x07
