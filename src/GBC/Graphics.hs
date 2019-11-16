@@ -26,7 +26,6 @@ import           GBC.Registers
 import           GLUtils
 import           Graphics.GL.Core44
 import qualified Data.ByteString               as B
-import           Data.Foldable
 import qualified SDL
 
 -- | Window state.
@@ -108,6 +107,7 @@ eventLoop context@WindowContext {..} = do
     bindTexture Texture2D (frameTexture glState)
     glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGB GL_UNSIGNED_BYTE nullPtr
     glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+    glFinish  
     SDL.glSwapWindow window
 
   unless (line == 255) $ eventLoop context
