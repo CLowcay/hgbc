@@ -13,11 +13,12 @@ import           Test.Hspec
 import qualified Data.ByteString               as B
 
 makeROM :: [Word8] -> ROM
-makeROM d = ROM $ B.take (32 * 1024 * 1024) $ B.pack (0xFF : d) <> B.replicate (32 * 1024 * 1024) 0
+makeROM d =
+  ROM "test" $ B.take (32 * 1024 * 1024) $ B.pack (0xFF : d) <> B.replicate (32 * 1024 * 1024) 0
 
 decodesTo :: [Word8] -> Instruction -> IO ()
 decodesTo encoding expectedDecoding = do
-  memory               <- initMemory (makeROM encoding) (VideoBuffers nullPtr nullPtr nullPtr)
+  memory               <- initMemory (makeROM encoding) (VideoBuffers nullPtr nullPtr)
   (instruction, addr1) <- runReaderT (runDecode 1 decode) memory
   instruction `shouldBe` expectedDecoding
   addr1 `shouldBe` 1 + fromIntegral (length encoding)

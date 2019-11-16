@@ -20,7 +20,7 @@ import qualified Data.ByteString               as B
 import           Data.Foldable
 
 blankROM :: ROM
-blankROM = ROM (B.replicate (32 * 1024 * 1024) 0)
+blankROM = ROM "testRom" (B.replicate (32 * 1024 * 1024) 0)
 
 data CPUTestState = CPUTestState {
     testCPU :: !CPUState
@@ -34,11 +34,10 @@ instance HasMemory CPUTestState where
   forMemory = testMemory
 
 withNewCPU :: ReaderT CPUTestState IO () -> IO ()
-withNewCPU computation = allocaArray 0x2000 $ \pVRAM -> allocaArray 160 $ \pOAM ->
-  allocaArray 12 $ \pRegisters -> do
-    mem <- initMemory blankROM (VideoBuffers pVRAM pOAM pRegisters)
-    cpu <- initCPU
-    void $ runReaderT computationWithVerification $ CPUTestState cpu mem
+withNewCPU computation = allocaArray 0x2000 $ \pVRAM -> allocaArray 160 $ \pOAM -> do
+  mem <- initMemory blankROM (VideoBuffers pVRAM pOAM)
+  cpu <- initCPU
+  void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where
   computationWithVerification = do
     reset
@@ -147,7 +146,7 @@ spec = do
     ldhl 0xC000 (-1)  False False
     ldhl 0xC000 (-42) False False
     ldhl 0xC00F 1     False True
-    ldhl 0xC0F0 0x10  True False
+    ldhl 0xC0F0 0x10  True  False
     ldhl 0xC0FF 1     True  True
     ldhl 0x8FFF 1     True  True
     ldhl 0xFFFF 127   True  True
