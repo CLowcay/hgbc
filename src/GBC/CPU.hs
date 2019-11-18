@@ -346,6 +346,7 @@ reset = do
   setIME
   writePC 0x100
 
+  writeByte P1   0xFF
   writeByte TIMA 0x00
   writeByte TMA  0x00
   writeByte TAC  0x00
