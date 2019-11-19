@@ -16,28 +16,39 @@ import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
 
-mbc5 :: RAMAllocator -> IO MBC
-mbc5 ramAllocator = do
+mbc5 :: Int -> Int -> RAMAllocator -> IO MBC
+mbc5 bankMask ramMask ramAllocator = do
   ramG                <- newIORef False
   romB0               <- newIORef 1
   romB1               <- newIORef 0
   ramB                <- newIORef 0
   (ram, ramPtrOffset) <- ramAllocator 0x40000
 
-  let bankOffset = do
-        low  <- readIORef romB0
-        high <- readIORef romB1
-        pure (high `unsafeShiftL` 24 .|. low `unsafeShiftL` 14)
+  cachedROMOffset     <- newIORef 0x4000
+
+  let
+    updateROMOffset = do
+      low  <- readIORef romB0
+      high <- readIORef romB1
+      writeIORef cachedROMOffset
+                 ((((high `unsafeShiftL` 8) .|. low) .&. bankMask) `unsafeShiftL` 14)
+
+  let bankOffset = readIORef cachedROMOffset
 
   let getRAMOffset = do
         bank <- readIORef ramB
-        pure (bank `unsafeShiftL` 13)
+        pure ((bank .&. ramMask) `unsafeShiftL` 13)
 
-  let writeROM address value | address < 0x2000 = writeIORef ramG (value .&. 0x0F == 0x0A)
-                             | address < 0x3000 = writeIORef romB0 (fromIntegral value)
-                             | address < 0x4000 = writeIORef romB1 (fromIntegral value .&. 1)
-                             | address < 0x6000 = writeIORef ramB (fromIntegral value .&. 0xF)
-                             | otherwise        = pure ()
+  let writeROM address value
+        | address < 0x2000 = writeIORef ramG (value .&. 0x0F == 0x0A)
+        | address < 0x3000 = do
+          writeIORef romB0 (fromIntegral value)
+          updateROMOffset
+        | address < 0x4000 = do
+          writeIORef romB1 (fromIntegral value .&. 1)
+          updateROMOffset
+        | address < 0x6000 = writeIORef ramB (fromIntegral value .&. 0xF)
+        | otherwise = pure ()
   let readRAM check address = do
         when check $ liftIO $ do
           enabled <- readIORef ramG

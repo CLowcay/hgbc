@@ -10,7 +10,6 @@ module GBC.ROM
   , CartridgeType(..)
   , Header(..)
   , validateROM
-  , extractHeader
   , MBC(..)
   , getMBC
   )
@@ -24,6 +23,7 @@ import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
 
 data ROM = ROM { romFile :: String
+               , romHeader :: Header
                , romContent :: B.ByteString
                } deriving (Eq, Ord, Show)
 
@@ -59,11 +59,22 @@ validateROM file rom = do
   when (rom `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
   when (rom `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"
   when (complementCheck rom /= 0) $ Left "Complement check failed"
-  pure $ ROM file rom
+  header <- extractHeader rom
+  when (romSize header /= B.length rom) $ Left
+    (  "Incorrect ROM length.  ROM header states length as "
+    <> show (romSize header)
+    <> " but image length is actually "
+    <> show (B.length rom)
+    )
+  pure $ ROM file header rom
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
 
-extractHeader :: ROM -> Header
-extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
+extractHeader :: B.ByteString -> Either String Header
+extractHeader rom =
+  let result = runGetOrFail getHeader . LB.fromStrict . B.take 0x50 . B.drop 0x100 $ rom
+  in  case result of
+        Left  (_, _, message) -> Left message
+        Right (_, _, header ) -> Right header
  where
   getHeader :: Get Header
   getHeader = do
@@ -96,9 +107,9 @@ extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.d
     x    -> fail $ "unknown destination code " ++ show x
   decodeExternalRAM b = case b of
     0x00 -> pure 0
-    0x02 -> pure $ 64 * 128
-    0x03 -> pure $ 256 * 128
-    0x04 -> pure $ 1024 * 128
+    0x01 -> pure $ 64 * 128
+    0x02 -> pure $ 256 * 128
+    0x03 -> pure $ 1024 * 128
     x    -> fail $ "unknown external RAM code " ++ show x
   decodeROMSize b = case b of
     0x00 -> pure $ 256 * 128
@@ -134,13 +145,15 @@ extractHeader (ROM _ rom) = runGet getHeader . LB.fromStrict . B.take 0x50 . B.d
 
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
-getMBC rom@(ROM file _) =
-  let cType     = cartridgeType (extractHeader rom)
+getMBC (ROM file header _) =
+  let cType     = cartridgeType header
       allocator = if hasBackupBattery cType then savedRAM file else volatileRAM
+      bankMask  = (romSize header `div` 0x4000) - 1
+      ramMask   = (externalRAM header `div` 0x2000) - 1
   in  case mbcType cType of
         Nothing      -> nullMBC
-        Just MBC1    -> mbc1 allocator
-        Just MBC3    -> mbc3 allocator
-        Just MBC3RTC -> mbc3 allocator
-        Just MBC5    -> mbc5 allocator
+        Just MBC1    -> mbc1 bankMask ramMask allocator
+        Just MBC3    -> mbc3 bankMask ramMask allocator
+        Just MBC3RTC -> mbc3 bankMask ramMask allocator
+        Just MBC5    -> mbc5 bankMask ramMask allocator
         Just _       -> nullMBC

@@ -16,8 +16,8 @@ import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
 
-mbc3 :: RAMAllocator -> IO MBC
-mbc3 ramAllocator = do
+mbc3 :: Int -> Int -> RAMAllocator -> IO MBC
+mbc3 bankMask ramMask ramAllocator = do
   romOffset           <- newIORef 1
   ramOffset           <- newIORef 0
   enableRAM           <- newIORef False
@@ -25,10 +25,10 @@ mbc3 ramAllocator = do
 
   let bankOffset = do
         offset <- readIORef romOffset
-        pure (offset `unsafeShiftL` 14)
+        pure ((offset .&. bankMask) `unsafeShiftL` 14)
   let getRAMOffset = do
         offset <- readIORef ramOffset
-        pure (offset `unsafeShiftL` 13)
+        pure ((offset .&. ramMask) `unsafeShiftL` 13)
 
   let writeROM address value
         | address < 0x2000

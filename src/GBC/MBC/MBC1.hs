@@ -16,46 +16,57 @@ import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
 
-mbc1 :: RAMAllocator -> IO MBC
-mbc1 ramAllocator = do
+mbc1 :: Int -> Int -> RAMAllocator -> IO MBC
+mbc1 bankMask ramMask ramAllocator = do
   romOffset           <- newIORef 1
   ramOffset           <- newIORef 0
   enableRAM           <- newIORef False
   ramSelect           <- newIORef False
   (ram, ramPtrOffset) <- ramAllocator 0x8000
 
-  let bankOffset = do
+  cachedROMOffset     <- newIORef 0x4000
+  cachedRAMOffset     <- newIORef 0
+
+  let bankOffset = readIORef cachedROMOffset
+
+  let updateROMOffset = do
         noHighROM <- readIORef ramSelect
         low       <- readIORef romOffset
-        if noHighROM
-          then pure (low `unsafeShiftL` 14)
+        bank      <- if noHighROM
+          then pure low
           else do
             high <- readIORef ramOffset
-            pure (((high `unsafeShiftL` 5) .|. low) `unsafeShiftL` 14)
-  let getRAMOffset = do
-        ramBanking <- readIORef ramSelect
-        if ramBanking
-          then do
-            offset <- readIORef ramOffset
-            pure (offset `unsafeShiftL` 13)
-          else pure 0
+            pure ((high `unsafeShiftL` 5) .|. low)
+        writeIORef cachedROMOffset ((bank .&. bankMask) `unsafeShiftL` 14)
 
-  let
-    writeROM address value
-      | address < 0x2000
-      = writeIORef enableRAM (value .&. 0x0F == 0x0A)
-      | address < 0x4000
-      = let low = (fromIntegral value .&. 0x1F)
-        in  writeIORef romOffset (if low == 0 then 1 else low)
-      | address < 0x6000
-      = writeIORef ramOffset (fromIntegral value .&. 0x3)
-      | otherwise
-      = writeIORef ramSelect (value /= 0)
+  let updateRAMOffset = do
+        ramBanking <- readIORef ramSelect
+        bank       <- if ramBanking then readIORef ramOffset else pure 0
+        writeIORef cachedRAMOffset ((bank .&. ramMask) `unsafeShiftL` 13)
+
+  let writeROM address value
+        | address < 0x2000
+        = writeIORef enableRAM (value .&. 0x0F == 0x0A)
+        | address < 0x4000
+        = let low = (fromIntegral value .&. 0x1F)
+          in  do
+                writeIORef romOffset (if low == 0 then 1 else low)
+                updateROMOffset
+        | address < 0x6000
+        = do
+          writeIORef ramOffset (fromIntegral value .&. 0x3)
+          updateROMOffset
+          updateRAMOffset
+        | otherwise
+        = do
+          writeIORef ramSelect (value /= 0)
+          updateROMOffset
+          updateRAMOffset
   let readRAM check address = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidRead (address + 0xA000)))
-        offset <- getRAMOffset
+        offset <- readIORef cachedRAMOffset
         withForeignPtr ram
           $ \ptr -> peekElemOff (ptr `plusPtr` ramPtrOffset) (offset + fromIntegral address)
   let
@@ -63,14 +74,14 @@ mbc1 ramAllocator = do
       when check $ liftIO $ do
         enabled <- readIORef enableRAM
         unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-      offset <- getRAMOffset
+      offset <- readIORef cachedRAMOffset
       withForeignPtr ram
         $ \ptr -> pokeElemOff (ptr `plusPtr` ramPtrOffset) (offset + fromIntegral address) value
   let withRAMPointer check address action = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidAccess (address + 0xA000)))
-        offset <- getRAMOffset
+        offset <- readIORef cachedRAMOffset
         withForeignPtr ram (action . (`plusPtr` (ramPtrOffset + offset + fromIntegral address)))
   let mbcRegisters = do
         r1 <- readIORef romOffset

@@ -56,8 +56,7 @@ instance HasMemory Memory where
 
 -- | The initial memory state.
 initMemory :: ROM -> VideoBuffers -> IO Memory
-initMemory romInfo@(ROM _ rom) videoBuffer = do
-  let romHeader = extractHeader romInfo
+initMemory romInfo@(ROM _ romHeader rom) videoBuffer = do
   memRam         <- mallocForeignPtrArray 0x2000
   memHigh        <- mallocForeignPtrArray 0x100
   mbc            <- getMBC romInfo
