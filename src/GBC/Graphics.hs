@@ -217,7 +217,8 @@ renderLine line VideoBuffers {..} assemblySpace priorityBuffer outputBase = do
     if not spriteVisible
       then pure False
       else do
-        code  <- spriteCode offset
+        rawCode <- spriteCode offset
+        let code = if h == 16 then rawCode .&. 0xFE else rawCode
         attrs <- spriteAttrs offset
         let vflip = attrs .&. flagVerticalFlip /= 0
         let hflip = attrs .&. flagHorizontalFlip /= 0
