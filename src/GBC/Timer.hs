@@ -76,7 +76,6 @@ updateTimer advance = do
   tac <- readByte TAC
   when (timerStarted tac) $ do
     timer <- liftIO (readIORef timerCounter)
-    -- liftIO (print timer)
     let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus (tac .&. 3)
     liftIO (writeIORef timerCounter timer')
 
