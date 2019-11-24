@@ -26,6 +26,7 @@ import           Data.Word
 import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
+import           GBC.Audio
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Decode
@@ -87,9 +88,9 @@ data DebugState = DebugState {
   , cpu :: !CPUState
   , graphicsState :: !GraphicsState
   , graphicsSync :: !GraphicsSync
-  , lcdEnabled :: !(IORef Bool)
   , keypadState :: !KeypadState
   , timerState :: !TimerState
+  , audioState :: !AudioState
   , romFile :: !FilePath
   , codeMap :: !(IORef SymbolTable)
   , breakpoints :: !BreakpointTable
@@ -111,6 +112,10 @@ instance HasKeypad DebugState where
 instance HasTimer DebugState where
   {-# INLINE forTimerState #-}
   forTimerState = timerState
+
+instance HasAudio DebugState where
+  {-# INLINE forAudioState #-}
+  forAudioState = audioState
 
 instance HasGraphics DebugState where
   {-# INLINE forGraphicsState #-}
@@ -134,8 +139,8 @@ initDebug romFile cpu memory graphicsSync = do
   bus           <- initBusState
   graphicsState <- initGraphics
   keypadState   <- initKeypadState
-  lcdEnabled    <- newIORef True
   timerState    <- initTimerState
+  audioState    <- initAudioState
   pure DebugState { .. }
 
 getCodeMap :: MonadDebug SymbolTable
@@ -280,12 +285,13 @@ doCommand StepOut = do
   reportingClockStats (lift (doRun [breakOnRet sp] postConditions))
   lift $ do
     DebugState {..} <- ask
-    wasBreakpoint   <- (shouldBreakOnExecute breakpoints)
+    wasBreakpoint   <- shouldBreakOnExecute breakpoints
     unless wasBreakpoint (void busStep)
   disassembleAtPC
 doCommand Run = do
   postConditions <- lift (sequence [breakOnBreakpoints])
-  reportingClockStats (lift (doRun [] postConditions))
+  bracket (lift enableAudioOut) (const $ lift disableAudioOut)
+    $ const $ reportingClockStats (lift (doRun [] postConditions))
   disassembleAtPC
 doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
   postConditions <- lift (sequence [breakOnBreakpoints, pure (breakOnPC addr)])
