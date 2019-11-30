@@ -48,6 +48,8 @@ instance Channel PulseChannel where
 
   disable = liftIO . disableIO
 
+  getStatus PulseChannel {..} = liftIO $ readIORef enable
+
   trigger PulseChannel {..} = do
     register2 <- readByte (baseRegister + 2)
     liftIO $ do
@@ -71,7 +73,7 @@ instance Channel PulseChannel where
       void $ updateStateCycle dutyCycle 1 $ \i -> do
         dutyCycleNumber <- getDutyCycle <$> readByte (baseRegister + 1)
         sample          <- liftIO $ envelopeVolume envelope
-        liftIO $ writeIORef output (if dutyCycleOutput dutyCycleNumber i then sample - 8 else 0)
+        liftIO $ writeIORef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
       getTimerPeriod baseRegister
 
   writeX0 _ = pure ()

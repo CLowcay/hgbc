@@ -27,6 +27,7 @@ noFrameSequencerOutput = FrameSequencerOutput False False False
 class Channel channel where
   getOutput :: HasMemory env => channel -> ReaderT env IO Int
   disable :: HasMemory env => channel -> ReaderT env IO ()
+  getStatus :: HasMemory env => channel -> ReaderT env IO Bool
   trigger :: HasMemory env => channel -> ReaderT env IO ()
   frameSequencerClock :: HasMemory env => channel -> FrameSequencerOutput -> ReaderT env IO ()
   masterClock :: HasMemory env => channel -> Int -> ReaderT env IO ()

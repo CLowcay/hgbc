@@ -167,6 +167,20 @@ mixOutputChannel channelFlags = do
   out3            <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
   pure (fromIntegral (((out1 + out2 + out3) * 4) + 128))
 
+updateStatus :: HasAudio env => ReaderT env IO ()
+updateStatus = do
+  AudioState {..} <- asks forAudioState
+  s1              <- getStatus channel1
+  s2              <- getStatus channel2
+  s3              <- getStatus channel3
+  nr52            <- readByte NR52
+  let status =
+        (nr52 .&. 0xF0)
+          .|. (if s1 then 1 else 0)
+          .|. (if s2 then 2 else 0)
+          .|. (if s3 then 4 else 0)
+  writeByte NR52 status
+
 audioStep :: HasAudio env => BusEvent -> ReaderT env IO ()
 audioStep BusEvent { writeAddress, clockAdvance } = do
   AudioState {..} <- asks forAudioState
@@ -218,6 +232,7 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
             frameSequencerClock channel1 frameSequencerOutput
             frameSequencerClock channel2 frameSequencerOutput
             frameSequencerClock channel3 frameSequencerOutput
+            updateStatus
     masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance

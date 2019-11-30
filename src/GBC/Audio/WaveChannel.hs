@@ -51,6 +51,8 @@ instance Channel WaveChannel where
 
   disable = liftIO . disableIO
 
+  getStatus WaveChannel {..} = liftIO $ readIORef enable
+
   trigger WaveChannel {..} = do
     liftIO $ writeIORef enable True
     liftIO $ initLength lengthCounter
