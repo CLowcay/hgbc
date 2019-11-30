@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE  RecordWildCards #-}
+{-# LANGUAGE RecordWildCards #-}
 module GBC.Audio.Channel3
   ( Channel3
   , makeChannel3
@@ -50,10 +50,10 @@ instance Channel Channel3 where
   trigger Channel3 {..} = do
     liftIO $ writeIORef enable True
     l <- getCounter lengthCounter
-    when (l == 0) $ reloadCounter lengthCounter 0xFF
-    reloadCounter frequencyCounter =<< getTimerPeriod
+    when (l == 0) $ reloadCounter lengthCounter 256
+    reloadCounter frequencyCounter =<< getTimer3Period
     resetStateCycle sample waveSamplerStates
-    volume       <- getVolume
+    volume       <- getVolume3
     masterEnable <- getMasterEnable
     when (volume == 0 || not masterEnable) $ liftIO $ writeIORef enable False
 
@@ -70,13 +70,13 @@ instance Channel Channel3 where
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle sample 1 $ \i -> do
         sampleByte <- readByte (0xFF30 + (i `unsafeShiftR` 1))
-        volume     <- getVolume
+        volume     <- getVolume3
         let rawSampleValue =
               if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
         liftIO $ writeIORef output (fromIntegral sampleValue - 8)
-      getTimerPeriod
+      getTimer3Period
 
   writeX0 channel = do
     nr30 <- readByte NR30
@@ -90,20 +90,20 @@ instance Channel Channel3 where
 
   writeX2 _ = pure ()
 
-  writeX3 Channel3 {..} = reloadCounter frequencyCounter =<< getTimerPeriod
+  writeX3 Channel3 {..} = reloadCounter frequencyCounter =<< getTimer3Period
 
 getMasterEnable :: HasMemory env => ReaderT env IO Bool
 getMasterEnable = do
   nr32 <- readByte NR30
   pure (nr32 .&. 0x80 /= 0)
 
-getVolume :: HasMemory env => ReaderT env IO Word8
-getVolume = do
+getVolume3 :: HasMemory env => ReaderT env IO Word8
+getVolume3 = do
   nr32 <- readByte NR32
   pure (3 .&. (nr32 `unsafeShiftR` 5))
 
-getTimerPeriod :: HasMemory env => ReaderT env IO Int
-getTimerPeriod = do
+getTimer3Period :: HasMemory env => ReaderT env IO Int
+getTimer3Period = do
   nr33 <- readByte NR33
   nr34 <- readByte NR34
   let f = ((fromIntegral nr34 .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral nr33

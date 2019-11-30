@@ -24,6 +24,7 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
+import           GBC.Audio.Channel2
 import           GBC.Audio.Channel3
 import           GBC.Audio.Common
 import           GBC.CPU
@@ -52,6 +53,7 @@ data AudioState = AudioState {
   , audioEnabled :: IORef Bool
   , sampler :: Counter
   , frameSequencer :: StateCycle Int
+  , channel2 :: Channel2
   , channel3 :: Channel3
 }
 
@@ -75,6 +77,7 @@ initAudioState = do
   audioEnabled   <- newIORef True
   sampler        <- newCounter
   frameSequencer <- newStateCycle frameSequencerStates
+  channel2       <- makeChannel2
   channel3       <- makeChannel3
   pure AudioState { .. }
 
@@ -157,17 +160,9 @@ samplePeriod = 94
 mixOutputChannel :: HasAudio env => Word8 -> ReaderT env IO Word8
 mixOutputChannel channelFlags = do
   AudioState {..} <- asks forAudioState
-  out             <- getOutput channel3
-  pure (fromIntegral ((out * 4) + 128))
-
-  --(channelFlags `testBit`) <$> [0..3]
-
-
-
-  --samples         <- liftIO $ traverse
-  --  (\(i, channel) -> if channelFlags `testBit` i then readIORef channel else pure 0)
-  --  ([0 .. 3] `zip` [channel1, channel2, channel3, channel4])
-  --pure (fromIntegral ((17 * sum samples) `div` 4))
+  out2             <- if channelFlags `testBit` 1 then getOutput channel3 else pure 0
+  out3             <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
+  pure (fromIntegral (((out2 + out3) * 4) + 128))
 
 audioStep :: HasAudio env => BusEvent -> ReaderT env IO ()
 audioStep BusEvent { writeAddress, clockAdvance } = do
@@ -182,6 +177,13 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
         else do
           disable channel3
           clearAllRegisters
+    NR20 -> writeX0 channel2
+    NR21 -> writeX1 channel2
+    NR22 -> writeX2 channel2
+    NR23 -> writeX3 channel2
+    NR24 -> do
+      nr24 <- readByte NR24
+      when (isFlagSet flagTrigger nr24) $ trigger channel2
     NR30 -> writeX0 channel3
     NR31 -> writeX1 channel3
     NR32 -> writeX2 channel3
@@ -205,7 +207,10 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
             6 -> FrameSequencerOutput True False True
             7 -> FrameSequencerOutput False True False
             x -> error ("Invalid frame sequencer state " <> show x)
-      in  frameSequencerClock channel3 frameSequencerOutput
+      in  do
+        frameSequencerClock channel2 frameSequencerOutput
+        frameSequencerClock channel3 frameSequencerOutput
+    masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance
 
     updateCounter sampler clockAdvance $ do
