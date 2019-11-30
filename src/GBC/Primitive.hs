@@ -1,6 +1,10 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE RecordWildCards #-}
+
 module GBC.Primitive
   ( Counter
   , newCounter
+  , getCounter
   , reloadCounter
   , updateCounter
   , StateCycle
@@ -8,32 +12,47 @@ module GBC.Primitive
   , getStateCycle
   , updateStateCycle
   , resetStateCycle
+  , RingBuffer
+  , newRingBuffer
+  , readableSize
+  , writableSize
+  , writeBuffer
+  , foldBuffer
   )
 where
 
-import           Data.IORef
-import           Control.Monad.IO.Class
+import           Control.Monad
 import           Control.Monad.Fail
+import           Control.Monad.IO.Class
+import           Data.Bits
+import           Data.IORef
+import           Foreign.ForeignPtr
+import           Foreign.Storable
 
+-- | A reloading down counter.  Number of states is reload value + 1.
 newtype Counter = Counter (IORef Int)
 
 newCounter :: MonadIO m => m Counter
 newCounter = liftIO $ Counter <$> newIORef 0
 
 {-# INLINE reloadCounter #-}
-reloadCounter :: MonadIO m => Int -> Counter -> m ()
-reloadCounter reload (Counter ref) = liftIO $ writeIORef ref reload
+reloadCounter :: MonadIO m => Counter -> Int -> m ()
+reloadCounter (Counter ref) reload = liftIO $ writeIORef ref reload
+
+{-# INLINE getCounter #-}
+getCounter :: MonadIO m => Counter -> m Int
+getCounter (Counter ref) = liftIO $ readIORef ref
 
 {-# INLINE updateCounter #-}
 updateCounter :: MonadIO m => Counter -> Int -> m Int -> m ()
 updateCounter (Counter ref) update k = do
   count <- liftIO $ readIORef ref
   let count' = count - update
-  if count' > 0
+  if count' >= 0
     then liftIO $ writeIORef ref count'
     else do
       reload <- k
-      liftIO $ writeIORef ref (count' + reload)
+      liftIO $ writeIORef ref (count' + reload + 1)
 
 data StateCycle a = StateCycle !(IORef Int) !(IORef [(a, Int)])
 
@@ -73,3 +92,56 @@ resetStateCycle (StateCycle cycles states) states' = case states' of
   ((_, count0) : _) -> liftIO $ do
     writeIORef states (cycle states')
     writeIORef cycles count0
+
+data RingBuffer a = RingBuffer {
+    ringBuffer :: ForeignPtr a
+  , ringReadPtr :: IORef Int
+  , ringWritePtr :: IORef Int
+  , ringMask :: Int
+}
+
+newRingBuffer :: Storable a => Int -> IO (RingBuffer a)
+newRingBuffer size = do
+  ringBuffer   <- mallocForeignPtrArray (2 ^ size)
+  ringReadPtr  <- newIORef 0
+  ringWritePtr <- newIORef 0
+  let ringMask = (2 ^ size) - 1
+  pure RingBuffer { .. }
+
+{-# INLINE readableSize #-}
+readableSize :: RingBuffer a -> IO Int
+readableSize RingBuffer {..} = do
+  readPtr  <- readIORef ringReadPtr
+  writePtr <- readIORef ringWritePtr
+  pure $ writePtr - readPtr
+
+{-# INLINE writableSize #-}
+writableSize :: RingBuffer a -> IO Int
+writableSize RingBuffer {..} = do
+  readPtr  <- readIORef ringReadPtr
+  writePtr <- readIORef ringWritePtr
+  pure $ (ringMask + 1) - (writePtr - readPtr)
+
+{-# INLINE writeBuffer #-}
+writeBuffer :: Storable a => RingBuffer a -> a -> IO ()
+writeBuffer RingBuffer {..} x = do
+  readPtr  <- readIORef ringReadPtr
+  writePtr <- readIORef ringWritePtr
+  when ((writePtr - readPtr) <= ringMask) $ do
+    withForeignPtr ringBuffer $ \ptr -> pokeElemOff ptr (writePtr .&. ringMask) x
+    writeIORef ringWritePtr (writePtr + 1)
+
+{-# INLINABLE foldBuffer #-}
+foldBuffer :: Storable a => RingBuffer a -> Int -> b -> (b -> a -> IO b) -> IO b
+foldBuffer RingBuffer {..} limit acc0 accumulate = do
+  readPtr  <- readIORef ringReadPtr
+  writePtr <- readIORef ringWritePtr
+  let nextReadPtr       = writePtr `min` (readPtr + limit)
+  writeIORef ringReadPtr nextReadPtr
+  withForeignPtr ringBuffer $ \base ->
+    let go !acc !i = if i == nextReadPtr
+          then pure acc
+          else do
+            acc' <- accumulate acc =<< peekElemOff base (i .&. ringMask)
+            go acc' (i + 1)
+    in  go acc0 readPtr

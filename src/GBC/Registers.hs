@@ -14,6 +14,7 @@ module GBC.Registers (
   , pattern NR12
   , pattern NR13
   , pattern NR14
+  , pattern NR20
   , pattern NR21
   , pattern NR22
   , pattern NR23
@@ -23,6 +24,7 @@ module GBC.Registers (
   , pattern NR32
   , pattern NR33
   , pattern NR34
+  , pattern NR40
   , pattern NR41
   , pattern NR42
   , pattern NR43
@@ -97,6 +99,9 @@ pattern NR13 = 0xFF13
 pattern NR14 :: Word16
 pattern NR14 = 0xFF14
 
+pattern NR20 :: Word16
+pattern NR20 = 0xFF15
+
 pattern NR21 :: Word16
 pattern NR21 = 0xFF16
 
@@ -123,6 +128,9 @@ pattern NR33 = 0xFF1D
 
 pattern NR34 :: Word16
 pattern NR34 = 0xFF1E
+
+pattern NR40 :: Word16
+pattern NR40 = 0xFF1F
 
 pattern NR41 :: Word16
 pattern NR41 = 0xFF20

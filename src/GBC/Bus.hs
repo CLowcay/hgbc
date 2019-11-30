@@ -18,6 +18,7 @@ import           Data.Bits
 import           Data.Foldable
 import           Data.IORef
 import           Data.Word
+import           GBC.Audio
 import           GBC.CPU
 import           GBC.GraphicsSync
 import           GBC.Keypad
@@ -32,7 +33,14 @@ data BusState = BusState {
   , breakFlag :: !(IORef Bool)
 }
 
-class (HasMemory env, HasCPU env, HasGraphics env, HasKeypad env, HasTimer env) => HasBus env where
+class
+  ( HasMemory env
+  , HasCPU env
+  , HasGraphics env
+  , HasKeypad env
+  , HasTimer env
+  , HasAudio env
+  ) => HasBus env where
   forBusState :: env -> BusState
 
 -- | Number of milliseconds to wait between polling for events.
@@ -96,4 +104,5 @@ busStep = do
 
   graphicsStep busEvent
   updateTimer (clockAdvance busEvent)
+  audioStep busEvent
   pure busEvent
