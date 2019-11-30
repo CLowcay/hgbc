@@ -51,7 +51,7 @@ instance Channel Channel3 where
     liftIO $ writeIORef enable True
     l <- getCounter lengthCounter
     when (l == 0) $ reloadCounter lengthCounter 0xFF
-    reloadCounter frequencyCounter . fromIntegral =<< getPTPeriod NR33
+    reloadCounter frequencyCounter =<< getTimerPeriod
     resetStateCycle sample waveSamplerStates
     volume       <- getVolume
     masterEnable <- getMasterEnable
@@ -70,13 +70,13 @@ instance Channel Channel3 where
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle sample 1 $ \i -> do
         sampleByte <- readByte (0xFF30 + (i `unsafeShiftR` 1))
-        volume <- getVolume
+        volume     <- getVolume
         let rawSampleValue =
               if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
         liftIO $ writeIORef output (fromIntegral sampleValue - 8)
-      fromIntegral <$> getPTPeriod NR33
+      getTimerPeriod
 
   writeX0 channel = do
     nr30 <- readByte NR30
@@ -90,7 +90,7 @@ instance Channel Channel3 where
 
   writeX2 _ = pure ()
 
-  writeX3 Channel3 {..} = reloadCounter frequencyCounter . fromIntegral =<< getPTPeriod NR33
+  writeX3 Channel3 {..} = reloadCounter frequencyCounter =<< getTimerPeriod
 
 getMasterEnable :: HasMemory env => ReaderT env IO Bool
 getMasterEnable = do
@@ -102,3 +102,9 @@ getVolume = do
   nr32 <- readByte NR32
   pure (3 .&. (nr32 `unsafeShiftR` 5))
 
+getTimerPeriod :: HasMemory env => ReaderT env IO Int
+getTimerPeriod = do
+  nr33 <- readByte NR33
+  nr34 <- readByte NR34
+  let f = ((fromIntegral nr34 .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral nr33
+  pure (2 * (2048 - f))

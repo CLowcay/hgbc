@@ -4,12 +4,10 @@ module GBC.Audio.Common
   , noFrameSequencerOutput
   , flagTrigger
   , flagLength
-  , getPTPeriod
   )
 where
 
 import           Control.Monad.Reader
-import           Data.Bits
 import           Data.Word
 import           GBC.Memory
 
@@ -36,9 +34,3 @@ class Channel channel where
   writeX1 :: HasMemory env => channel -> ReaderT env IO ()
   writeX2 :: HasMemory env => channel -> ReaderT env IO ()
   writeX3 :: HasMemory env => channel -> ReaderT env IO ()
-
-getPTPeriod :: HasMemory env => Word16 -> ReaderT env IO Word16
-getPTPeriod base = do
-  lsb <- readByte base
-  msb <- readByte (base + 1)
-  pure $ negate ((fromIntegral lsb `unsafeShiftL` 5) .|. (fromIntegral msb `unsafeShiftL` 13))

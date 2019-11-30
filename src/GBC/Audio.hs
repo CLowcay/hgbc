@@ -152,7 +152,7 @@ flagMasterPower :: Word8
 flagMasterPower = 0x80
 
 samplePeriod :: Int
-samplePeriod = 95
+samplePeriod = 94
 
 mixOutputChannel :: HasAudio env => Word8 -> ReaderT env IO Word8
 mixOutputChannel channelFlags = do
