@@ -24,8 +24,8 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
-import           GBC.Audio.Channel2
-import           GBC.Audio.Channel3
+import           GBC.Audio.PulseChannel
+import           GBC.Audio.WaveChannel
 import           GBC.Audio.Common
 import           GBC.CPU
 import           GBC.Memory
@@ -53,8 +53,9 @@ data AudioState = AudioState {
   , audioEnabled :: IORef Bool
   , sampler :: Counter
   , frameSequencer :: StateCycle Int
-  , channel2 :: Channel2
-  , channel3 :: Channel3
+  , channel1 :: PulseChannel
+  , channel2 :: PulseChannel
+  , channel3 :: WaveChannel
 }
 
 frameSequencerStates :: [(Int, Int)]
@@ -77,8 +78,9 @@ initAudioState = do
   audioEnabled   <- newIORef True
   sampler        <- newCounter
   frameSequencer <- newStateCycle frameSequencerStates
-  channel2       <- makeChannel2
-  channel3       <- makeChannel3
+  channel1       <- newPulseChannel NR10
+  channel2       <- newPulseChannel NR20
+  channel3       <- newWaveChannel
   pure AudioState { .. }
 
 disableAudioOut :: HasAudio env => ReaderT env IO ()
@@ -160,9 +162,10 @@ samplePeriod = 94
 mixOutputChannel :: HasAudio env => Word8 -> ReaderT env IO Word8
 mixOutputChannel channelFlags = do
   AudioState {..} <- asks forAudioState
-  out2             <- if channelFlags `testBit` 1 then getOutput channel3 else pure 0
-  out3             <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
-  pure (fromIntegral (((out2 + out3) * 4) + 128))
+  out1            <- if channelFlags `testBit` 1 then getOutput channel1 else pure 0
+  out2            <- if channelFlags `testBit` 1 then getOutput channel2 else pure 0
+  out3            <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
+  pure (fromIntegral (((out1 + out2 + out3) * 4) + 128))
 
 audioStep :: HasAudio env => BusEvent -> ReaderT env IO ()
 audioStep BusEvent { writeAddress, clockAdvance } = do
@@ -177,22 +180,26 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
         else do
           disable channel3
           clearAllRegisters
+
+    NR10 -> writeX0 channel1
+    NR11 -> writeX1 channel1
+    NR12 -> writeX2 channel1
+    NR13 -> writeX3 channel1
+    NR14 -> writeX4 channel1
+
     NR20 -> writeX0 channel2
     NR21 -> writeX1 channel2
     NR22 -> writeX2 channel2
     NR23 -> writeX3 channel2
-    NR24 -> do
-      nr24 <- readByte NR24
-      when (isFlagSet flagTrigger nr24) $ trigger channel2
+    NR24 -> writeX4 channel2
+
     NR30 -> writeX0 channel3
     NR31 -> writeX1 channel3
     NR32 -> writeX2 channel3
     NR33 -> writeX3 channel3
-    NR34 -> do
-      nr34 <- readByte NR34
-      when (isFlagSet flagTrigger nr34) $ trigger channel3
+    NR34 -> writeX4 channel3
 
-    _ -> pure ()
+    _    -> pure ()
 
   enabled <- liftIO $ readIORef audioEnabled
   when enabled $ do
@@ -208,8 +215,10 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
             7 -> FrameSequencerOutput False True False
             x -> error ("Invalid frame sequencer state " <> show x)
       in  do
-        frameSequencerClock channel2 frameSequencerOutput
-        frameSequencerClock channel3 frameSequencerOutput
+            frameSequencerClock channel1 frameSequencerOutput
+            frameSequencerClock channel2 frameSequencerOutput
+            frameSequencerClock channel3 frameSequencerOutput
+    masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance
 
