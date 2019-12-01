@@ -18,6 +18,10 @@ module GBC.Primitive
   , writableSize
   , writeBuffer
   , foldBuffer
+  , LinearFeedbackShiftRegister
+  , newLinearFeedbackShiftRegister
+  , initLinearFeedbackShiftRegister
+  , nextBit
   )
 where
 
@@ -136,7 +140,7 @@ foldBuffer :: Storable a => RingBuffer a -> Int -> b -> (b -> a -> IO b) -> IO b
 foldBuffer RingBuffer {..} limit acc0 accumulate = do
   readPtr  <- readIORef ringReadPtr
   writePtr <- readIORef ringWritePtr
-  let nextReadPtr       = writePtr `min` (readPtr + limit)
+  let nextReadPtr = writePtr `min` (readPtr + limit)
   writeIORef ringReadPtr nextReadPtr
   withForeignPtr ringBuffer $ \base ->
     let go !acc !i = if i == nextReadPtr
@@ -145,3 +149,24 @@ foldBuffer RingBuffer {..} limit acc0 accumulate = do
             acc' <- accumulate acc =<< peekElemOff base (i .&. ringMask)
             go acc' (i + 1)
     in  go acc0 readPtr
+
+newtype LinearFeedbackShiftRegister a = LinearFeedbackShiftRegister (IORef a)
+
+newLinearFeedbackShiftRegister :: Bits a => IO (LinearFeedbackShiftRegister a)
+newLinearFeedbackShiftRegister = LinearFeedbackShiftRegister <$> newIORef (bit 0)
+
+{-# INLINE initLinearFeedbackShiftRegister #-}
+initLinearFeedbackShiftRegister :: a -> LinearFeedbackShiftRegister a -> IO ()
+initLinearFeedbackShiftRegister value (LinearFeedbackShiftRegister ref) = writeIORef ref value
+
+{-# INLINE nextBit #-}
+nextBit :: Bits a => LinearFeedbackShiftRegister a -> Int -> IO Bool
+nextBit (LinearFeedbackShiftRegister ref) width = do
+  register <- readIORef ref
+  let shifted   = register `unsafeShiftR` 1
+  let b0        = register .&. bit 0
+  let b1        = shifted .&. bit 0
+  let register' = (shifted .&. complement (bit width)) .|. ((b0 `xor` b1) `unsafeShiftL` width)
+  writeIORef ref register'
+  pure (not (register' `testBit` 0))
+

@@ -24,9 +24,10 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
+import           GBC.Audio.Common
+import           GBC.Audio.NoiseChannel
 import           GBC.Audio.PulseChannel
 import           GBC.Audio.WaveChannel
-import           GBC.Audio.Common
 import           GBC.CPU
 import           GBC.Memory
 import           GBC.Primitive
@@ -56,6 +57,7 @@ data AudioState = AudioState {
   , channel1 :: PulseChannel
   , channel2 :: PulseChannel
   , channel3 :: WaveChannel
+  , channel4 :: NoiseChannel
 }
 
 frameSequencerStates :: [(Int, Int)]
@@ -78,9 +80,10 @@ initAudioState = do
   audioEnabled   <- newIORef True
   sampler        <- newCounter
   frameSequencer <- newStateCycle frameSequencerStates
-  channel1       <- newPulseChannel NR10
-  channel2       <- newPulseChannel NR20
+  channel1       <- newPulseChannel NR10 True
+  channel2       <- newPulseChannel NR20 False
   channel3       <- newWaveChannel
+  channel4       <- newNoiseChannel
   pure AudioState { .. }
 
 disableAudioOut :: HasAudio env => ReaderT env IO ()
@@ -162,10 +165,11 @@ samplePeriod = 94
 mixOutputChannel :: HasAudio env => Word8 -> ReaderT env IO Word8
 mixOutputChannel channelFlags = do
   AudioState {..} <- asks forAudioState
-  out1            <- if channelFlags `testBit` 1 then getOutput channel1 else pure 0
+  out1            <- if channelFlags `testBit` 0 then getOutput channel1 else pure 0
   out2            <- if channelFlags `testBit` 1 then getOutput channel2 else pure 0
   out3            <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
-  pure (fromIntegral (((out1 + out2 + out3) * 4) + 128))
+  out4            <- if channelFlags `testBit` 3 then getOutput channel4 else pure 0
+  pure (fromIntegral (((out1 + out2 + out3 + out4) * 4) + 128))
 
 updateStatus :: HasAudio env => ReaderT env IO ()
 updateStatus = do
@@ -173,12 +177,14 @@ updateStatus = do
   s1              <- getStatus channel1
   s2              <- getStatus channel2
   s3              <- getStatus channel3
+  s4              <- getStatus channel4
   nr52            <- readByte NR52
   let status =
         (nr52 .&. 0xF0)
           .|. (if s1 then 1 else 0)
           .|. (if s2 then 2 else 0)
           .|. (if s3 then 4 else 0)
+          .|. (if s4 then 8 else 0)
   writeByte NR52 status
 
 audioStep :: HasAudio env => BusEvent -> ReaderT env IO ()
@@ -213,6 +219,11 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
     NR33 -> writeX3 channel3
     NR34 -> writeX4 channel3
 
+    NR40 -> writeX0 channel4
+    NR41 -> writeX1 channel4
+    NR42 -> writeX2 channel4
+    NR43 -> writeX3 channel4
+    NR44 -> writeX4 channel4
     _    -> pure ()
 
   enabled <- liftIO $ readIORef audioEnabled
@@ -232,10 +243,12 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
             frameSequencerClock channel1 frameSequencerOutput
             frameSequencerClock channel2 frameSequencerOutput
             frameSequencerClock channel3 frameSequencerOutput
+            frameSequencerClock channel4 frameSequencerOutput
             updateStatus
     masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance
+    masterClock channel4 clockAdvance
 
     updateCounter sampler clockAdvance $ do
       nr50 <- readByte NR50

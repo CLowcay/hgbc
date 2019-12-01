@@ -115,4 +115,4 @@ getTimerPeriod = do
   register3 <- readByte NR33
   register4 <- readByte NR34
   let f = ((fromIntegral register4 .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral register3
-  pure (2 * (2048 - f))
+  pure ((2 * (2048 - f)) - 1)

@@ -15,23 +15,27 @@ import           Data.Word
 import           GBC.Audio.Common
 import           GBC.Audio.Envelope
 import           GBC.Audio.Length
+import           GBC.Audio.Sweep
 import           GBC.Memory
 import           GBC.Primitive
 
 data PulseChannel = PulseChannel {
     output           :: IORef Int
   , enable           :: IORef Bool
+  , hasSweepUnit     :: Bool
   , baseRegister     :: Word16
+  , sweepUnit        :: Sweep
   , frequencyCounter :: Counter
   , dutyCycle        :: StateCycle Int
   , envelope         :: Envelope
   , lengthCounter    :: Length
 }
 
-newPulseChannel :: Word16 -> IO PulseChannel
-newPulseChannel baseRegister = do
+newPulseChannel :: Word16 -> Bool -> IO PulseChannel
+newPulseChannel baseRegister hasSweepUnit = do
   output           <- newIORef 0
   enable           <- newIORef False
+  sweepUnit        <- newSweep
   frequencyCounter <- newCounter
   dutyCycle        <- newStateCycle dutyCycleStates
   envelope         <- newEnvelope
@@ -51,21 +55,30 @@ instance Channel PulseChannel where
   getStatus PulseChannel {..} = liftIO $ readIORef enable
 
   trigger PulseChannel {..} = do
+    register0 <- readByte baseRegister
     register2 <- readByte (baseRegister + 2)
+    frequency <- getFrequency baseRegister
     liftIO $ do
       writeIORef enable True
+      when hasSweepUnit $ initSweep sweepUnit frequency register0
       initLength lengthCounter
       initEnvelope envelope register2
-    reloadCounter frequencyCounter =<< getTimerPeriod baseRegister
+    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     isEnabled <- liftIO $ readIORef enable
     when isEnabled $ do
       register4 <- readByte (baseRegister + 4)
-      liftIO $ do
-        when (lengthClock && isFlagSet flagLength register4)
-          $ clockLength lengthCounter (disableIO channel)
-        when envelopeClock $ clockEnvelope envelope
+      liftIO $ when (lengthClock && isFlagSet flagLength register4) $ clockLength
+        lengthCounter
+        (disableIO channel)
+      liftIO $ when envelopeClock $ clockEnvelope envelope
+      when sweepClock $ do
+        register0 <- readByte baseRegister
+        mUpdate   <- liftIO $ clockSweep sweepUnit register0
+        case mUpdate of
+          Nothing         -> pure ()
+          Just frequency' -> updateFrequency baseRegister frequency'
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- liftIO $ readIORef enable
@@ -74,7 +87,7 @@ instance Channel PulseChannel where
         dutyCycleNumber <- getDutyCycle <$> readByte (baseRegister + 1)
         sample          <- liftIO $ envelopeVolume envelope
         liftIO $ writeIORef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
-      getTimerPeriod baseRegister
+      getTimerPeriod <$> getFrequency baseRegister
 
   writeX0 _ = pure ()
 
@@ -86,7 +99,8 @@ instance Channel PulseChannel where
 
   writeX2 _ = pure ()
 
-  writeX3 PulseChannel {..} = reloadCounter frequencyCounter =<< getTimerPeriod baseRegister
+  writeX3 PulseChannel {..} =
+    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
 
   writeX4 channel@PulseChannel {..} = do
     register4 <- readByte (baseRegister + 4)
@@ -101,13 +115,23 @@ dutyCycleStates = [1, 2, 3, 4, 5, 6, 7, 0] <&> (, 1)
 dutyCycleOutput :: Word8 -> Int -> Bool
 dutyCycleOutput 0 i = i == 0
 dutyCycleOutput 1 i = i <= 1
-dutyCycleOutput 2 i = i <= 4
+dutyCycleOutput 2 i = i <= 1 || i >= 6
 dutyCycleOutput 3 i = i > 1
 dutyCycleOutput x _ = error ("Invalid duty cycle " <> show x)
 
-getTimerPeriod :: HasMemory env => Word16 -> ReaderT env IO Int
-getTimerPeriod base = do
+getFrequency :: HasMemory env => Word16 -> ReaderT env IO Int
+getFrequency base = do
   lsb <- readByte (base + 3)
   msb <- readByte (base + 4)
-  let f = ((fromIntegral msb .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral lsb
-  pure (4 * (2048 - f))
+  pure (((fromIntegral msb .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral lsb)
+
+updateFrequency :: HasMemory env => Word16 -> Int -> ReaderT env IO ()
+updateFrequency base frequency = do
+  let lsb = fromIntegral (frequency .&. 0xFF)
+  let msb = fromIntegral ((frequency `unsafeShiftR` 8) .&. 0x07)
+  register4 <- readByte (base + 4)
+  writeByte (base + 3) lsb
+  writeByte (base + 4) ((register4 .&. 0xF8) .|. msb)
+
+getTimerPeriod :: Int -> Int
+getTimerPeriod f = (4 * (2048 - f)) - 1
