@@ -54,18 +54,15 @@ instance Channel WaveChannel where
   getStatus WaveChannel {..} = liftIO $ readIORef enable
 
   trigger WaveChannel {..} = do
-    liftIO $ writeIORef enable True
     liftIO $ initLength lengthCounter
     reloadCounter frequencyCounter =<< getTimerPeriod
     resetStateCycle sample waveSamplerStates
-    volume       <- getVolume
     masterEnable <- getMasterEnable
-    when (volume == 0 || not masterEnable) $ liftIO $ writeIORef enable False
+    liftIO $ writeIORef enable masterEnable
 
   frameSequencerClock channel@WaveChannel {..} FrameSequencerOutput {..} = do
     register4 <- readByte NR34
-    isEnabled <- liftIO $ readIORef enable
-    liftIO $ when (isEnabled && lengthClock && isFlagSet flagLength register4) $ clockLength
+    liftIO $ when (lengthClock && isFlagSet flagLength register4) $ clockLength
       lengthCounter
       (disableIO channel)
 

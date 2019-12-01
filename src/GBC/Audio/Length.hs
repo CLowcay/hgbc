@@ -27,13 +27,14 @@ newLength bitMask = do
 initLength :: Length -> IO ()
 initLength Length {..} = do
   l <- getCounter counter
-  when (l == 0) $ reloadCounter counter (fromIntegral bitMask + 1)
+  when (l == 0) $ reloadCounter counter (fromIntegral bitMask)
 
 {-# INLINE reloadLength #-}
 reloadLength :: Length -> Word8 -> IO ()
 reloadLength Length {..} register =
-  reloadCounter counter (fromIntegral bitMask .&. negate (fromIntegral (register .&. bitMask)))
+  let len = negate (fromIntegral (register .&. bitMask))
+  in  reloadCounter counter ((len - 1) .&. fromIntegral bitMask)
 
 {-# INLINE clockLength #-}
 clockLength :: Length -> IO () -> IO ()
-clockLength Length {..} action = updateCounter counter 1 $ 0 <$ action
+clockLength Length {..} action = updateCounter counter 1 $ fromIntegral bitMask <$ action

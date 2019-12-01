@@ -15,6 +15,7 @@ import           GBC.Registers
 
 data NoiseChannel = NoiseChannel {
     enable           :: IORef Bool
+  , dacEnable        :: IORef Bool
   , output           :: IORef Int
   , lengthCounter    :: Length
   , envelope         :: Envelope
@@ -25,6 +26,7 @@ data NoiseChannel = NoiseChannel {
 newNoiseChannel :: IO NoiseChannel
 newNoiseChannel = do
   enable           <- newIORef False
+  dacEnable        <- newIORef True
   output           <- newIORef 0
   lengthCounter    <- newLength 0x3F
   envelope         <- newEnvelope
@@ -47,20 +49,19 @@ instance Channel NoiseChannel where
   trigger NoiseChannel {..} = do
     register2 <- readByte NR42
     liftIO $ do
-      writeIORef enable True
+      isDacEnabled <- readIORef dacEnable
+      writeIORef enable isDacEnabled
       initLength lengthCounter
       initEnvelope envelope register2
       initLinearFeedbackShiftRegister 0xFFFF lfsr
     reloadCounter frequencyCounter =<< getTimerPeriod
 
   frameSequencerClock channel@NoiseChannel {..} FrameSequencerOutput {..} = do
-    isEnabled <- liftIO $ readIORef enable
-    when isEnabled $ do
-      register4 <- readByte NR44
-      liftIO $ when (lengthClock && isFlagSet flagLength register4) $ clockLength
-        lengthCounter
-        (disableIO channel)
-      liftIO $ when envelopeClock $ clockEnvelope envelope
+    register4 <- readByte NR44
+    liftIO $ do
+      when (lengthClock && isFlagSet flagLength register4)
+        $ clockLength lengthCounter (disableIO channel)
+      when envelopeClock $ clockEnvelope envelope
 
   masterClock NoiseChannel {..} clockAdvance = do
     isEnabled <- liftIO $ readIORef enable
@@ -80,7 +81,11 @@ instance Channel NoiseChannel where
       register1 <- readByte NR41
       liftIO $ reloadLength lengthCounter register1
 
-  writeX2 _ = pure ()
+  writeX2 channel@NoiseChannel {..} = do
+    register2 <- readByte NR42
+    let isDacEnabled = register2 .&. 0xF8 /= 0
+    unless isDacEnabled $ disable channel
+    liftIO $ writeIORef dacEnable isDacEnabled
 
   writeX3 NoiseChannel {..} = reloadCounter frequencyCounter =<< getTimerPeriod
 

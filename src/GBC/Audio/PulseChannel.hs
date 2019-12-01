@@ -22,6 +22,7 @@ import           GBC.Primitive
 data PulseChannel = PulseChannel {
     output           :: IORef Int
   , enable           :: IORef Bool
+  , dacEnable        :: IORef Bool
   , hasSweepUnit     :: Bool
   , baseRegister     :: Word16
   , sweepUnit        :: Sweep
@@ -35,6 +36,7 @@ newPulseChannel :: Word16 -> Bool -> IO PulseChannel
 newPulseChannel baseRegister hasSweepUnit = do
   output           <- newIORef 0
   enable           <- newIORef False
+  dacEnable        <- newIORef True
   sweepUnit        <- newSweep
   frequencyCounter <- newCounter
   dutyCycle        <- newStateCycle dutyCycleStates
@@ -59,26 +61,25 @@ instance Channel PulseChannel where
     register2 <- readByte (baseRegister + 2)
     frequency <- getFrequency baseRegister
     liftIO $ do
-      writeIORef enable True
+      isDacEnabled <- readIORef dacEnable
+      writeIORef enable isDacEnabled
       when hasSweepUnit $ initSweep sweepUnit frequency register0
       initLength lengthCounter
       initEnvelope envelope register2
     reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
-    isEnabled <- liftIO $ readIORef enable
-    when isEnabled $ do
-      register4 <- readByte (baseRegister + 4)
-      liftIO $ when (lengthClock && isFlagSet flagLength register4) $ clockLength
-        lengthCounter
-        (disableIO channel)
-      liftIO $ when envelopeClock $ clockEnvelope envelope
-      when sweepClock $ do
-        register0 <- readByte baseRegister
-        mUpdate   <- liftIO $ clockSweep sweepUnit register0
-        case mUpdate of
-          Nothing         -> pure ()
-          Just frequency' -> updateFrequency baseRegister frequency'
+    register4 <- readByte (baseRegister + 4)
+    liftIO $ do
+      when (lengthClock && isFlagSet flagLength register4)
+        $ clockLength lengthCounter (disableIO channel)
+      when envelopeClock $ clockEnvelope envelope
+    when sweepClock $ do
+      register0 <- readByte baseRegister
+      mUpdate   <- liftIO $ clockSweep sweepUnit register0
+      case mUpdate of
+        Nothing         -> pure ()
+        Just frequency' -> updateFrequency baseRegister frequency'
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- liftIO $ readIORef enable
@@ -97,7 +98,11 @@ instance Channel PulseChannel where
       register1 <- readByte (baseRegister + 1)
       liftIO $ reloadLength lengthCounter register1
 
-  writeX2 _ = pure ()
+  writeX2 channel@PulseChannel {..} = do
+    register2 <- readByte (baseRegister + 2)
+    let isDacEnabled = register2 .&. 0xF8 /= 0
+    unless isDacEnabled $ disable channel
+    liftIO $ writeIORef dacEnable isDacEnabled
 
   writeX3 PulseChannel {..} =
     reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister

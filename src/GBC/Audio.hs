@@ -100,7 +100,7 @@ audioCallback :: RingBuffer Word16 -> Ptr () -> Ptr Word8 -> CInt -> IO ()
 audioCallback buffer _ stream len = do
   size <- readableSize buffer
   if size == 0
-    then pokeArray stream [0 .. (fromIntegral len - 1)]
+    then pokeArray stream (replicate (fromIntegral len) 128)
     else void $ foldBuffer buffer (fromIntegral len `div` 2) 0 $ \i sample ->
       let left  = fromIntegral (sample .&. 0x00FF)
           right = fromIntegral (sample `unsafeShiftR` 8)
@@ -225,6 +225,8 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
     NR43 -> writeX3 channel4
     NR44 -> writeX4 channel4
     _    -> pure ()
+
+  updateStatus
 
   enabled <- liftIO $ readIORef audioEnabled
   when enabled $ do
