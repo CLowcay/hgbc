@@ -37,7 +37,7 @@ newPulseChannel baseRegister hasSweepUnit = do
   output           <- newIORef 0
   enable           <- newIORef False
   dacEnable        <- newIORef True
-  sweepUnit        <- newSweep
+  sweepUnit        <- newSweep baseRegister
   frequencyCounter <- newCounter
   dutyCycle        <- newStateCycle dutyCycleStates
   envelope         <- newEnvelope
@@ -56,14 +56,14 @@ instance Channel PulseChannel where
 
   getStatus PulseChannel {..} = liftIO $ readIORef enable
 
-  trigger PulseChannel {..} = do
+  trigger channel@PulseChannel {..} = do
     register0 <- readByte baseRegister
     register2 <- readByte (baseRegister + 2)
     frequency <- getFrequency baseRegister
     liftIO $ do
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
-      when hasSweepUnit $ initSweep sweepUnit frequency register0
+      when hasSweepUnit $ initSweep sweepUnit frequency register0 (disableIO channel)
       initLength lengthCounter
       initEnvelope envelope register2
     reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
@@ -74,12 +74,9 @@ instance Channel PulseChannel where
       when (lengthClock && isFlagSet flagLength register4)
         $ clockLength lengthCounter (disableIO channel)
       when envelopeClock $ clockEnvelope envelope
-    when sweepClock $ do
+    when (sweepClock && hasSweepUnit) $ do
       register0 <- readByte baseRegister
-      mUpdate   <- liftIO $ clockSweep sweepUnit register0
-      case mUpdate of
-        Nothing         -> pure ()
-        Just frequency' -> updateFrequency baseRegister frequency'
+      clockSweep sweepUnit register0 (disableIO channel)
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- liftIO $ readIORef enable
@@ -90,7 +87,10 @@ instance Channel PulseChannel where
         liftIO $ writeIORef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
       getTimerPeriod <$> getFrequency baseRegister
 
-  writeX0 _ = pure ()
+  writeX0 channel@PulseChannel {..} = when hasSweepUnit $ do
+    register0  <- readByte (baseRegister + 0)
+    hasNegated <- liftIO $ hasPerformedSweepCalculationInNegateMode sweepUnit
+    when (hasNegated && not (isFlagSet flagNegate register0)) $ disable channel
 
   writeX1 PulseChannel {..} = do
     register4 <- readByte (baseRegister + 4)
@@ -123,20 +123,6 @@ dutyCycleOutput 1 i = i <= 1
 dutyCycleOutput 2 i = i <= 1 || i >= 6
 dutyCycleOutput 3 i = i > 1
 dutyCycleOutput x _ = error ("Invalid duty cycle " <> show x)
-
-getFrequency :: HasMemory env => Word16 -> ReaderT env IO Int
-getFrequency base = do
-  lsb <- readByte (base + 3)
-  msb <- readByte (base + 4)
-  pure (((fromIntegral msb .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral lsb)
-
-updateFrequency :: HasMemory env => Word16 -> Int -> ReaderT env IO ()
-updateFrequency base frequency = do
-  let lsb = fromIntegral (frequency .&. 0xFF)
-  let msb = fromIntegral ((frequency `unsafeShiftR` 8) .&. 0x07)
-  register4 <- readByte (base + 4)
-  writeByte (base + 3) lsb
-  writeByte (base + 4) ((register4 .&. 0xF8) .|. msb)
 
 getTimerPeriod :: Int -> Int
 getTimerPeriod f = (4 * (2048 - f)) - 1

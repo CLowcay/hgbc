@@ -55,7 +55,7 @@ instance Channel WaveChannel where
 
   trigger WaveChannel {..} = do
     liftIO $ initLength lengthCounter
-    reloadCounter frequencyCounter =<< getTimerPeriod
+    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency NR30
     resetStateCycle sample waveSamplerStates
     masterEnable <- getMasterEnable
     liftIO $ writeIORef enable masterEnable
@@ -77,7 +77,7 @@ instance Channel WaveChannel where
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
         liftIO $ writeIORef output (fromIntegral sampleValue - 8)
-      getTimerPeriod
+      getTimerPeriod <$> getFrequency NR30
 
   writeX0 channel = do
     register0 <- readByte NR30
@@ -91,7 +91,7 @@ instance Channel WaveChannel where
 
   writeX2 _ = pure ()
 
-  writeX3 WaveChannel {..} = reloadCounter frequencyCounter =<< getTimerPeriod
+  writeX3 WaveChannel {..} = reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency NR30
 
   writeX4 channel@WaveChannel {..} = do
     register4 <- readByte NR34
@@ -107,9 +107,5 @@ getVolume = do
   register2 <- readByte NR32
   pure (3 .&. (register2 `unsafeShiftR` 5))
 
-getTimerPeriod :: HasMemory env => ReaderT env IO Int
-getTimerPeriod = do
-  register3 <- readByte NR33
-  register4 <- readByte NR34
-  let f = ((fromIntegral register4 .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral register3
-  pure ((2 * (2048 - f)) - 1)
+getTimerPeriod :: Int -> Int
+getTimerPeriod f = (2 * (2048 - f)) - 1
