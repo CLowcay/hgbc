@@ -33,7 +33,7 @@ newEnvelope = do
 initEnvelope :: Envelope -> Word8 -> IO ()
 initEnvelope Envelope {..} register = do
   let envelopePeriod = getEnvelopePeriod register
-  reloadCounter envelopeCounter envelopePeriod
+  reloadCounter envelopeCounter ((envelopePeriod - 1) .&. 7)
   writeIORef envelopePeriodRef envelopePeriod
   writeIORef volumeDeltaRef    (getVolumeDelta register)
   writeIORef volumeRef         (getVolume register)
@@ -45,7 +45,7 @@ clockEnvelope Envelope {..} = do
     volume      <- readIORef volumeRef
     volumeDelta <- readIORef volumeDeltaRef
     writeIORef volumeRef (((volume + volumeDelta) `min` 15) `max` 0)
-    pure envelopePeriod
+    pure ((envelopePeriod - 1) .&. 7)
 
 envelopeVolume :: Envelope -> IO Int
 envelopeVolume Envelope {..} = readIORef volumeRef

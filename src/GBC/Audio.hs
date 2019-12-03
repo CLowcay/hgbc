@@ -194,12 +194,13 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
     NR52 -> do
       nr52 <- readByte NR52
       let masterPower = isFlagSet flagMasterPower nr52
-      liftIO $ writeIORef audioEnabled masterPower
-      if masterPower
-        then initAllRegisters
-        else do
-          disable channel3
-          clearAllRegisters
+      enabled <- liftIO $ readIORef audioEnabled
+      when (masterPower && not enabled) $ do
+        liftIO $ writeIORef audioEnabled masterPower
+        initAllRegisters
+      when (not masterPower && enabled) $ do
+        disable channel3
+        clearAllRegisters
 
     NR10 -> writeX0 channel1
     NR11 -> writeX1 channel1

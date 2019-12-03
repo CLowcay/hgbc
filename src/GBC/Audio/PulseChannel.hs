@@ -60,13 +60,14 @@ instance Channel PulseChannel where
     register0 <- readByte baseRegister
     register2 <- readByte (baseRegister + 2)
     frequency <- getFrequency baseRegister
+
     liftIO $ do
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       when hasSweepUnit $ initSweep sweepUnit frequency register0 (disableIO channel)
       initLength lengthCounter
       initEnvelope envelope register2
-    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
+    reloadCounter frequencyCounter (getTimerPeriod frequency)
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     register4 <- readByte (baseRegister + 4)
@@ -104,8 +105,9 @@ instance Channel PulseChannel where
     unless isDacEnabled $ disable channel
     liftIO $ writeIORef dacEnable isDacEnabled
 
-  writeX3 PulseChannel {..} =
-    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency baseRegister
+  writeX3 PulseChannel {..} = do
+    frequency <- getFrequency baseRegister
+    reloadCounter frequencyCounter (getTimerPeriod frequency)
 
   writeX4 channel@PulseChannel {..} = do
     register4 <- readByte (baseRegister + 4)
