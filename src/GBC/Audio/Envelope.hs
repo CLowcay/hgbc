@@ -16,10 +16,10 @@ import           Data.Word
 import           GBC.Primitive
 
 data Envelope = Envelope {
-    volumeRef        :: IORef Int
-  , volumeDeltaRef   :: IORef Int
-  , envelopePeriodRef:: IORef Int
-  , envelopeCounter  :: Counter
+    volumeRef        :: !(IORef Int)
+  , volumeDeltaRef   :: !(IORef Int)
+  , envelopePeriodRef:: !(IORef Int)
+  , envelopeCounter  :: !Counter
 }
 
 newEnvelope :: IO Envelope

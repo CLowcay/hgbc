@@ -98,10 +98,10 @@ resetStateCycle (StateCycle cycles states) states' = case states' of
     writeIORef cycles count0
 
 data RingBuffer a = RingBuffer {
-    ringBuffer :: ForeignPtr a
-  , ringReadPtr :: IORef Int
-  , ringWritePtr :: IORef Int
-  , ringMask :: Int
+    ringBuffer :: !(ForeignPtr a)
+  , ringReadPtr :: !(IORef Int)
+  , ringWritePtr :: !(IORef Int)
+  , ringMask :: !Int
 }
 
 newRingBuffer :: Storable a => Int -> IO (RingBuffer a)

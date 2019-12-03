@@ -14,8 +14,8 @@ import           Data.Bits
 import           Control.Monad
 
 data Length = Length {
-    bitMask :: Word8
-  , counter :: Counter
+    bitMask :: !Word8
+  , counter :: !Counter
 }
 
 newLength :: Word8 -> IO Length

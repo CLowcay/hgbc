@@ -20,11 +20,11 @@ import           GBC.Memory
 import           GBC.Primitive
 
 data Sweep = Sweep {
-    enable       :: IORef Bool
-  , hasNegated   :: IORef Bool
-  , baseRegister :: Word16
-  , frequencyRef :: IORef Int
-  , counter      :: Counter
+    enable       :: !(IORef Bool)
+  , hasNegated   :: !(IORef Bool)
+  , baseRegister :: !Word16
+  , frequencyRef :: !(IORef Int)
+  , counter      :: !Counter
 }
 
 newSweep :: Word16 -> IO Sweep

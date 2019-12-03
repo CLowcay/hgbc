@@ -41,23 +41,23 @@ desiredAudioSpec callback = SDL.Raw.AudioSpec { audioSpecFreq     = 44100
                                               , audioSpecFormat   = SDL.Raw.SDL_AUDIO_U8
                                               , audioSpecChannels = 2
                                               , audioSpecSilence  = 0
-                                              , audioSpecSamples  = 512
+                                              , audioSpecSamples  = 1024
                                               , audioSpecSize     = 0
                                               , audioSpecCallback = callback
                                               , audioSpecUserdata = nullPtr
                                               }
 
 data AudioState = AudioState {
-    audioDevice :: SDL.Raw.AudioDeviceID
-  , audioOut :: RingBuffer Word16
-  , outFile :: Handle
-  , audioEnabled :: IORef Bool
-  , sampler :: Counter
-  , frameSequencer :: StateCycle Int
-  , channel1 :: PulseChannel
-  , channel2 :: PulseChannel
-  , channel3 :: WaveChannel
-  , channel4 :: NoiseChannel
+    audioDevice :: !SDL.Raw.AudioDeviceID
+  , audioOut :: !(RingBuffer Word16)
+  , outFile :: !Handle
+  , audioEnabled :: !(IORef Bool)
+  , sampler :: !Counter
+  , frameSequencer :: !(StateCycle Int)
+  , channel1 :: !PulseChannel
+  , channel2 :: !PulseChannel
+  , channel3 :: !WaveChannel
+  , channel4 :: !NoiseChannel
 }
 
 frameSequencerStates :: [(Int, Int)]

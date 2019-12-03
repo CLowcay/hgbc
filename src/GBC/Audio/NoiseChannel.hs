@@ -14,13 +14,13 @@ import           GBC.Primitive
 import           GBC.Registers
 
 data NoiseChannel = NoiseChannel {
-    enable           :: IORef Bool
-  , dacEnable        :: IORef Bool
-  , output           :: IORef Int
-  , lengthCounter    :: Length
-  , envelope         :: Envelope
-  , frequencyCounter :: Counter
-  , lfsr             :: LinearFeedbackShiftRegister Word16
+    enable           :: !(IORef Bool)
+  , dacEnable        :: !(IORef Bool)
+  , output           :: !(IORef Int)
+  , lengthCounter    :: !Length
+  , envelope         :: !Envelope
+  , frequencyCounter :: !Counter
+  , lfsr             :: !(LinearFeedbackShiftRegister Word16)
 }
 
 newNoiseChannel :: IO NoiseChannel

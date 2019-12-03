@@ -20,16 +20,16 @@ import           GBC.Memory
 import           GBC.Primitive
 
 data PulseChannel = PulseChannel {
-    output           :: IORef Int
-  , enable           :: IORef Bool
-  , dacEnable        :: IORef Bool
-  , hasSweepUnit     :: Bool
-  , baseRegister     :: Word16
-  , sweepUnit        :: Sweep
-  , frequencyCounter :: Counter
-  , dutyCycle        :: StateCycle Int
-  , envelope         :: Envelope
-  , lengthCounter    :: Length
+    output           :: !(IORef Int)
+  , enable           :: !(IORef Bool)
+  , dacEnable        :: !(IORef Bool)
+  , hasSweepUnit     :: !Bool
+  , baseRegister     :: !Word16
+  , sweepUnit        :: !Sweep
+  , frequencyCounter :: !Counter
+  , dutyCycle        :: !(StateCycle Int)
+  , envelope         :: !Envelope
+  , lengthCounter    :: !Length
 }
 
 newPulseChannel :: Word16 -> Bool -> IO PulseChannel

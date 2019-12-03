@@ -19,11 +19,11 @@ import           GBC.Primitive
 import           GBC.Registers
 
 data WaveChannel = WaveChannel {
-    output           :: IORef Int
-  , enable           :: IORef Bool
-  , frequencyCounter :: Counter
-  , sample           :: StateCycle Word16
-  , lengthCounter    :: Length
+    output           :: !(IORef Int)
+  , enable           :: !(IORef Bool)
+  , frequencyCounter :: !Counter
+  , sample           :: !(StateCycle Word16)
+  , lengthCounter    :: !Length
 }
 
 waveSamplerStates :: [(Word16, Int)]
