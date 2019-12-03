@@ -256,10 +256,10 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
     updateCounter sampler clockAdvance $ do
       nr50 <- readByte NR50
       nr51 <- readByte NR51
-      let volumeLeft  = 8 - (nr50 .&. 0x07)
-      let volumeRight = 8 - (nr50 `unsafeShiftR` 4 .&. 0x07)
-      let left        = nr51 .&. 0x0F
-      let right       = nr51 `unsafeShiftR` 4
+      let volumeLeft  = 8 - (nr50 `unsafeShiftR` 4 .&. 0x07)
+      let volumeRight = 8 - (nr50 .&. 0x07)
+      let left        = nr51 `unsafeShiftR` 4
+      let right       = nr51 .&. 0x0F
       leftSample  <- (`div` volumeLeft) <$> mixOutputChannel left
       rightSample <- (`div` volumeRight) <$> mixOutputChannel right
       let stereo = fromIntegral leftSample .|. (fromIntegral rightSample `unsafeShiftL` 8)
