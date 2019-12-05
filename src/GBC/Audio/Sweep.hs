@@ -61,7 +61,7 @@ clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
   when (isEnabled && getPeriod register /= 0) $ do
     frequency' <- liftIO $ overflowCheck sweep register disableIO
     when (getShift register /= 0) $ do
-      liftIO $ writeIORef frequencyRef frequency'
+      liftIO $ writeIORef frequencyRef $! frequency'
       updateFrequency baseRegister frequency'
       void $ liftIO $ overflowCheck sweep register disableIO
   pure ((getPeriod register - 1) .&. 7)

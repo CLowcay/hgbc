@@ -44,7 +44,7 @@ clockEnvelope Envelope {..} = do
   when (envelopePeriod /= 0) $ updateCounter envelopeCounter 1 $ do
     volume      <- readIORef volumeRef
     volumeDelta <- readIORef volumeDeltaRef
-    writeIORef volumeRef (((volume + volumeDelta) `min` 15) `max` 0)
+    writeIORef volumeRef $! ((volume + volumeDelta) `min` 15) `max` 0
     pure ((envelopePeriod - 1) .&. 7)
 
 envelopeVolume :: Envelope -> IO Int

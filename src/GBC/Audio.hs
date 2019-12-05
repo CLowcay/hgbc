@@ -34,8 +34,6 @@ import           GBC.Primitive
 import           GBC.Registers
 import qualified SDL.Raw
 
-import           System.IO
-
 desiredAudioSpec :: SDL.Raw.AudioCallback -> SDL.Raw.AudioSpec
 desiredAudioSpec callback = SDL.Raw.AudioSpec { audioSpecFreq     = 44100
                                               , audioSpecFormat   = SDL.Raw.SDL_AUDIO_U8
@@ -50,7 +48,6 @@ desiredAudioSpec callback = SDL.Raw.AudioSpec { audioSpecFreq     = 44100
 data AudioState = AudioState {
     audioDevice :: !SDL.Raw.AudioDeviceID
   , audioOut :: !(RingBuffer Word16)
-  , outFile :: !Handle
   , audioEnabled :: !(IORef Bool)
   , sampler :: !Counter
   , frameSequencer :: !(StateCycle Int)
@@ -68,9 +65,7 @@ class HasMemory env => HasAudio env where
 
 initAudioState :: IO AudioState
 initAudioState = do
-  audioOut       <- newRingBuffer 14
-
-  outFile        <- openBinaryFile "out.pcm" WriteMode
+  audioOut       <- newRingBuffer 12
 
   pAudioCallback <- SDL.Raw.mkAudioCallback (audioCallback audioOut)
   audioDevice    <- alloca $ \desired -> alloca $ \actual -> do
@@ -196,10 +191,14 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
       let masterPower = isFlagSet flagMasterPower nr52
       enabled <- liftIO $ readIORef audioEnabled
       when (masterPower && not enabled) $ do
-        liftIO $ writeIORef audioEnabled masterPower
+        liftIO $ writeIORef audioEnabled True
         initAllRegisters
       when (not masterPower && enabled) $ do
+        liftIO $ writeIORef audioEnabled False
+        disable channel1
+        disable channel2
         disable channel3
+        disable channel4
         clearAllRegisters
 
     NR10 -> writeX0 channel1
@@ -264,5 +263,4 @@ audioStep BusEvent { writeAddress, clockAdvance } = do
       rightSample <- (`div` volumeRight) <$> mixOutputChannel right
       let stereo = fromIntegral leftSample .|. (fromIntegral rightSample `unsafeShiftL` 8)
       liftIO $ writeBuffer audioOut stereo
-      liftIO $ alloca $ \pBuf -> poke pBuf stereo >> hPutBuf outFile pBuf 2
       pure samplePeriod

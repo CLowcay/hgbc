@@ -85,7 +85,7 @@ instance Channel PulseChannel where
       void $ updateStateCycle dutyCycle 1 $ \i -> do
         dutyCycleNumber <- getDutyCycle <$> readByte (baseRegister + 1)
         sample          <- liftIO $ envelopeVolume envelope
-        liftIO $ writeIORef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
+        liftIO $ writeIORef output $! (if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8
       getTimerPeriod <$> getFrequency baseRegister
 
   writeX0 channel@PulseChannel {..} = when hasSweepUnit $ do

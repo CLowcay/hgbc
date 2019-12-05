@@ -41,7 +41,7 @@ newCounter = liftIO $ Counter <$> newIORef 0
 
 {-# INLINE reloadCounter #-}
 reloadCounter :: MonadIO m => Counter -> Int -> m ()
-reloadCounter (Counter ref) reload = liftIO $ writeIORef ref reload
+reloadCounter (Counter ref) reload = liftIO $ writeIORef ref $! reload
 
 {-# INLINE getCounter #-}
 getCounter :: MonadIO m => Counter -> m Int
@@ -53,10 +53,10 @@ updateCounter (Counter ref) update k = do
   count <- liftIO $ readIORef ref
   let count' = count - update
   if count' >= 0
-    then liftIO $ writeIORef ref count'
+    then liftIO $ writeIORef ref $! count'
     else do
       reload <- k
-      liftIO $ writeIORef ref (count' + reload + 1)
+      liftIO $ writeIORef ref $! count' + reload + 1
 
 data StateCycle a = StateCycle !(IORef Int) !(IORef [(a, Int)])
 
@@ -78,14 +78,14 @@ updateStateCycle (StateCycle cycles states) update k = do
   let count' = count - update
   if count' > 0
     then liftIO $ do
-      writeIORef cycles count'
+      writeIORef cycles $! count'
       fst . head <$> readIORef states
     else do
       stateList <- liftIO $ readIORef states
       let stateList'                   = tail stateList
       let (nextState, nextStateLength) = head stateList'
-      liftIO $ writeIORef states stateList'
-      liftIO $ writeIORef cycles (count' + nextStateLength)
+      liftIO $ writeIORef states $! stateList'
+      liftIO $ writeIORef cycles $! count' + nextStateLength
       k nextState
       pure nextState
 
@@ -94,8 +94,8 @@ resetStateCycle :: MonadIO m => StateCycle a -> [(a, Int)] -> m ()
 resetStateCycle (StateCycle cycles states) states' = case states' of
   []                -> error "Tried to reset a counter with no states!"
   ((_, count0) : _) -> liftIO $ do
-    writeIORef states (cycle states')
-    writeIORef cycles count0
+    writeIORef states $! cycle states'
+    writeIORef cycles $! count0
 
 data RingBuffer a = RingBuffer {
     ringBuffer :: !(ForeignPtr a)
@@ -141,7 +141,7 @@ foldBuffer RingBuffer {..} limit acc0 accumulate = do
   readPtr  <- readIORef ringReadPtr
   writePtr <- readIORef ringWritePtr
   let nextReadPtr = writePtr `min` (readPtr + limit)
-  writeIORef ringReadPtr nextReadPtr
+  writeIORef ringReadPtr $! nextReadPtr
   withForeignPtr ringBuffer $ \base ->
     let go !acc !i = if i == nextReadPtr
           then pure acc
@@ -157,16 +157,14 @@ newLinearFeedbackShiftRegister = LinearFeedbackShiftRegister <$> newIORef (bit 0
 
 {-# INLINE initLinearFeedbackShiftRegister #-}
 initLinearFeedbackShiftRegister :: a -> LinearFeedbackShiftRegister a -> IO ()
-initLinearFeedbackShiftRegister value (LinearFeedbackShiftRegister ref) = writeIORef ref value
+initLinearFeedbackShiftRegister value (LinearFeedbackShiftRegister ref) = writeIORef ref $! value
 
 {-# INLINE nextBit #-}
-nextBit :: Bits a => LinearFeedbackShiftRegister a -> Int -> IO Bool
-nextBit (LinearFeedbackShiftRegister ref) width = do
+nextBit :: (Num a, Bits a) => LinearFeedbackShiftRegister a -> a -> IO a
+nextBit (LinearFeedbackShiftRegister ref) mask = do
   register <- readIORef ref
-  let shifted   = register `unsafeShiftR` 1
-  let b0        = register .&. bit 0
-  let b1        = shifted .&. bit 0
-  let register' = (shifted .&. complement (bit width)) .|. ((b0 `xor` b1) `unsafeShiftL` width)
-  writeIORef ref register'
-  pure (not (register' `testBit` 0))
-
+  let shifted = register `unsafeShiftR` 1
+  let register' =
+        (shifted .&. complement mask) .|. (mask .&. negate (1 .&. (register `xor` shifted)))
+  writeIORef ref $! register'
+  pure register'

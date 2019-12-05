@@ -66,11 +66,11 @@ instance Channel NoiseChannel where
   masterClock NoiseChannel {..} clockAdvance = do
     isEnabled <- liftIO $ readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      width <- getWidth
+      width <- getWidthMask
       liftIO $ do
-        outBit <- nextBit lfsr width
-        sample <- envelopeVolume envelope
-        writeIORef output ((if outBit then sample else 0) - 8)
+        registerOut <- nextBit lfsr width
+        sample      <- envelopeVolume envelope
+        writeIORef output $! (if registerOut .&. 1 == 0 then sample else 0) - 8
       getTimerPeriod
 
   writeX0 _ = pure ()
@@ -93,10 +93,10 @@ instance Channel NoiseChannel where
     register4 <- readByte NR44
     when (isFlagSet flagTrigger register4) $ trigger channel
 
-getWidth :: HasMemory env => ReaderT env IO Int
-getWidth = do
+getWidthMask :: HasMemory env => ReaderT env IO Word16
+getWidthMask = do
   register3 <- readByte NR43
-  pure (if register3 `testBit` 3 then 6 else 14)
+  pure (if register3 `testBit` 3 then 0x0040 else 0x4000)
 
 getTimerPeriod :: HasMemory env => ReaderT env IO Int
 getTimerPeriod = do
@@ -104,4 +104,4 @@ getTimerPeriod = do
   pure (timerPeriod (fromIntegral register3 `unsafeShiftR` 4) (fromIntegral register3 .&. 0x07))
 
 timerPeriod :: Int -> Int -> Int
-timerPeriod shiftClock ratio = 4 * (ratio + 1) * (1 `unsafeShiftL` (shiftClock + 1))
+timerPeriod shiftClock ratio = 32 `max` (4 * (ratio + 1) * (1 `unsafeShiftL` (shiftClock + 1)))
