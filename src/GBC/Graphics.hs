@@ -26,13 +26,14 @@ import           Common
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
 import           Data.Bits
-import           GBC.Primitive
 import           Data.Foldable
+import           Data.Functor
 import           Data.IORef
 import           Data.Word
-import           Data.Functor
 import           GBC.CPU
+import           GBC.Graphics.VRAM
 import           GBC.Memory
+import           GBC.Primitive
 import           GBC.Registers
 
 -- | The current status of the graphics system.
@@ -43,6 +44,7 @@ data GraphicsState = GraphicsState {
     lcdState      :: !(StateCycle Mode)
   , lcdLine       :: !(StateCycle Word8)
   , lcdEnabledRef :: !(IORef Bool)
+  , vram          :: !VRAM
 }
 
 -- | Graphics synchronization objects. It's a pair of MVars. The CPU thread
@@ -62,8 +64,8 @@ lcdLines :: [(Word8, Int)]
 lcdLines = [0 .. 153] <&> (, 456)
 
 -- | The initial graphics state.
-initGraphics :: IO GraphicsState
-initGraphics = do
+initGraphics :: VRAM -> IO GraphicsState
+initGraphics vram = do
   lcdState      <- newStateCycle lcdStates
   lcdLine       <- newStateCycle lcdLines
   lcdEnabledRef <- newIORef True
@@ -161,7 +163,9 @@ graphicsStep (BusEvent newWrites clocks _) = do
       writeByte STAT (modifyBits maskMode (modeBits mode') stat)
 
       -- If we're entering ReadVRAM mode, then signal the graphics output.
-      when (mode' == ReadVRAM) $ liftIO $ putMVar (currentLine graphicsSync) line'
+      when (mode' == ReadVRAM) $ liftIO $ do
+        setVRAMAccessible vram False
+        putMVar (currentLine graphicsSync) line'
 
       -- Raise interrupts
       when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
@@ -170,7 +174,9 @@ graphicsStep (BusEvent newWrites clocks _) = do
       when (mode' == VBlank) (raiseInterrupt 0)
 
       -- If we're entering HBlank mode, then sync
-      when (mode' == HBlank) $ liftIO (takeMVar (hblankStart graphicsSync))
+      when (mode' == HBlank) $ liftIO $ do
+        takeMVar (hblankStart graphicsSync)
+        setVRAMAccessible vram True
 
 -- | Prepare a status report on the graphics registers.
 graphicsRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]

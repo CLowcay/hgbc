@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
@@ -9,7 +10,6 @@ module Debug.Debugger
   , MemAddress(..)
   , Option(..)
   , DebugState
-  , bus
   , initDebug
   , doCommand
   )
@@ -27,20 +27,18 @@ import           Debug.Breakpoints
 import           Debug.Dump
 import           Debug.Map
 import           GBC.Audio
-import           GBC.Bus
+import           GBC.Emulator
 import           GBC.CPU
 import           GBC.Decode
 import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Keypad
 import           GBC.Memory
+import           GBC.ROM
 import           GBC.Timer
 import           Numeric
 import           System.Console.Haskeline
 import qualified SDL.Time                      as SDL
-
-{-# SPECIALIZE readPC :: ReaderT DebugState IO Word16 #-}
-{-# SPECIALIZE busStep :: ReaderT DebugState IO BusEvent #-}
 
 data MemAddress = ConstAddress !Word16 | LabelAddress !String !(Maybe Word16) deriving (Eq, Ord, Show)
 
@@ -83,64 +81,49 @@ data Command = ShowHeader
 
 -- | The current state of the debugger.
 data DebugState = DebugState {
-    bus :: !BusState
-  , memory :: !Memory
-  , cpu :: !CPUState
-  , graphicsState :: !GraphicsState
-  , graphicsSync :: !GraphicsSync
-  , keypadState :: !KeypadState
-  , timerState :: !TimerState
-  , audioState :: !AudioState
-  , romFile :: !FilePath
+    emulator :: !EmulatorState
+  , romFileName :: !FilePath
   , codeMap :: !(IORef SymbolTable)
   , breakpoints :: !BreakpointTable
   , watchpoints :: !BreakpointTable
 }
 
-instance HasMemory DebugState where
-  {-# INLINE forMemory #-}
-  forMemory = memory
-
-instance HasCPU DebugState where
-  {-# INLINE forCPUState #-}
-  forCPUState = cpu
-
-instance HasKeypad DebugState where
-  {-# INLINE forKeypadState #-}
-  forKeypadState = keypadState
-
-instance HasTimer DebugState where
-  {-# INLINE forTimerState #-}
-  forTimerState = timerState
-
-instance HasAudio DebugState where
-  {-# INLINE forAudioState #-}
-  forAudioState = audioState
-
-instance HasGraphics DebugState where
-  {-# INLINE forGraphicsState #-}
-  forGraphicsState = graphicsState
-  {-# INLINE forGraphicsSync #-}
-  forGraphicsSync = graphicsSync
-
-instance HasBus DebugState where
-  {-# INLINE forBusState #-}
-  forBusState = bus
-
 type MonadDebug a = ReaderT DebugState IO a
 type MonadDebugger a = InputT (ReaderT DebugState IO) a
 
+instance HasMemory DebugState where
+  {-# INLINE forMemory #-}
+  forMemory = forMemory . emulator
+
+instance HasCPU DebugState where
+  {-# INLINE forCPUState #-}
+  forCPUState = forCPUState . emulator
+
+instance HasKeypad DebugState where
+  {-# INLINE forKeypadState #-}
+  forKeypadState = forKeypadState . emulator
+
+instance HasTimer DebugState where
+  {-# INLINE forTimerState #-}
+  forTimerState = forTimerState . emulator
+
+instance HasAudio DebugState where
+  {-# INLINE forAudioState #-}
+  forAudioState = forAudioState . emulator
+
+instance HasGraphics DebugState where
+  {-# INLINE forGraphicsState #-}
+  forGraphicsState = forGraphicsState . emulator
+  {-# INLINE forGraphicsSync #-}
+  forGraphicsSync = forGraphicsSync . emulator
+
 -- | Initialise the debugger.
-initDebug :: FilePath -> CPUState -> Memory -> GraphicsSync -> IO DebugState
-initDebug romFile cpu memory graphicsSync = do
-  codeMap       <- newIORef =<< initMap romFile
-  breakpoints   <- initBreakpointTable
-  watchpoints   <- initBreakpointTable
-  bus           <- initBusState
-  graphicsState <- initGraphics
-  keypadState   <- initKeypadState
-  timerState    <- initTimerState
-  audioState    <- initAudioState
+initDebug :: ROM -> EmulatorState -> IO DebugState
+initDebug rom emulator = do
+  codeMap     <- newIORef =<< initMap (romFile rom)
+  breakpoints <- initBreakpointTable
+  watchpoints <- initBreakpointTable
+  let romFileName = romFile rom
   pure DebugState { .. }
 
 getCodeMap :: MonadDebug SymbolTable
@@ -210,16 +193,16 @@ breakOnRet originalSP = do
 
 -- | Run the interpreter until one of the break conditions is met.
 doRun :: [BreakPreCondition] -> [BreakPostCondition] -> MonadDebug Int
-doRun preConditions postConditions = clearBreakFlag >> go 0
+doRun preConditions postConditions = withReaderT emulator clearBreakFlag >> go 0
  where
   go !ticks = do
     doPreBreak <- orM preConditions
     if doPreBreak
       then pure ticks
       else do
-        debugInfo <- busStep
+        debugInfo <- withReaderT emulator step
         let ticks' = ticks + clockAdvance debugInfo
-        breakFlag   <- isBreakFlagSet
+        breakFlag   <- withReaderT emulator isBreakFlagSet
         doPostBreak <- orM (fmap ($ debugInfo) postConditions)
         if doPostBreak || breakFlag || currentMode debugInfo == ModeStop
           then pure ticks'
@@ -284,14 +267,14 @@ doCommand StepOut = do
   postConditions <- lift (sequence [breakOnBreakpoints])
   reportingClockStats (lift (doRun [breakOnRet sp] postConditions))
   lift $ do
-    DebugState {..} <- ask
-    wasBreakpoint   <- shouldBreakOnExecute breakpoints
-    unless wasBreakpoint (void busStep)
+    DebugState { breakpoints } <- ask
+    wasBreakpoint              <- shouldBreakOnExecute breakpoints
+    unless wasBreakpoint (void (withReaderT emulator step))
   disassembleAtPC
 doCommand Run = do
   postConditions <- lift (sequence [breakOnBreakpoints])
-  bracket (lift enableAudioOut) (const $ lift disableAudioOut)
-    $ const $ reportingClockStats (lift (doRun [] postConditions))
+  bracket (lift enableAudioOut) (const $ lift disableAudioOut) $ const $ reportingClockStats
+    (lift (doRun [] postConditions))
   disassembleAtPC
 doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
   postConditions <- lift (sequence [breakOnBreakpoints, pure (breakOnPC addr)])
@@ -343,12 +326,12 @@ doCommand ListBreakpoints = do
 doCommand (AddSymbol symbol value) = lift $ do
   DebugState {..} <- ask
   codeMap'        <- addToMap (symbol, value) <$> getCodeMap
-  liftIO (saveMap (mapFileName romFile) codeMap')
+  liftIO (saveMap (mapFileName romFileName) codeMap')
   setCodeMap codeMap'
 doCommand (DeleteSymbol symbol) = lift $ do
   DebugState {..} <- ask
   codeMap'        <- removeFromMap symbol <$> getCodeMap
-  liftIO (saveMap (mapFileName romFile) codeMap')
+  liftIO (saveMap (mapFileName romFileName) codeMap')
   setCodeMap codeMap'
 doCommand ListSymbols = do
   symbols <- lift (listSymbols <$> getCodeMap)
