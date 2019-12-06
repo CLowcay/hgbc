@@ -3,7 +3,6 @@
 
 module GBC.Memory
   ( Memory
-  , VideoBuffers(..)
   , HasMemory(..)
   , initMemory
   , getROMHeader
@@ -24,18 +23,13 @@ import           Data.Bits
 import           Data.IORef
 import           Data.Word
 import           Foreign.ForeignPtr
-import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Errors
+import           GBC.Graphics.VRAM
 import           GBC.ROM
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Unsafe        as B
-
-data VideoBuffers = VideoBuffers {
-    vram :: !(Ptr Word8)
-  , oam :: !(Ptr Word8)
-}
 
 data Memory = Memory {
     mbc :: !MBC
@@ -43,7 +37,7 @@ data Memory = Memory {
   , rom :: !B.ByteString
   , memRam :: !(ForeignPtr Word8)
   , memHigh :: !(ForeignPtr Word8)
-  , videoBuffer :: !VideoBuffers
+  , vram :: !VRAM
   , checkRAMAccess :: !(IORef Bool)
 }
 
@@ -55,8 +49,8 @@ instance HasMemory Memory where
   forMemory = id
 
 -- | The initial memory state.
-initMemory :: ROM -> VideoBuffers -> IO Memory
-initMemory romInfo@(ROM _ romHeader rom) videoBuffer = do
+initMemory :: ROM -> VRAM -> IO Memory
+initMemory romInfo@(ROM _ romHeader rom) vram = do
   memRam         <- mallocForeignPtrArray 0x2000
   memHigh        <- mallocForeignPtrArray 0x100
   mbc            <- getMBC romInfo
@@ -84,22 +78,20 @@ getMbcRegisters = do
 dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
-  let copyOAM from = moveArray (oam videoBuffer) from 160
-
   liftIO $ case source `unsafeShiftR` 13 of
-    0 -> B.unsafeUseAsCString rom (copyOAM . (`plusPtr` fromIntegral source))
-    1 -> B.unsafeUseAsCString rom (copyOAM . (`plusPtr` fromIntegral source))
+    0 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
+    1 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
     2 -> do
       bank <- bankOffset mbc
-      B.unsafeUseAsCString rom (copyOAM . (`plusPtr` (bank + offset 0x4000)))
+      B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` (bank + offset 0x4000)))
     3 -> do
       bank <- bankOffset mbc
-      B.unsafeUseAsCString rom (copyOAM . (`plusPtr` (bank + offset 0x4000)))
-    4 -> copyOAM (vram videoBuffer `plusPtr` offset 0x8000)
+      B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` (bank + offset 0x4000)))
+    4 -> copyVRAMToOAM vram source
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
-      withRAMPointer mbc check (source - 0xA000) copyOAM
-    6 -> withForeignPtr memRam $ \ram -> copyOAM (ram `plusPtr` offset 0xC000)
+      withRAMPointer mbc check (source - 0xA000) (copyToOAM vram)
+    6 -> withForeignPtr memRam $ \ram -> copyToOAM vram (ram `plusPtr` offset 0xC000)
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
 
@@ -117,7 +109,7 @@ readByte addr = do
     3 -> do
       bank <- bankOffset mbc
       pure $ rom `B.unsafeIndex` (bank + offset 0x4000)
-    4 -> peekElemOff (vram videoBuffer) (offset 0x8000)
+    4 -> readVRAM vram addr
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       readRAM mbc check (addr - 0xA000)
@@ -125,7 +117,7 @@ readByte addr = do
     7
       | addr < 0xFE00 -> withForeignPtr memRam (`peekElemOff` offset 0xE000)
       | addr < 0xFEA0 -> do
-        value <- peekElemOff (oam videoBuffer) (offset 0xFE00)
+        value <- readOAM vram addr
         pure (fromIntegral value)
       | addr < 0xFF00 -> liftIO $ do
         check <- readIORef checkRAMAccess
@@ -150,14 +142,14 @@ writeByte addr value = do
     1 -> writeROM mbc addr value
     2 -> writeROM mbc addr value
     3 -> writeROM mbc addr value
-    4 -> pokeElemOff (vram videoBuffer) (offset 0x8000) value
+    4 -> writeVRAM vram addr value
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       writeRAM mbc check (addr - 0xA000) value
     6 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xC000) value
     7
       | addr < 0xFE00 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xE000) value
-      | addr < 0xFEA0 -> pokeElemOff (oam videoBuffer) (offset 0xFE00) (fromIntegral value)
+      | addr < 0xFEA0 -> writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()

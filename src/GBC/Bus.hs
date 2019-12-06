@@ -20,7 +20,7 @@ import           Data.IORef
 import           Data.Word
 import           GBC.Audio
 import           GBC.CPU
-import           GBC.GraphicsSync
+import           GBC.Graphics
 import           GBC.Keypad
 import           GBC.Memory
 import           GBC.Registers

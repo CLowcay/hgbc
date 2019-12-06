@@ -19,7 +19,7 @@ import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.GraphicsSync
+import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM

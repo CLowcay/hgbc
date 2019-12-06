@@ -30,7 +30,7 @@ import           GBC.Audio
 import           GBC.Bus
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.GraphicsSync
+import           GBC.Graphics
 import           GBC.ISA
 import           GBC.Keypad
 import           GBC.Memory
