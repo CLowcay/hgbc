@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module GBC.Emulator
@@ -32,7 +33,11 @@ import qualified SDL
 
 data EmulatorState = EmulatorState {
     lastEventPollAt :: !(IORef Word32)
+  , hdmaSource      :: !(IORef Word16)
+  , hdmaDestination :: !(IORef Word16)
+  , hdmaActive      :: !(IORef Bool)
   , breakFlag       :: !(IORef Bool)
+  , mode            :: !EmulatorMode
   , memory          :: !Memory
   , vram            :: !VRAM
   , cpu             :: !CPUState
@@ -82,6 +87,9 @@ initEmulatorState rom = do
         CGBIncompatible -> DMG
   lastEventPollAt <- newIORef 0
   breakFlag       <- newIORef False
+  hdmaSource      <- newIORef 0
+  hdmaDestination <- newIORef 0
+  hdmaActive      <- newIORef False
   vram            <- initVRAM mode
   memory          <- initMemory rom vram
   cpu             <- initCPU mode
@@ -123,21 +131,100 @@ doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
   address <- fromIntegral <$> readByte DMA
   dmaToOAM (address `shiftL` 8)
 
+doGeneralHDMA :: Word8 -> ReaderT EmulatorState IO ()
+doGeneralHDMA hdma5 = do
+  hdma1 <- readByte HDMA1
+  hdma2 <- readByte HDMA2
+  hdma3 <- readByte HDMA3
+  hdma4 <- readByte HDMA4
+  go (makeHDMASource hdma1 hdma2) (makeHDMADestination hdma3 hdma4) (hdma5 + 1)
+ where
+  go _       _            0      = pure ()
+  go !source !destination !count = do
+    copy16 source destination
+    go (source + 16) (destination + 16) (count - 1)
+
+initHBlankHDMA :: Word8 -> ReaderT EmulatorState IO ()
+initHBlankHDMA hdma5 = do
+  EmulatorState {..} <- ask
+  hdma1              <- readByte HDMA1
+  hdma2              <- readByte HDMA2
+  hdma3              <- readByte HDMA3
+  hdma4              <- readByte HDMA4
+  writeByte HDMA5 (hdma5 .&. 0x7F)
+  liftIO $ do
+    writeIORef hdmaSource $! makeHDMASource hdma1 hdma2
+    writeIORef hdmaDestination $! makeHDMADestination hdma3 hdma4
+    writeIORef hdmaActive True
+
+doHBlankHDMA :: ReaderT EmulatorState IO Int
+doHBlankHDMA = do
+  EmulatorState {..} <- ask
+  isActive           <- liftIO $ readIORef hdmaActive
+  if not isActive
+    then pure 0
+    else do
+      source      <- liftIO $ readIORef hdmaSource
+      destination <- liftIO $ readIORef hdmaDestination
+      liftIO $ do
+        writeIORef hdmaSource $! source + 16
+        writeIORef hdmaSource $! destination + 16
+      copy16 source destination
+
+      hdma5 <- readByte HDMA5
+      writeByte HDMA5 (hdma5 - 1)
+      when (hdma5 == 0) $ liftIO $ writeIORef hdmaActive False
+
+      pure 8
+
+makeHDMASource :: Word8 -> Word8 -> Word16
+makeHDMASource high low = (fromIntegral high `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0)
+
+makeHDMADestination :: Word8 -> Word8 -> Word16
+makeHDMADestination high low =
+  0x8000 + (((fromIntegral high .&. 0x1F) `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0))
+
 -- | Execute a single step of the emulation.
 step :: ReaderT EmulatorState IO BusEvent
 step = do
-  busEvent <- cpuStep
+  EmulatorState {..} <- ask
+  busEvent           <- cpuStep
+
+  for_ (writeAddress busEvent) $ \case
+    HDMA5 -> do
+      hdma5 <- readByte HDMA5
+      if hdma5 .&. 0x80 /= 0
+        then initHBlankHDMA hdma5
+        else do
+          isActive <- liftIO $ readIORef hdmaActive
+          if isActive
+            then do
+              liftIO $ writeIORef hdmaActive False
+              writeByte HDMA5 (hdma5 .|. 0x80)
+            else doGeneralHDMA hdma5
+
+    _ -> pure ()
+
   keypadHandleBusEvent busEvent
   doDMA busEvent
 
-  EmulatorState {..} <- ask
-  now                <- SDL.ticks
-  lastPoll           <- liftIO $ readIORef lastEventPollAt
+  now      <- SDL.ticks
+  lastPoll <- liftIO $ readIORef lastEventPollAt
   when (now - lastPoll > pollDelay) $ do
     handleEvents
     liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
-  graphicsStep busEvent
   updateTimer (clockAdvance busEvent)
   audioStep busEvent
-  pure busEvent
+  graphicsEvent <- graphicsStep busEvent
+
+  case graphicsEvent of
+    NoGraphicsEvent -> pure busEvent
+    HBlankEvent     -> do
+      dmaClockAdvance <- doHBlankHDMA
+      when (dmaClockAdvance > 0) $ do
+        updateTimer dmaClockAdvance
+        let busEvent2 = BusEvent [] dmaClockAdvance ModeNormal
+        audioStep busEvent2
+        void $ graphicsStep busEvent2
+      pure (busEvent { clockAdvance = clockAdvance busEvent + dmaClockAdvance })

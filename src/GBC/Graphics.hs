@@ -7,6 +7,7 @@ module GBC.Graphics
   , GraphicsSync(..)
   , HasGraphics(..)
   , Mode(..)
+  , GraphicsBusEvent(..)
   , initGraphics
   , newGraphicsSync
   , graphicsRegisters
@@ -131,8 +132,10 @@ checkLY ly = do
   writeByte STAT (modifyBits (bit matchBit) matchFlag stat)
   when (stat `testBit` interruptCoincidence && lyc == ly) (raiseInterrupt 1)
 
+data GraphicsBusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
+
 {-# INLINABLE graphicsStep #-}
-graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO ()
+graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO GraphicsBusEvent
 graphicsStep (BusEvent newWrites clocks _) = do
   GraphicsState {..} <- asks forGraphicsState
   graphicsSync       <- asks forGraphicsSync
@@ -153,30 +156,39 @@ graphicsStep (BusEvent newWrites clocks _) = do
         writeByte LY 0
       when (not lcdEnabled' && lcdEnabled) $ writeByte LY 0
     LYC -> readByte LY >>= checkLY
-    _   -> pure ()
+    VBK -> do
+      vbk <- readByte VBK
+      liftIO $ setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
+    _ -> pure ()
 
-  when lcdEnabled $ do
-    line' <- updateStateCycle lcdLine clocks updateLY
-    void $ updateStateCycle lcdState clocks $ \mode' -> do
-      -- Update STAT register
-      stat <- readByte STAT
-      writeByte STAT (modifyBits maskMode (modeBits mode') stat)
+  if not lcdEnabled
+    then pure NoGraphicsEvent
+    else do
+      line'      <- getUpdateResult <$> updateStateCycle lcdLine clocks updateLY
+      modeUpdate <- updateStateCycle lcdState clocks $ \mode' -> do
+        -- Update STAT register
+        stat <- readByte STAT
+        writeByte STAT (modifyBits maskMode (modeBits mode') stat)
 
-      -- If we're entering ReadVRAM mode, then signal the graphics output.
-      when (mode' == ReadVRAM) $ liftIO $ do
-        setVRAMAccessible vram False
-        putMVar (currentLine graphicsSync) line'
+        -- If we're entering ReadVRAM mode, then signal the graphics output.
+        when (mode' == ReadVRAM) $ liftIO $ do
+          setVRAMAccessible vram False
+          putMVar (currentLine graphicsSync) line'
 
-      -- Raise interrupts
-      when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
-      when (stat `testBit` interruptVBlank && mode' == VBlank) (raiseInterrupt 1)
-      when (stat `testBit` interruptOAM && mode' == ScanOAM) (raiseInterrupt 1)
-      when (mode' == VBlank) (raiseInterrupt 0)
+        -- Raise interrupts
+        when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
+        when (stat `testBit` interruptVBlank && mode' == VBlank) (raiseInterrupt 1)
+        when (stat `testBit` interruptOAM && mode' == ScanOAM) (raiseInterrupt 1)
+        when (mode' == VBlank) (raiseInterrupt 0)
 
-      -- If we're entering HBlank mode, then sync
-      when (mode' == HBlank) $ liftIO $ do
-        takeMVar (hblankStart graphicsSync)
-        setVRAMAccessible vram True
+        -- If we're entering HBlank mode, then sync
+        when (mode' == HBlank) $ liftIO $ do
+          takeMVar (hblankStart graphicsSync)
+          setVRAMAccessible vram True
+
+      pure $ case modeUpdate of
+        HasChangedTo HBlank -> HBlankEvent
+        _                   -> NoGraphicsEvent
 
 -- | Prepare a status report on the graphics registers.
 graphicsRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]

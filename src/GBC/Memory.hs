@@ -12,6 +12,7 @@ module GBC.Memory
   , readByte
   , writeByte
   , writeWord
+  , copy16
   , readChunk
   )
 where
@@ -156,6 +157,26 @@ writeByte addr value = do
       | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
+
+{-# INLINABLE copy16 #-}
+copy16 :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
+copy16 source destination = do
+  writeByte destination =<< readByte source
+  writeByte (destination + 1) =<< readByte (source + 1)
+  writeByte (destination + 2) =<< readByte (source + 2)
+  writeByte (destination + 3) =<< readByte (source + 3)
+  writeByte (destination + 4) =<< readByte (source + 4)
+  writeByte (destination + 5) =<< readByte (source + 5)
+  writeByte (destination + 6) =<< readByte (source + 6)
+  writeByte (destination + 7) =<< readByte (source + 7)
+  writeByte (destination + 8) =<< readByte (source + 8)
+  writeByte (destination + 9) =<< readByte (source + 9)
+  writeByte (destination + 10) =<< readByte (source + 10)
+  writeByte (destination + 11) =<< readByte (source + 11)
+  writeByte (destination + 12) =<< readByte (source + 12)
+  writeByte (destination + 13) =<< readByte (source + 13)
+  writeByte (destination + 14) =<< readByte (source + 14)
+  writeByte (destination + 15) =<< readByte (source + 15)
 
 -- | Read a chunk of memory.
 {-# INLINABLE readChunk #-}

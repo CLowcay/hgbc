@@ -7,9 +7,11 @@ module GBC.Primitive
   , getCounter
   , reloadCounter
   , updateCounter
+  , UpdateResult(..)
   , StateCycle
   , newStateCycle
   , getStateCycle
+  , getUpdateResult
   , updateStateCycle
   , resetStateCycle
   , RingBuffer
@@ -71,15 +73,21 @@ getStateCycle (StateCycle _ states) = do
   ((state, _) : _) <- liftIO $ readIORef states
   pure state
 
+data UpdateResult a = NoChange !a | HasChangedTo !a deriving (Eq, Ord, Show)
+
+getUpdateResult :: UpdateResult a -> a
+getUpdateResult (NoChange x) = x
+getUpdateResult (HasChangedTo x) = x
+
 {-# INLINE updateStateCycle #-}
-updateStateCycle :: MonadIO m => StateCycle a -> Int -> (a -> m ()) -> m a
+updateStateCycle :: MonadIO m => StateCycle a -> Int -> (a -> m ()) -> m (UpdateResult a)
 updateStateCycle (StateCycle cycles states) update k = do
   count <- liftIO $ readIORef cycles
   let count' = count - update
   if count' > 0
     then liftIO $ do
       writeIORef cycles $! count'
-      fst . head <$> readIORef states
+      NoChange . fst . head <$> readIORef states
     else do
       stateList <- liftIO $ readIORef states
       let stateList'                   = tail stateList
@@ -87,7 +95,7 @@ updateStateCycle (StateCycle cycles states) update k = do
       liftIO $ writeIORef states $! stateList'
       liftIO $ writeIORef cycles $! count' + nextStateLength
       k nextState
-      pure nextState
+      pure (HasChangedTo nextState)
 
 {-# INLINE resetStateCycle #-}
 resetStateCycle :: MonadIO m => StateCycle a -> [(a, Int)] -> m ()

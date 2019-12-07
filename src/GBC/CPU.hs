@@ -972,6 +972,7 @@ executeInstruction instruction = case instruction of
     pure (BusEvent [] (clocks instruction True) ModeHalt)
   -- STOP
   STOP -> do
+    liftIO (putStrLn "STOP")
     key1 <- readByte KEY1
     if key1 `testBit` 0
       then do

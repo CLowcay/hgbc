@@ -25,6 +25,6 @@ main = do
     Right rom -> do
       emulatorState <- initEmulatorState rom
       debugState    <- initDebug rom emulatorState
-      void $ startOutput (memory emulatorState) (vram emulatorState) (graphicsSync emulatorState)
+      void $ startOutput (memory emulatorState) (vram emulatorState) (graphicsSync emulatorState) (mode emulatorState)
       runReaderT reset debugState
       runReaderT (Haskeline.runInputT Haskeline.defaultSettings cli) debugState
