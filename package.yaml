@@ -38,6 +38,7 @@ dependencies:
 - mmap
 - monad-loops
 - mtl
+- optparse-applicative
 - resourcet
 - sdl2
 - text

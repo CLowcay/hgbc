@@ -76,11 +76,15 @@ pollDelay = 10
 -- | Create an initial bus state.
 initEmulatorState :: ROM -> IO EmulatorState
 initEmulatorState rom = do
+  let mode = case cgbSupport (romHeader rom) of
+        CGBCompatible   -> CGB
+        CGBExclusive    -> CGB
+        CGBIncompatible -> DMG
   lastEventPollAt <- newIORef 0
   breakFlag       <- newIORef False
-  vram            <- initVRAM DMG
+  vram            <- initVRAM mode
   memory          <- initMemory rom vram
-  cpu             <- initCPU
+  cpu             <- initCPU mode
   graphicsSync    <- newGraphicsSync
   graphicsState   <- initGraphics vram
   keypadState     <- initKeypadState
@@ -127,8 +131,8 @@ step = do
   doDMA busEvent
 
   EmulatorState {..} <- ask
-  now           <- SDL.ticks
-  lastPoll      <- liftIO $ readIORef lastEventPollAt
+  now                <- SDL.ticks
+  lastPoll           <- liftIO $ readIORef lastEventPollAt
   when (now - lastPoll > pollDelay) $ do
     handleEvents
     liftIO $ writeIORef lastEventPollAt =<< SDL.ticks

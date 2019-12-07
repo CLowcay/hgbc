@@ -58,6 +58,7 @@ import           GBC.Decode
 import           GBC.Errors
 import           GBC.ISA
 import           GBC.Memory
+import           GBC.Mode
 import           GBC.Registers
 
 -- | The register file.
@@ -130,16 +131,20 @@ data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded
 
 -- | The internal CPU state.
 data CPUState = CPUState {
-    registers :: !(ForeignPtr RegisterFile)
-  , cpuMode :: !(IORef CPUMode)
+    registers    :: !(ForeignPtr RegisterFile)
+  , cpuMode      :: !(IORef CPUMode)
+  , cpuType      :: !EmulatorMode
 }
 
 class HasMemory env => HasCPU env where
   forCPUState :: env -> CPUState
 
 -- | Initialize a new CPU.
-initCPU :: IO CPUState
-initCPU = CPUState <$> mallocForeignPtr <*> newIORef ModeNormal
+initCPU :: EmulatorMode -> IO CPUState
+initCPU cpuType = do
+  registers <- mallocForeignPtr 
+  cpuMode <- newIORef ModeNormal
+  pure CPUState {..}
 
 -- | Get the current cpu mode.
 {-# INLINABLE getMode #-}
@@ -333,7 +338,9 @@ testIME = do
 {-# INLINABLE reset #-}
 reset :: HasCPU env => ReaderT env IO ()
 reset = do
-  writeR8 RegA 0x01
+  CPUState {..} <- asks forCPUState
+
+  writeR8 RegA (if cpuType == DMG then 0x01 else 0x11)
   writeF 0xB0
   writeR8 RegB 0x00
   writeR8 RegC 0x13
