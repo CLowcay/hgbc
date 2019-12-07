@@ -94,6 +94,9 @@ flagOBJSize = 0x04
 flagOBJEnable = 0x02
 flagBackgroundEnable = 0x01
 
+flagPaletteIncrement :: Word8
+flagPaletteIncrement = 0x80
+
 matchBit, interruptCoincidence, interruptOAM, interruptVBlank, interruptHBlank :: Int
 matchBit = 2
 interruptCoincidence = 6
@@ -159,6 +162,22 @@ graphicsStep (BusEvent newWrites clocks _) = do
     VBK -> do
       vbk <- readByte VBK
       liftIO $ setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
+    BCPS -> do
+      bcps <- readByte BCPS
+      writeByte BCPD =<< liftIO (readPalette vram False bcps)
+    BCPD -> do
+      bcps <- readByte BCPS
+      bcpd <- readByte BCPD
+      liftIO $ writePalette vram False bcps bcpd
+      when (isFlagSet flagPaletteIncrement bcps) $ writeByte BCPS ((bcps .&. 0xBF) + 1)
+    OCPS -> do
+      ocps <- readByte OCPS
+      writeByte OCPD =<< liftIO (readPalette vram True ocps)
+    OCPD -> do
+      ocps <- readByte OCPS
+      ocpd <- readByte OCPD
+      liftIO $ writePalette vram True ocps ocpd
+      when (isFlagSet flagPaletteIncrement ocps) $ writeByte OCPS ((ocps .&. 0xBF) + 1)
     _ -> pure ()
 
   if not lcdEnabled

@@ -4,6 +4,9 @@ module GBC.Graphics.VRAM
   , initVRAM
   , setVRAMAccessible
   , setVRAMBank
+  , writePalette
+  , readPalette
+  , readRGBPalette
   , readSpritePosition
   , readSpriteAttributes
   , readTile
@@ -19,8 +22,10 @@ module GBC.Graphics.VRAM
   )
 where
 
+import           Common
 import           Data.IORef
 import           Data.Word
+import           Data.Bits
 import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
@@ -30,6 +35,8 @@ import           GBC.Mode
 data VRAM = VRAM {
     vram           :: !(Ptr Word8)
   , oam            :: !(Ptr Word8)
+  , rawPalettes    :: !(Ptr Word16)
+  , rgbPalettes    :: !(Ptr Word32)
   , mode           :: !EmulatorMode
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(IORef Int)
@@ -44,6 +51,8 @@ initVRAM mode = do
   oam            <- mallocBytes 160
   vramAccessible <- newIORef True
   vramBank       <- newIORef 0
+  rawPalettes    <- mallocArray (8 * 4 * 2)
+  rgbPalettes    <- mallocArray (8 * 4 * 2)
   pure VRAM { .. }
 
 {-# INLINE setVRAMAccessible #-}
@@ -53,6 +62,38 @@ setVRAMAccessible VRAM {..} = writeIORef vramAccessible
 {-# INLINE setVRAMBank #-}
 setVRAMBank :: VRAM -> Int -> IO ()
 setVRAMBank VRAM {..} = writeIORef vramBank
+
+-- | Write a palette given the values of the cps and cpd registers.
+{-# INLINE writePalette #-}
+writePalette :: VRAM -> Bool -> Word8 -> Word8 -> IO ()
+writePalette r@VRAM {..} fg cps cpd = do
+  pokeByteOff rawPalettes ((if fg then 64 else 0) + fromIntegral cps .&. 0x3F) cpd
+  updatePalette r fg cps
+
+-- | Read a palette given the value of the cps register.
+{-# INLINE readPalette #-}
+readPalette :: VRAM -> Bool -> Word8 -> IO Word8
+readPalette VRAM {..} fg cps =
+  peekByteOff rawPalettes ((if fg then 64 else 0) + fromIntegral cps .&. 0x3F)
+
+-- | Read a decoded RGB palette with the given 5-bit address
+{-# INLINE readRGBPalette #-}
+readRGBPalette :: VRAM -> Bool -> Word8 -> IO Word32
+readRGBPalette VRAM {..} fg addr =
+  peekElemOff rgbPalettes ((if fg then 32 else 0) + fromIntegral addr .&. 0x1F)
+
+updatePalette :: VRAM -> Bool -> Word8 -> IO ()
+updatePalette VRAM {..} fg cps = do
+  let addr = (if fg then 32 else 0) + fromIntegral ((cps `unsafeShiftR` 1) .&. 0x1F)
+  raw <- peekElemOff rawPalettes addr
+  pokeElemOff rgbPalettes addr (encodeColor raw)
+
+encodeColor :: Word16 -> Word32
+encodeColor color =
+  let b = 8 * fromIntegral ((color `unsafeShiftR` 10) .&. 0x1F)
+      g = 8 * fromIntegral ((color `unsafeShiftR` 5) .&. 0x1F)
+      r = 8 * fromIntegral (color .&. 0x1F)
+  in  (b `unsafeShiftL` 16) .|. (g `unsafeShiftL` 8) .|. r
 
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)

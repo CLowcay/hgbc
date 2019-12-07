@@ -226,7 +226,7 @@ pattern OCPS :: Word16
 pattern OCPS = 0xFF6A
 
 pattern OCPD :: Word16
-pattern OCPD = 0xFF5B
+pattern OCPD = 0xFF6B
 
 pattern SVBK :: Word16
 pattern SVBK = 0xFF70

@@ -39,8 +39,8 @@ data WindowContext = WindowContext {
   -- | This is a temporary area for blending the background, window, and
   -- sprites. Each byte represents one pixel.
   -- bit 7: Priority to background
-  -- bit 6 ~ 4: CGB palette
-  -- bit 3 ~ 2: DMG palette
+  -- bit 6 ~ 5: DMG palette
+  -- bit 4 ~ 2: CGB palette
   -- bit 1 ~ 0: Index into palette
   , lineAssemblySpace :: !(ForeignPtr Word8)
   -- | Each byte in this buffer corresponds to one of the pixels in the
@@ -58,7 +58,7 @@ getBlendInfo :: Word8 -> Word8
 getBlendInfo attrs =
   let priorityToBackground = isFlagSet flagDisplayPriority attrs
       cgbPalette           = attrs .&. 7
-  in  (if priorityToBackground then 0x80 else 0) .|. (cgbPalette `unsafeShiftL` 4)
+  in  (if priorityToBackground then 0x80 else 0) .|. (cgbPalette `unsafeShiftL` 2)
 
 {-# INLINE getSpriteBlendInfo #-}
 getSpriteBlendInfo :: Word8 -> Word8
@@ -67,8 +67,23 @@ getSpriteBlendInfo attrs =
       dmgPalette           = isFlagSet flagOAMPalette attrs
       cgbPalette           = attrs .&. 7
   in  (if priorityToBackground then 0x80 else 0)
-        .|. (if dmgPalette then 0x08 else 0x04)
-        .|. (cgbPalette `unsafeShiftL` 4)
+        .|. (cgbPalette `unsafeShiftL` 2)
+        .|. (if dmgPalette then 0x40 else 0x20)
+
+decodeBlendInfo :: Word8 -> (Word8, Int)
+decodeBlendInfo blendInfo =
+  let palette = (blendInfo `unsafeShiftR` 5) .&. 3
+      index   = blendInfo .&. 3
+  in  (palette, fromIntegral index)
+
+cgbDecodeBlendInfo :: Word8 -> (Word8, Bool)
+cgbDecodeBlendInfo blendInfo = (blendInfo .&. 0x1F, blendInfo .&. blendInfoDMGPaletteMask /= 0)
+
+blendInfoDMGPaletteMask :: Word8
+blendInfoDMGPaletteMask = 0x60
+
+blendInfoIndexMask :: Word8
+blendInfoIndexMask = 3
 
 -- | OpenGL state variables.
 data GLState = GLState {
@@ -108,7 +123,7 @@ eventLoop context@WindowContext {..} = do
   -- Acquire exclusive access to VRAM
   line <- takeMVar (currentLine sync)
 
-  let outputBase = frameTextureBufferBytes glState `plusPtr` (fromIntegral line * 480)
+  let outputBase = frameTextureBufferBytes glState `plusPtr` (fromIntegral line * 640)
   withForeignPtr lineAssemblySpace
     $ \lineAssembly -> withForeignPtr spritePriorityBuffer $ \priorityBuffer ->
         runReaderT (renderLine mode line buffers lineAssembly priorityBuffer outputBase) memory
@@ -118,9 +133,9 @@ eventLoop context@WindowContext {..} = do
 
   when (line == 143) $ do
     bindBuffer PixelUpload (frameTextureBuffer glState)
-    glFlushMappedBufferRange GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 3)
+    glFlushMappedBufferRange GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 4)
     bindTexture Texture2D (frameTexture glState)
-    glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGB GL_UNSIGNED_BYTE nullPtr
+    glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGBA GL_UNSIGNED_BYTE nullPtr
     glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
     glFinish
     SDL.glSwapWindow window
@@ -168,7 +183,7 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
 
   -- Copy the data from the assembly area into the frame texture buffer,
   -- applying the GB palettes.
-  applyDMGPalettes
+  if mode == CGB then applyCGBPalettes else applyDMGPalettes
 
  where
   -- Write tiles to the assembly area. Read from the line of tiles starting at
@@ -235,27 +250,18 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
         let hflip = isFlagSet flagHorizontalFlip attrs
         let fontLineOffset = (16 * fromIntegral code) + 2 * fromIntegral
               (if vflip then y + h - 17 - line else line + 16 - y)
-        let bgPriority = isFlagSet flagDisplayPriority attrs
-        let blendInfo  = getSpriteBlendInfo attrs
-        let xOffset    = fromIntegral x - 8
+        let blendInfo = getSpriteBlendInfo attrs
+        let xOffset   = fromIntegral x - 8
         (byte0, byte1) <- if mode == CGB && isFlagSet flagBank attrs
           then readBankedTileData vram fontLineOffset
           else readTileData vram fontLineOffset
 
         let priority = if mode == CGB then 0 else fromIntegral xOffset
         if hflip
-          then
-            fastFor 0 8
-              $ \i -> blendSprite bgPriority
-                                  priority
-                                  (blendInfo .|. decodePixel byte0 byte1 i)
-                                  (xOffset + i)
-          else
-            fastFor 0 8
-              $ \i -> blendSprite bgPriority
-                                  priority
-                                  (blendInfo .|. decodePixel byte0 byte1 (7 - i))
-                                  (xOffset + i)
+          then fastFor 0 8
+            $ \i -> blendSprite priority (blendInfo .|. decodePixel byte0 byte1 i) (xOffset + i)
+          else fastFor 0 8 $ \i ->
+            blendSprite priority (blendInfo .|. decodePixel byte0 byte1 (7 - i)) (xOffset + i)
         pure True
 
   fastFor :: Int -> Int -> (Int -> IO ()) -> IO ()
@@ -268,14 +274,16 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
         go (i + 1)
 
   {-# INLINE blendSprite #-}
-  blendSprite spriteBgPriority priority pixel outOffset = when (pixel .&. 0x03 /= 0) $ do
+  blendSprite priority pixel outOffset = when (pixel .&. blendInfoIndexMask /= 0) $ do
     previous         <- peekElemOff assemblySpace outOffset
     previousPriority <- peekElemOff priorityBuffer outOffset
-    let drawOverSprite = previous .&. 0x0C /= 0
-    let bgPriority     = spriteBgPriority || previous .&. 0x80 /= 0
+    let drawOverSprite = previous .&. blendInfoDMGPaletteMask /= 0
+    let bgPriority     = (pixel .|. previous) .&. 0x80 /= 0
     when
         (  (drawOverSprite && priority < previousPriority)
-        || (not drawOverSprite && (not bgPriority || (bgPriority && (previous .&. 3 == 0))))
+        || (  not drawOverSprite
+           && (not bgPriority || (bgPriority && (previous .&. blendInfoIndexMask == 0)))
+           )
         )
       $ do
           pokeElemOff assemblySpace  outOffset pixel
@@ -290,27 +298,29 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
 
     let go !offset = do
           blendResult <- peekElemOff assemblySpace offset
-          let palette = (blendResult `unsafeShiftR` 2) .&. 3
-          let index   = blendResult .&. 3
+          let (palette, index) = decodeBlendInfo blendResult
           let paletteData = case palette of
                 0 -> bgp :: Word8
                 1 -> obp0
                 2 -> obp1
                 _ -> error "Framebuffer corrupted"
           let pixel = (3 - ((paletteData `unsafeShiftR` (fromIntegral index * 2)) .&. 0x03)) * 85
-          let outputOffset = offset * 3
-          if palette == 0
-            then do
-              pokeElemOff outputBase outputOffset       pixel
-              pokeElemOff outputBase (outputOffset + 1) pixel
-              pokeElemOff outputBase (outputOffset + 2) pixel
-            else do
-              pokeElemOff outputBase outputOffset       pixel
-              pokeElemOff outputBase (outputOffset + 1) 0
-              pokeElemOff outputBase (outputOffset + 2) 0
+          let outputOffset = offset * 4
+          pokeElemOff outputBase outputOffset       pixel
+          pokeElemOff outputBase (outputOffset + 1) pixel
+          pokeElemOff outputBase (outputOffset + 2) pixel
           if offset >= 159 then pure () else go (offset + 1)
 
     liftIO (go 0)
+
+  applyCGBPalettes = liftIO (go 0)
+   where
+    go !offset = do
+      blendResult <- peekElemOff assemblySpace offset
+      let (colorIndex, isForeground) = cgbDecodeBlendInfo blendResult
+      color <- readRGBPalette vram isForeground colorIndex
+      pokeElemOff (castPtr outputBase) offset color
+      if offset >= 159 then pure () else go (offset + 1)
 
 flagBank :: Word8
 flagBank = 0x08
@@ -351,12 +361,12 @@ setUpOpenGL = do
   frameSampler $= TextureUnit 0
   frameTexture <- genTexture
   bindTexture Texture2D frameTexture
-  glTexStorage2D GL_TEXTURE_2D 1 GL_RGB8 160 144
+  glTexStorage2D GL_TEXTURE_2D 1 GL_RGBA8 160 144
   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER (fromIntegral GL_NEAREST)
   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER (fromIntegral GL_NEAREST)
 
   (frameTextureBuffer, frameTextureBufferBytes) <- makeWritablePersistentBuffer ExplicitFlush
                                                                                 PixelUpload
-                                                                                (160 * 144 * 3)
+                                                                                (160 * 144 * 4)
 
   pure GLState { .. }

@@ -6,5 +6,6 @@ in vec2 textureCoord;
 
 void main( )
 { 
-  outColor = texture(frame, vec2(textureCoord.x, 1 - textureCoord.y));
+  vec4 color = texture(frame, vec2(textureCoord.x, 1 - textureCoord.y));
+  outColor = vec4(color.r, color.g, color.b, 1.0);
 }
