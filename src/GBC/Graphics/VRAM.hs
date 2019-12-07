@@ -90,10 +90,20 @@ updatePalette VRAM {..} fg cps = do
 
 encodeColor :: Word16 -> Word32
 encodeColor color =
-  let b = 8 * fromIntegral ((color `unsafeShiftR` 10) .&. 0x1F)
-      g = 8 * fromIntegral ((color `unsafeShiftR` 5) .&. 0x1F)
-      r = 8 * fromIntegral (color .&. 0x1F)
-  in  (b `unsafeShiftL` 16) .|. (g `unsafeShiftL` 8) .|. r
+  let b            = (color `unsafeShiftR` 10) .&. 0x1F
+      g            = (color `unsafeShiftR` 5) .&. 0x1F
+      r            = color .&. 0x1F
+      (r', g', b') = cgbColors (fromIntegral r, fromIntegral g, fromIntegral b)
+  in  (fromIntegral b' `unsafeShiftL` 16) .|. (fromIntegral g' `unsafeShiftL` 8) .|. fromIntegral r'
+
+type ColorCorrection = (Int, Int, Int) -> (Word8, Word8, Word8)
+
+cgbColors :: ColorCorrection
+cgbColors (r, g, b) =
+  let r' = 960 `min` (r * 26 + g * 4 + b * 2)
+      g' = 960 `min` (g * 24 + b * 8)
+      b' = 960 `min` (r * 6 + g * 4 + b * 22)
+  in  (fromIntegral (r' `div` 4), fromIntegral (g' `div` 4), fromIntegral (b' `div` 4))
 
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)
