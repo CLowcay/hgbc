@@ -12,6 +12,7 @@ module GBC.Emulator
   )
 where
 
+import           Common
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
 import           Data.Bits
@@ -215,7 +216,9 @@ step = do
     handleEvents
     liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
-  updateTimer (clockAdvance busEvent)
+  key1 <- readByte KEY1
+  let cpuClocks = clockAdvance busEvent
+  updateTimer (if isFlagSet flagDoubleSpeed key1 then cpuClocks * 2 else cpuClocks)
   audioStep busEvent
   graphicsEvent <- graphicsStep busEvent
 
