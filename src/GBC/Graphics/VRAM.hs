@@ -22,7 +22,6 @@ module GBC.Graphics.VRAM
   )
 where
 
-import           Common
 import           Data.IORef
 import           Data.Word
 import           Data.Bits
@@ -53,6 +52,8 @@ initVRAM mode = do
   vramBank       <- newIORef 0
   rawPalettes    <- mallocArray (8 * 4 * 2)
   rgbPalettes    <- mallocArray (8 * 4 * 2)
+  pokeArray rawPalettes (replicate (8 * 4 * 2) 0x7FFF)
+  pokeArray rgbPalettes (replicate (8 * 4 * 2) 0xFFFFFFFF)
   pure VRAM { .. }
 
 {-# INLINE setVRAMAccessible #-}

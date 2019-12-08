@@ -20,12 +20,12 @@ import           Data.IORef
 import           Data.Word
 import           GBC.Audio
 import           GBC.CPU
-import           GBC.ROM
 import           GBC.Graphics
 import           GBC.Graphics.VRAM
-import           GBC.Mode
 import           GBC.Keypad
 import           GBC.Memory
+import           GBC.Mode
+import           GBC.ROM
 import           GBC.Registers
 import           GBC.Timer
 import           SDL.Orphans                    ( )
@@ -91,7 +91,7 @@ initEmulatorState rom = do
   hdmaDestination <- newIORef 0
   hdmaActive      <- newIORef False
   vram            <- initVRAM mode
-  memory          <- initMemory rom vram
+  memory          <- initMemory rom vram mode
   cpu             <- initCPU mode
   graphicsSync    <- newGraphicsSync
   graphicsState   <- initGraphics vram
@@ -137,6 +137,7 @@ doGeneralHDMA hdma5 = do
   hdma2 <- readByte HDMA2
   hdma3 <- readByte HDMA3
   hdma4 <- readByte HDMA4
+  writeByte HDMA5 0xFF
   go (makeHDMASource hdma1 hdma2) (makeHDMADestination hdma3 hdma4) (hdma5 + 1)
  where
   go _       _            0      = pure ()
@@ -168,7 +169,7 @@ doHBlankHDMA = do
       destination <- liftIO $ readIORef hdmaDestination
       liftIO $ do
         writeIORef hdmaSource $! source + 16
-        writeIORef hdmaSource $! destination + 16
+        writeIORef hdmaDestination $! destination + 16
       copy16 source destination
 
       hdma5 <- readByte HDMA5

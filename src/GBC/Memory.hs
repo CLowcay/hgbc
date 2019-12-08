@@ -28,17 +28,21 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Errors
 import           GBC.Graphics.VRAM
+import           GBC.Mode
 import           GBC.ROM
+import           GBC.Registers
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Unsafe        as B
 
 data Memory = Memory {
-    mbc :: !MBC
-  , romHeader :: !Header
-  , rom :: !B.ByteString
-  , memRam :: !(ForeignPtr Word8)
-  , memHigh :: !(ForeignPtr Word8)
-  , vram :: !VRAM
+    mbc            :: !MBC
+  , romHeader      :: !Header
+  , rom            :: !B.ByteString
+  , memRam         :: !(ForeignPtr Word8)
+  , ramBankOffset  :: !(IORef Int)
+  , memHigh        :: !(ForeignPtr Word8)
+  , mode           :: !EmulatorMode
+  , vram           :: !VRAM
   , checkRAMAccess :: !(IORef Bool)
 }
 
@@ -50,10 +54,11 @@ instance HasMemory Memory where
   forMemory = id
 
 -- | The initial memory state.
-initMemory :: ROM -> VRAM -> IO Memory
-initMemory romInfo@(ROM _ romHeader rom) vram = do
-  memRam         <- mallocForeignPtrArray 0x2000
+initMemory :: ROM -> VRAM -> EmulatorMode -> IO Memory
+initMemory romInfo@(ROM _ romHeader rom) vram mode = do
+  memRam         <- mallocForeignPtrArray 0x10000
   memHigh        <- mallocForeignPtrArray 0x100
+  ramBankOffset  <- newIORef 0
   mbc            <- getMBC romInfo
   checkRAMAccess <- newIORef False
   pure Memory { .. }
@@ -92,7 +97,12 @@ dmaToOAM source = do
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       withRAMPointer mbc check (source - 0xA000) (copyToOAM vram)
-    6 -> withForeignPtr memRam $ \ram -> copyToOAM vram (ram `plusPtr` offset 0xC000)
+    6
+      | source < 0xD000 || mode == DMG -> withForeignPtr memRam
+      $  \ram -> copyToOAM vram (ram `plusPtr` offset 0xC000)
+      | otherwise -> do
+        bankOffset <- readIORef ramBankOffset
+        withForeignPtr memRam $ \ram -> copyToOAM vram (ram `plusPtr` (bankOffset + offset 0xC000))
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
 
@@ -114,7 +124,11 @@ readByte addr = do
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       readRAM mbc check (addr - 0xA000)
-    6 -> withForeignPtr memRam (`peekElemOff` offset 0xC000)
+    6
+      | addr < 0xD000 || mode == DMG -> withForeignPtr memRam (`peekElemOff` offset 0xC000)
+      | otherwise -> do
+        bankOffset <- readIORef ramBankOffset
+        withForeignPtr memRam (`peekElemOff` (bankOffset + offset 0xC000))
     7
       | addr < 0xFE00 -> withForeignPtr memRam (`peekElemOff` offset 0xE000)
       | addr < 0xFEA0 -> do
@@ -147,13 +161,22 @@ writeByte addr value = do
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       writeRAM mbc check (addr - 0xA000) value
-    6 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xC000) value
+    6
+      | addr < 0xD000 || mode == DMG -> withForeignPtr memRam
+      $  \ptr -> pokeElemOff ptr (offset 0xC000) value
+      | otherwise -> do
+        bankOffset <- readIORef ramBankOffset
+        withForeignPtr memRam $ \ptr -> pokeElemOff ptr (bankOffset + offset 0xC000) value
     7
       | addr < 0xFE00 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xE000) value
       | addr < 0xFEA0 -> writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
+      | addr == SVBK -> do
+        let bank = fromIntegral (value .&. 7)
+        writeIORef ramBankOffset $! 0 `max` ((bank - 1) * 0x1000)
+        withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) (value .|. 0xF8)
       | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
