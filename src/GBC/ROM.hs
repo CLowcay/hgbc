@@ -133,11 +133,11 @@ extractHeader rom =
     0x07 -> fail "invalid cartridgeType 0x07"
     0x08 -> pure $ CartridgeType Nothing True False
     0x09 -> pure $ CartridgeType Nothing True True
-    0x0F -> pure $ CartridgeType (Just MBC3) False True
-    0x10 -> pure $ CartridgeType (Just MBC3) True True
-    0x11 -> pure $ CartridgeType (Just MBC3RTC) False False
-    0x12 -> pure $ CartridgeType (Just MBC3RTC) True False
-    0x13 -> pure $ CartridgeType (Just MBC3RTC) True True
+    0x0F -> pure $ CartridgeType (Just MBC3RTC) False True
+    0x10 -> pure $ CartridgeType (Just MBC3RTC) True True
+    0x11 -> pure $ CartridgeType (Just MBC3) False False
+    0x12 -> pure $ CartridgeType (Just MBC3) True False
+    0x13 -> pure $ CartridgeType (Just MBC3) True True
     0x19 -> pure $ CartridgeType (Just MBC5) False False
     0x1A -> pure $ CartridgeType (Just MBC5) True False
     0x1B -> pure $ CartridgeType (Just MBC5) True True
@@ -153,7 +153,7 @@ getMBC (ROM file header _) =
   in  case mbcType cType of
         Nothing      -> nullMBC
         Just MBC1    -> mbc1 bankMask ramMask allocator
-        Just MBC3    -> mbc3 bankMask ramMask allocator
-        Just MBC3RTC -> mbc3 bankMask ramMask allocator
+        Just MBC3    -> mbc3 bankMask ramMask allocator nullRTC
+        Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< (savedRTC file)
         Just MBC5    -> mbc5 bankMask ramMask allocator
         Just _       -> nullMBC

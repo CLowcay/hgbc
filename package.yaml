@@ -42,6 +42,7 @@ dependencies:
 - resourcet
 - sdl2
 - text
+- time
 - unordered-containers
 
 library:
