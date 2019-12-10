@@ -201,12 +201,16 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
         tileAttrs <- if mode == DMG
           then pure dmgBackgroundTileAttrs
           else readTileAttrs vram tileBase inPos
-        let tileDataBase   = if tile > 127 then 0 else fontOffset
-        let fontLineOffset = (fromIntegral tile * 16) + (yOffset * 2)
+        let hflip        = isFlagSet flagHorizontalFlip tileAttrs
+        let vflip        = isFlagSet flagVerticalFlip tileAttrs
+        let tileDataBase = if tile > 127 then 0 else fontOffset
+        let fontLineOffset = if vflip
+              then (fromIntegral tile * 16) + ((7 - yOffset) * 2)
+              else (fromIntegral tile * 16) + (yOffset * 2)
         (byte0, byte1) <- if isFlagSet flagBank tileAttrs
           then readBankedTileData vram (tileDataBase + fontLineOffset)
           else readTileData vram (tileDataBase + fontLineOffset)
-        outPos' <- pixelMachine byte0 byte1 (getBlendInfo tileAttrs) 7 outPos
+        outPos' <- pixelMachine byte0 byte1 (getBlendInfo tileAttrs) hflip 7 outPos
         go ((inPos + 1) .&. 0x1F) outPos'  -- wrap inPos back to 0 when it gets to the end of the line
 
   {-# INLINE decodePixel #-}
@@ -221,12 +225,13 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
   -- pixels to. Returns the final x position. Negative values for outPos are
   -- acceptable, pixelMachine will skip pixels that were scheduled to go to
   -- negative positions.
-  pixelMachine byte0 byte1 blendInfo = go
+  pixelMachine byte0 byte1 blendInfo hflip = go
    where
     go !byteOffset !pixelOffset = if pixelOffset < 0
       then go (byteOffset - 1) (pixelOffset + 1)
       else do
-        pokeElemOff assemblySpace pixelOffset (blendInfo .|. decodePixel byte0 byte1 byteOffset)
+        let pixel = decodePixel byte0 byte1 (if hflip then 7 - byteOffset else byteOffset)
+        pokeElemOff assemblySpace pixelOffset (blendInfo .|. pixel)
         if byteOffset == 0 then pure (pixelOffset + 1) else go (byteOffset - 1) (pixelOffset + 1)
 
   -- Write sprites to the assembly area.
