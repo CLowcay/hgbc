@@ -262,37 +262,30 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
           else readTileData vram fontLineOffset
 
         let priority = if mode == CGB then 0 else fromIntegral xOffset
-        if hflip
-          then fastFor 0 8
-            $ \i -> blendSprite priority (blendInfo .|. decodePixel byte0 byte1 i) (xOffset + i)
-          else fastFor 0 8 $ \i ->
-            blendSprite priority (blendInfo .|. decodePixel byte0 byte1 (7 - i)) (xOffset + i)
+        blendSprite priority hflip blendInfo byte0 byte1 xOffset
         pure True
 
-  fastFor :: Int -> Int -> (Int -> IO ()) -> IO ()
-  fastFor i0 i1 action = go i0
+  blendSprite !priority !hflip !blendInfo !byte0 !byte1 !outOffset = go 0
    where
-    go !i = if i == i1
-      then pure ()
-      else do
-        action i
-        go (i + 1)
-
-  {-# INLINE blendSprite #-}
-  blendSprite priority pixel outOffset = when (pixel .&. blendInfoIndexMask /= 0) $ do
-    previous         <- peekElemOff assemblySpace outOffset
-    previousPriority <- peekElemOff priorityBuffer outOffset
-    let drawOverSprite = previous .&. blendInfoDMGPaletteMask /= 0
-    let bgPriority     = (pixel .|. previous) .&. 0x80 /= 0
-    when
-        (  (drawOverSprite && priority < previousPriority)
-        || (  not drawOverSprite
-           && (not bgPriority || (bgPriority && (previous .&. blendInfoIndexMask == 0)))
-           )
-        )
-      $ do
-          pokeElemOff assemblySpace  outOffset pixel
-          pokeElemOff priorityBuffer outOffset priority
+    go 8  = pure ()
+    go !i = do
+      let pixel = decodePixel byte0 byte1 (if hflip then i else 7 - i)
+      unless (pixel == 0) $ do
+        let outPos = outOffset + i
+        previous         <- peekElemOff assemblySpace outPos
+        previousPriority <- peekElemOff priorityBuffer outPos
+        let drawOverSprite = previous .&. blendInfoDMGPaletteMask /= 0
+        let bgPriority     = (blendInfo .|. previous) .&. 0x80 /= 0
+        when
+            (  (drawOverSprite && priority < previousPriority)
+            || (  not drawOverSprite
+               && (not bgPriority || (bgPriority && (previous .&. blendInfoIndexMask == 0)))
+               )
+            )
+          $ do
+              pokeElemOff assemblySpace  outPos (blendInfo .|. pixel)
+              pokeElemOff priorityBuffer outPos priority
+      go (i + 1)
 
   -- Generate actual pixel data in the frame texture buffer based on the data in
   -- the assembly area.
