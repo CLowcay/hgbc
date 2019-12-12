@@ -231,16 +231,16 @@ graphicsRegisters = do
     ]
  where
   decodeLCDC lcdc =
-    [ ("LCD Enable"      , show $ 0 /= lcdc .&. flagLCDEnable)
+    [ ("LCD Enable"      , show $ isFlagSet flagLCDEnable lcdc)
     , ("Window Code Area", if 0 == lcdc .&. flagWindowTileMap then "9800" else "9C00")
-    , ("Window Enable"   , show $ 0 /= lcdc .&. flagWindowEnable)
+    , ("Window Enable"   , show $ isFlagSet flagWindowEnable lcdc)
     , ( "Background Character Data Base"
       , if 0 == lcdc .&. flagTileDataSelect then "8800" else "8000"
       )
     , ("Background Code Area", if 0 == lcdc .&. flagBackgroundTileMap then "9800" else "9C00")
     , ("OBJ Height"          , if 0 == lcdc .&. flagOBJSize then "8" else "16")
-    , ("OBJ Enable"          , show $ 0 /= lcdc .&. flagOBJEnable)
-    , ("Background Enable"   , show $ 0 /= lcdc .&. flagBackgroundEnable)
+    , ("OBJ Enable"          , show $ isFlagSet flagOBJEnable lcdc)
+    , ("Background Enable"   , show $ isFlagSet flagBackgroundEnable lcdc) 
     ]
   decodeSTAT stat =
     let mode = case stat .&. 0x03 of
