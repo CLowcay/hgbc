@@ -62,7 +62,6 @@ data Command = ShowHeader
              | PokeR16 Register16 Word16
              | ShowGraphics (Maybe String)
              | ShowTimer (Maybe String)
-             | ShowAudio (Maybe String)
              | ShowInternal (Maybe String)
              | ShowMBC (Maybe String)
              | AddBreakpoint MemAddress
@@ -293,7 +292,6 @@ doCommand (PokeR8  reg value ) = lift (writeR8 reg value)
 doCommand (PokeR16 reg value ) = lift (writeR16 reg value)
 doCommand (ShowGraphics  r   ) = dumpGraphics r
 doCommand (ShowTimer     r   ) = dumpTimer r
-doCommand (ShowAudio     r   ) = dumpAudio r
 doCommand (ShowInternal  r   ) = dumpInternal r
 doCommand (ShowMBC       r   ) = dumpMBC r
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do

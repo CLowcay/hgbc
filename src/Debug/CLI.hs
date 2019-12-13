@@ -93,7 +93,6 @@ command =
     <|> try (Step <$> (symbol "s" *> (fromMaybe 1 <$> optional L.decimal)))
     <|> try (ShowGraphics <$> (symbol "graphics" *> optional labelValue))
     <|> try (ShowTimer <$> (symbol "timer" *> optional labelValue))
-    <|> try (ShowAudio <$> (symbol "audio" *> optional labelValue))
     <|> try (ShowInternal <$> (symbol "internal" *> optional labelValue))
     <|> try (ShowMBC <$> (symbol "mbc" *> optional labelValue))
     <|> try (AddWriteBreakpoint <$> try (symbol "watch" *> address))

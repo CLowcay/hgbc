@@ -5,7 +5,6 @@ module Debug.Dump
   , dumpDisassembly
   , dumpMem
   , dumpGraphics
-  , dumpAudio
   , dumpTimer
   , dumpInternal
   , dumpMBC
@@ -85,8 +84,8 @@ dumpHeader Header {..} = do
     ++ (if hasBackupBattery cartridgeType then "+Battery" else "")
     ++ " ("
     ++ formatByteCount romSize
-    ++ " ROM)"
-    ++ (if externalRAM > 0 then " + " ++ formatByteCount externalRAM ++ " RAM" else "")
+    ++ " ROM"
+    ++ (if externalRAM > 0 then " + " ++ formatByteCount externalRAM ++ " RAM)" else ")")
     )
 
   outputStrLn ("Start address: " ++ formatHex startAddress)
@@ -140,9 +139,6 @@ toPrintable c = if c <= ' ' || c >= '\DEL' then '.' else c
 
 dumpGraphics :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
 dumpGraphics register = dumpRegisterInfo . filterRegister register =<< lift graphicsRegisters
-
-dumpAudio :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
-dumpAudio register = undefined
 
 dumpTimer :: HasTimer env => Maybe String -> InputT (ReaderT env IO) ()
 dumpTimer register = dumpRegisterInfo . filterRegister register =<< lift timerRegisters
