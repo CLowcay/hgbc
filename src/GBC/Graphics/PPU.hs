@@ -106,7 +106,7 @@ startOutput memory buffers sync mode = do
 
   void $ forkOS $ do
     void (SDL.glCreateContext window)
-    SDL.swapInterval $= SDL.SynchronizedUpdates
+    SDL.swapInterval $= SDL.SynchronizedUpdates 
     lineAssemblySpace    <- mallocForeignPtrBytes 160
     spritePriorityBuffer <- mallocForeignPtrBytes 160
     glState              <- setUpOpenGL
@@ -192,7 +192,7 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
   -- 
   -- Each round takes the offset to the tile to render, and the x position to
   -- render the pixels to.
-  tileMachine tileBase fontOffset yOffset stopOffset = go
+  tileMachine !tileBase !fontOffset !yOffset !stopOffset = go
    where
     go !inPos !outPos = if outPos >= stopOffset
       then pure ()
@@ -225,7 +225,7 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
   -- pixels to. Returns the final x position. Negative values for outPos are
   -- acceptable, pixelMachine will skip pixels that were scheduled to go to
   -- negative positions.
-  pixelMachine byte0 byte1 blendInfo hflip = go
+  pixelMachine !byte0 !byte1 !blendInfo !hflip = go
    where
     go !byteOffset !pixelOffset = if pixelOffset < 0
       then go (byteOffset - 1) (pixelOffset + 1)
@@ -243,7 +243,7 @@ renderLine mode line vram assemblySpace priorityBuffer outputBase = do
         spriteRendered <- doSprite h (offset * 4)
         go (offset + 1) (if spriteRendered then spritesRendered + 1 else spritesRendered)
 
-  doSprite h offset = do
+  doSprite !h !offset = do
     (y, x) <- readSpritePosition vram offset
     let spriteVisible = x /= 0 && line + 16 >= y && line + 16 < y + h
     if not spriteVisible
