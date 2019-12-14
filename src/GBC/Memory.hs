@@ -29,10 +29,13 @@ import           Foreign.Storable
 import           GBC.Errors
 import           GBC.Graphics.VRAM
 import           GBC.Mode
+import           GBC.Primitive
 import           GBC.ROM
 import           GBC.Registers
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Unsafe        as B
+import qualified Data.Vector                   as V
+import           Data.Bifunctor
 
 data Memory = Memory {
     mbc            :: !MBC
@@ -40,6 +43,7 @@ data Memory = Memory {
   , rom            :: !B.ByteString
   , memRam         :: !(ForeignPtr Word8)
   , ramBankOffset  :: !(IORef Int)
+  , ports          :: !(V.Vector (Port Word8))
   , memHigh        :: !(ForeignPtr Word8)
   , mode           :: !EmulatorMode
   , vram           :: !VRAM
@@ -53,12 +57,26 @@ instance HasMemory Memory where
   {-# INLINE forMemory #-}
   forMemory = id
 
+portOffset :: Word16 -> Int
+portOffset = subtract 0xFF00 . fromIntegral
+
 -- | The initial memory state.
-initMemory :: ROM -> VRAM -> EmulatorMode -> IO Memory
-initMemory romInfo@(ROM _ romHeader rom) vram mode = do
-  memRam         <- mallocForeignPtrArray 0x10000
-  memHigh        <- mallocForeignPtrArray 0x100
-  ramBankOffset  <- newIORef 0
+initMemory :: ROM -> VRAM -> [(Word16, Port Word8)] -> EmulatorMode -> IO Memory
+initMemory romInfo@(ROM _ romHeader rom) vram rawPorts mode = do
+  memRam        <- mallocForeignPtrArray 0x10000
+  memHigh       <- mallocForeignPtrArray 0x80
+  emptyPort     <- newPort 0xFF 0x00 (const . pure)
+
+  ramBankOffset <- newIORef 0
+  svbk          <- newPort 0xF8 0x03 $ \_ newValue -> do
+    let bank = fromIntegral (newValue .&. 7)
+    writeIORef ramBankOffset $! 0 `max` ((bank - 1) * 0x1000)
+    pure newValue
+
+  let ports = V.accum (flip const)
+                      (V.replicate 128 emptyPort)
+                      (first portOffset <$> ((SVBK, svbk) : rawPorts))
+
   mbc            <- getMBC romInfo
   checkRAMAccess <- newIORef False
   pure Memory { .. }
@@ -137,7 +155,8 @@ readByte addr = do
       | addr < 0xFF00 -> liftIO $ do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
-      | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF00)
+      | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
+      | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF80)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 
@@ -173,10 +192,7 @@ writeByte addr value = do
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
-      | addr == SVBK -> do
-        let bank = fromIntegral (value .&. 7)
-        writeIORef ramBankOffset $! 0 `max` ((bank - 1) * 0x1000)
-        withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) (value .|. 0xF8)
+      | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
       | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base

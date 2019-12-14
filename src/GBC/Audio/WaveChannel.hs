@@ -1,5 +1,7 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE TupleSections #-}
+
 module GBC.Audio.WaveChannel
   ( WaveChannel
   , newWaveChannel
@@ -9,103 +11,114 @@ where
 import           Common
 import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           GBC.Audio.Common
 import           GBC.Audio.Length
-import           GBC.Memory
 import           GBC.Primitive
-import           GBC.Registers
+import qualified Data.Vector                   as V
 
 data WaveChannel = WaveChannel {
     output           :: !(IORef Int)
   , enable           :: !(IORef Bool)
+  , port0            :: !(Port Word8)
+  , port1            :: !(Port Word8)
+  , port2            :: !(Port Word8)
+  , port3            :: !(Port Word8)
+  , port4            :: !(Port Word8)
+  , port52           :: !(Port Word8)
+  , portWaveTable    :: !(V.Vector (Port Word8))
   , frequencyCounter :: !Counter
-  , sample           :: !(StateCycle Word16)
+  , sample           :: !(StateCycle Int)
   , lengthCounter    :: !Length
 }
 
-waveSamplerStates :: [(Word16, Int)]
+waveSamplerStates :: [(Int, Int)]
 waveSamplerStates = [0 .. 31] <&> (, 1)
 
-newWaveChannel :: IO WaveChannel
-newWaveChannel = do
-  output           <- newIORef 0
-  enable           <- newIORef False
+newWaveChannel :: Port Word8 -> IO WaveChannel
+newWaveChannel port52 = mdo
+  output <- newIORef 0
+  enable <- newIORef False
+
+  port0  <- newPortWithReadMask 0xFF 0x7F 0x80 $ \_ register0 -> do
+    unless (isFlagSet flagMasterEnable register0) $ disableIO port52 output enable
+    pure register0
+
+  port1 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register1 -> do
+    register4 <- readPort port4
+    when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
+    pure register1
+
+  port2 <- newPortWithReadMask 0xFF 0x9F 0x60 (const . pure)
+
+  port3 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register3 -> do
+    register4 <- readPort port4
+    reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
+    pure register3
+
+  port4 <- newPortWithReadMask 0xFF 0xBF 0xC7 $ \_ register4 -> do
+    when (isFlagSet flagTrigger register4) $ do
+      register0 <- readPort port0
+      register3 <- readPort port3
+      initLength lengthCounter
+      reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
+      resetStateCycle sample waveSamplerStates
+      let enabled = isFlagSet flagMasterEnable register0
+      writeIORef enable enabled
+      updateStatus port52 flagChannel3Enable enabled
+    pure register4
+
+  wavePort <- newPort 0x00 0x00 (const . pure)
+  let portWaveTable = V.replicate 16 wavePort
+
   frequencyCounter <- newCounter
   sample           <- newStateCycle waveSamplerStates
   lengthCounter    <- newLength 0xFF
   pure WaveChannel { .. }
 
-flagChannel3Enable :: Word8
-flagChannel3Enable = 0x80
-
-disableIO :: WaveChannel -> IO ()
-disableIO WaveChannel {..} = do
+disableIO :: Port Word8 -> IORef Int -> IORef Bool -> IO ()
+disableIO port52 output enable = do
   writeIORef output 0
   writeIORef enable False
+  updateStatus port52 flagChannel3Enable False
 
 instance Channel WaveChannel where
-  getOutput WaveChannel {..} = liftIO $ readIORef output
+  getOutput WaveChannel {..} = readIORef output
+  disable WaveChannel {..} = disableIO port52 output enable
+  getStatus WaveChannel {..} = readIORef enable
+  getPorts WaveChannel {..} =
+    [(0, port0), (1, port1), (2, port2), (3, port3), (4, port4)]
+      ++ ([22 ..] `zip` toList portWaveTable)
 
-  disable = liftIO . disableIO
-
-  getStatus WaveChannel {..} = liftIO $ readIORef enable
-
-  trigger WaveChannel {..} = do
-    liftIO $ initLength lengthCounter
-    reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency NR30
-    resetStateCycle sample waveSamplerStates
-    masterEnable <- getMasterEnable
-    liftIO $ writeIORef enable masterEnable
-
-  frameSequencerClock channel@WaveChannel {..} FrameSequencerOutput {..} = do
-    register4 <- readByte NR34
-    liftIO $ when (lengthClock && isFlagSet flagLength register4) $ clockLength
-      lengthCounter
-      (disableIO channel)
+  frameSequencerClock WaveChannel {..} FrameSequencerOutput {..} = do
+    register4 <- readPort port4
+    when (lengthClock && isFlagSet flagLength register4)
+      $ clockLength lengthCounter (disableIO port52 output enable)
 
   masterClock WaveChannel {..} clockAdvance = do
-    isEnabled <- liftIO $ readIORef enable
+    isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle sample 1 $ \i -> do
-        sampleByte <- readByte (0xFF30 + (i `unsafeShiftR` 1))
-        volume     <- getVolume
+        sampleByte <- readPort (portWaveTable V.! (i `unsafeShiftR` 1))
+        register2  <- readPort port2
+        let volume = getVolume register2
         let rawSampleValue =
               if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
-        liftIO $ writeIORef output (fromIntegral sampleValue - 8)
-      getTimerPeriod <$> getFrequency NR30
+        writeIORef output (fromIntegral sampleValue - 8)
+      register3 <- readPort port3
+      register4 <- readPort port4
+      pure (getTimerPeriod (getFrequency register3 register4))
 
-  writeX0 channel = do
-    register0 <- readByte NR30
-    unless (isFlagSet flagChannel3Enable register0) $ disable channel
+flagMasterEnable :: Word8
+flagMasterEnable = 0x80
 
-  writeX1 WaveChannel {..} = do
-    register4 <- readByte NR34
-    when (isFlagSet flagLength register4) $ do
-      register1 <- readByte NR31
-      liftIO $ reloadLength lengthCounter register1
-
-  writeX2 _ = pure ()
-
-  writeX3 WaveChannel {..} = reloadCounter frequencyCounter . getTimerPeriod =<< getFrequency NR30
-
-  writeX4 channel@WaveChannel {..} = do
-    register4 <- readByte NR34
-    when (isFlagSet flagTrigger register4) $ trigger channel
-
-getMasterEnable :: HasMemory env => ReaderT env IO Bool
-getMasterEnable = do
-  register2 <- readByte NR30
-  pure (register2 .&. 0x80 /= 0)
-
-getVolume :: HasMemory env => ReaderT env IO Word8
-getVolume = do
-  register2 <- readByte NR32
-  pure (3 .&. (register2 `unsafeShiftR` 5))
+getVolume :: Word8 -> Word8
+getVolume register2 = 3 .&. (register2 `unsafeShiftR` 5)
 
 getTimerPeriod :: Int -> Int
 getTimerPeriod f = (2 * (2048 - f)) - 1

@@ -16,19 +16,19 @@ import           Data.Bits
 import           Data.IORef
 import           Data.Word
 import           GBC.Audio.Common
-import           GBC.Memory
 import           GBC.Primitive
 
 data Sweep = Sweep {
     enable       :: !(IORef Bool)
   , hasNegated   :: !(IORef Bool)
-  , baseRegister :: !Word16
+  , port3        :: !(Port Word8)
+  , port4        :: !(Port Word8)
   , frequencyRef :: !(IORef Int)
   , counter      :: !Counter
 }
 
-newSweep :: Word16 -> IO Sweep
-newSweep baseRegister = do
+newSweep :: Port Word8 -> Port Word8 -> IO Sweep
+newSweep port3 port4 = do
   enable       <- newIORef False
   hasNegated   <- newIORef False
   frequencyRef <- newIORef 0
@@ -55,14 +55,14 @@ overflowCheck Sweep {..} register disableIO = do
   when isNegate $ writeIORef hasNegated True
   if frequency' > 2047 then frequency <$ disableIO else pure frequency'
 
-clockSweep :: HasMemory env => Sweep -> Word8 -> IO () -> ReaderT env IO ()
+clockSweep :: Sweep -> Word8 -> IO () -> IO ()
 clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
   isEnabled <- liftIO $ readIORef enable
   when (isEnabled && getPeriod register /= 0) $ do
     frequency' <- liftIO $ overflowCheck sweep register disableIO
     when (getShift register /= 0) $ do
       liftIO $ writeIORef frequencyRef $! frequency'
-      updateFrequency baseRegister frequency'
+      updateFrequency port3 port4 frequency'
       void $ liftIO $ overflowCheck sweep register disableIO
   pure ((getPeriod register - 1) .&. 7)
 

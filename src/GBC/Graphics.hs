@@ -1,14 +1,14 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE TupleSections #-}
 
 module GBC.Graphics
   ( GraphicsState(..)
   , GraphicsSync(..)
-  , HasGraphics(..)
   , Mode(..)
   , GraphicsBusEvent(..)
   , initGraphics
+  , graphicsPorts
   , newGraphicsSync
   , graphicsRegisters
   , graphicsStep
@@ -27,13 +27,10 @@ import           Common
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
 import           Data.Bits
-import           Data.Foldable
 import           Data.Functor
-import           Data.IORef
 import           Data.Word
-import           GBC.CPU
 import           GBC.Graphics.VRAM
-import           GBC.Memory
+import           GBC.Interrupts
 import           GBC.Primitive
 import           GBC.Registers
 
@@ -44,7 +41,23 @@ data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounde
 data GraphicsState = GraphicsState {
     lcdState      :: !(StateCycle Mode)
   , lcdLine       :: !(StateCycle Word8)
-  , lcdEnabledRef :: !(IORef Bool)
+  , portLCDC      :: !(Port Word8)
+  , portSTAT      :: !(Port Word8)
+  , portSCY       :: !(Port Word8)
+  , portSCX       :: !(Port Word8)
+  , portLY        :: !(Port Word8)
+  , portLYC       :: !(Port Word8)
+  , portBGP       :: !(Port Word8)
+  , portOBP0      :: !(Port Word8)
+  , portOBP1      :: !(Port Word8)
+  , portWY        :: !(Port Word8)
+  , portWX        :: !(Port Word8)
+  , portBCPS      :: !(Port Word8)
+  , portBCPD      :: !(Port Word8)
+  , portOCPS      :: !(Port Word8)
+  , portOCPD      :: !(Port Word8)
+  , portVBK       :: !(Port Word8)
+  , portIF        :: !(Port Word8)
   , vram          :: !VRAM
 }
 
@@ -65,12 +78,74 @@ lcdLines :: [(Word8, Int)]
 lcdLines = [0 .. 153] <&> (, 456)
 
 -- | The initial graphics state.
-initGraphics :: VRAM -> IO GraphicsState
-initGraphics vram = do
-  lcdState      <- newStateCycle lcdStates
-  lcdLine       <- newStateCycle lcdLines
-  lcdEnabledRef <- newIORef True
+initGraphics :: VRAM -> Port Word8 -> IO GraphicsState
+initGraphics vram portIF = mdo
+  lcdState <- newStateCycle lcdStates
+  lcdLine  <- newStateCycle lcdLines
+
+  portLCDC <- newPort 0xFF 0xFF $ \lcdc lcdc' -> do
+    let lcdEnabled  = isFlagSet flagLCDEnable lcdc
+    let lcdEnabled' = isFlagSet flagLCDEnable lcdc'
+    when (lcdEnabled' && not lcdEnabled) $ do
+      resetStateCycle lcdLine  lcdLines
+      resetStateCycle lcdState lcdStates
+      directWritePort portLY 0
+    when (not lcdEnabled' && lcdEnabled) $ directWritePort portLY 0
+    pure lcdc
+  portSTAT <- newPort 0xFF 0x78 (const . pure)
+  portSCY  <- newPort 0xFF 0xFF (const . pure)
+  portSCX  <- newPort 0xFF 0xFF (const . pure)
+  portLY   <- newPort 0xFF 0x00 (const . pure)
+  portLYC  <- newPort 0xFF 0xFF $ \_ lyc -> do
+    ly <- readPort portLY
+    checkLY portIF portSTAT ly lyc
+    pure lyc
+  portBGP  <- newPort 0xFF 0xFF (const . pure)
+  portOBP0 <- newPort 0xFF 0xFF (const . pure)
+  portOBP1 <- newPort 0xFF 0xFF (const . pure)
+  portWY   <- newPort 0xFF 0xFF (const . pure)
+  portWX   <- newPort 0xFF 0xFF (const . pure)
+  portBCPS <- newPort 0xFF 0xBF $ \_ bcps -> do
+    directWritePort portBCPD =<< readPalette vram False bcps
+    pure bcps
+  portBCPD <- newPort 0xFF 0xFF $ \_ bcpd -> do
+    bcps <- readPort portBCPS
+    writePalette vram False bcps bcpd
+    when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
+    pure bcpd
+  portOCPS <- newPort 0xFF 0xBF $ \_ ocps -> do
+    directWritePort portBCPD =<< readPalette vram False ocps
+    pure ocps
+  portOCPD <- newPort 0xFF 0xFF $ \_ ocpd -> do
+    ocps <- readPort portBCPS
+    writePalette vram False ocps ocpd
+    when (isFlagSet flagPaletteIncrement ocps) $ writePort portBCPS ((ocps .&. 0xBF) + 1)
+    pure ocpd
+  portVBK <- newPort 0xFF 0x01 $ \_ vbk -> do
+    setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
+    pure vbk
+
   pure GraphicsState { .. }
+
+graphicsPorts :: GraphicsState -> [(Word16, Port Word8)]
+graphicsPorts GraphicsState {..} =
+  [ (LCDC, portLCDC)
+  , (STAT, portSTAT)
+  , (SCY , portSCY)
+  , (SCX , portSCX)
+  , (LY  , portLY)
+  , (LYC , portLYC)
+  , (BGP , portBGP)
+  , (OBP0, portOBP0)
+  , (OBP1, portOBP1)
+  , (WY  , portWY)
+  , (WX  , portWX)
+  , (BCPS, portBCPS)
+  , (BCPD, portBCPD)
+  , (OCPS, portOCPS)
+  , (OCPD, portOCPD)
+  , (VBK , portVBK)
+  ]
 
 -- | Make a new Graphics sync object.
 newGraphicsSync :: IO GraphicsSync
@@ -78,10 +153,6 @@ newGraphicsSync = do
   hblankStart <- newEmptyMVar
   currentLine <- newEmptyMVar
   pure GraphicsSync { .. }
-
-class HasMemory env => HasGraphics env where
-  forGraphicsState :: env -> GraphicsState
-  forGraphicsSync :: env -> GraphicsSync
 
 flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
   :: Word8
@@ -111,10 +182,6 @@ maskMode = 0x03
 modifyBits :: Word8 -> Word8 -> Word8 -> Word8
 modifyBits mask value source = value .|. (source .&. complement mask)
 
--- | Set the LCD mode bits.
-setMode :: Word8 -> Mode -> Word8
-setMode v mode = modifyBits maskMode (modeBits mode) v
-
 -- | Get the bit code corresponding to the LCD mode.
 modeBits :: Mode -> Word8
 modeBits HBlank   = 0
@@ -122,86 +189,52 @@ modeBits VBlank   = 1
 modeBits ScanOAM  = 2
 modeBits ReadVRAM = 3
 
-updateLY :: HasMemory env => Word8 -> ReaderT env IO ()
-updateLY ly = do
-  writeByte LY ly
-  checkLY ly
+updateLY :: Port Word8 -> Port Word8 -> Port Word8 -> Port Word8 -> Word8 -> IO ()
+updateLY portIF portLY portLYC portSTAT ly = do
+  directWritePort portLY ly
+  lyc <- readPort portLYC
+  checkLY portIF portSTAT ly lyc
 
-checkLY :: HasMemory env => Word8 -> ReaderT env IO ()
-checkLY ly = do
-  lyc <- readByte LYC
+checkLY :: Port Word8 -> Port Word8 -> Word8 -> Word8 -> IO ()
+checkLY portIF portSTAT ly lyc = do
   let matchFlag = if lyc == ly then bit matchBit else 0
-  stat <- readByte STAT
-  writeByte STAT (modifyBits (bit matchBit) matchFlag stat)
-  when (stat `testBit` interruptCoincidence && lyc == ly) (raiseInterrupt 1)
+  stat <- readPort portSTAT
+  directWritePort portSTAT (modifyBits (bit matchBit) matchFlag stat)
+  when (stat `testBit` interruptCoincidence && lyc == ly) (raiseInterrupt portIF InterruptLCDCStat)
 
 data GraphicsBusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
 
 {-# INLINABLE graphicsStep #-}
-graphicsStep :: HasGraphics env => BusEvent -> ReaderT env IO GraphicsBusEvent
-graphicsStep (BusEvent newWrites clocks _) = do
-  GraphicsState {..} <- asks forGraphicsState
-  graphicsSync       <- asks forGraphicsSync
-
-  lcdEnabled         <- liftIO (readIORef lcdEnabledRef)
-  for_ newWrites $ \case
-    STAT -> do
-      stat    <- readByte STAT
-      lcdMode <- getStateCycle lcdState
-      writeByte STAT (0x80 .|. setMode stat lcdMode)
-    LCDC -> do
-      lcdc <- readByte LCDC
-      let lcdEnabled' = isFlagSet flagLCDEnable lcdc
-      liftIO (writeIORef lcdEnabledRef lcdEnabled')
-      when (lcdEnabled' && not lcdEnabled) $ do
-        resetStateCycle lcdLine  lcdLines
-        resetStateCycle lcdState lcdStates
-        writeByte LY 0
-      when (not lcdEnabled' && lcdEnabled) $ writeByte LY 0
-    LYC -> readByte LY >>= checkLY
-    VBK -> do
-      vbk <- readByte VBK
-      liftIO $ setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
-    BCPS -> do
-      bcps <- readByte BCPS
-      writeByte BCPD =<< liftIO (readPalette vram False bcps)
-    BCPD -> do
-      bcps <- readByte BCPS
-      bcpd <- readByte BCPD
-      liftIO $ writePalette vram False bcps bcpd
-      when (isFlagSet flagPaletteIncrement bcps) $ writeByte BCPS ((bcps .&. 0xBF) + 1)
-    OCPS -> do
-      ocps <- readByte OCPS
-      writeByte OCPD =<< liftIO (readPalette vram True ocps)
-    OCPD -> do
-      ocps <- readByte OCPS
-      ocpd <- readByte OCPD
-      liftIO $ writePalette vram True ocps ocpd
-      when (isFlagSet flagPaletteIncrement ocps) $ writeByte OCPS ((ocps .&. 0xBF) + 1)
-    _ -> pure ()
-
+graphicsStep :: GraphicsState -> GraphicsSync -> Int -> IO GraphicsBusEvent
+graphicsStep GraphicsState {..} graphicsSync clockAdvance = do
+  lcdc <- readPort portLCDC
+  let lcdEnabled = isFlagSet flagLCDEnable lcdc
   if not lcdEnabled
     then pure NoGraphicsEvent
     else do
-      line'      <- getUpdateResult <$> updateStateCycle lcdLine clocks updateLY
-      modeUpdate <- updateStateCycle lcdState clocks $ \mode' -> do
+      line' <- getUpdateResult
+        <$> updateStateCycle lcdLine clockAdvance (updateLY portIF portLY portLYC portSTAT)
+      modeUpdate <- updateStateCycle lcdState clockAdvance $ \mode' -> do
         -- Update STAT register
-        stat <- readByte STAT
-        writeByte STAT (modifyBits maskMode (modeBits mode') stat)
+        stat <- readPort portSTAT
+        directWritePort portSTAT (modifyBits maskMode (modeBits mode') stat)
 
         -- If we're entering ReadVRAM mode, then signal the graphics output.
-        when (mode' == ReadVRAM) $ liftIO $ do
+        when (mode' == ReadVRAM) $ do
           setVRAMAccessible vram False
           putMVar (currentLine graphicsSync) line'
 
         -- Raise interrupts
-        when (stat `testBit` interruptHBlank && mode' == HBlank) (raiseInterrupt 1)
-        when (stat `testBit` interruptVBlank && mode' == VBlank) (raiseInterrupt 1)
-        when (stat `testBit` interruptOAM && mode' == ScanOAM) (raiseInterrupt 1)
-        when (mode' == VBlank) (raiseInterrupt 0)
+        when (stat `testBit` interruptHBlank && mode' == HBlank)
+             (raiseInterrupt portIF InterruptLCDCStat)
+        when (stat `testBit` interruptVBlank && mode' == VBlank)
+             (raiseInterrupt portIF InterruptLCDCStat)
+        when (stat `testBit` interruptOAM && mode' == ScanOAM)
+             (raiseInterrupt portIF InterruptLCDCStat)
+        when (mode' == VBlank) (raiseInterrupt portIF InterruptVBlank)
 
         -- If we're entering HBlank mode, then sync
-        when (mode' == HBlank) $ liftIO $ do
+        when (mode' == HBlank) $ do
           takeMVar (hblankStart graphicsSync)
           setVRAMAccessible vram True
 
@@ -210,24 +243,23 @@ graphicsStep (BusEvent newWrites clocks _) = do
         _                   -> NoGraphicsEvent
 
 -- | Prepare a status report on the graphics registers.
-graphicsRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
-graphicsRegisters = do
-  lcdc <- readByte LCDC
-  stat <- readByte STAT
+graphicsRegisters :: GraphicsState -> IO [RegisterInfo]
+graphicsRegisters GraphicsState {..} = do
+  lcdc <- readPort portLCDC
+  stat <- readPort portSTAT
   sequence
     [ pure (RegisterInfo LCDC "LCDC" lcdc (decodeLCDC lcdc))
     , pure (RegisterInfo STAT "STAT" stat (decodeSTAT stat))
-    , RegisterInfo SCY "SCY" <$> readByte SCY <*> pure []
-    , RegisterInfo SCX "SCX" <$> readByte SCX <*> pure []
-    , RegisterInfo LY "LY" <$> readByte LY <*> pure []
-    , RegisterInfo LYC "LYC" <$> readByte LYC <*> pure []
-    , RegisterInfo DMA "DMA" <$> readByte DMA <*> pure []
-    , RegisterInfo BGP "BGP" <$> readByte BGP <*> pure []
-    , RegisterInfo OBP0 "OBP0" <$> readByte OBP0 <*> pure []
-    , RegisterInfo OBP1 "OBP1" <$> readByte OBP1 <*> pure []
-    , RegisterInfo WY "WY" <$> readByte WY <*> pure []
-    , RegisterInfo WX "WX" <$> readByte WX <*> pure []
-    , RegisterInfo VBK "VBK" <$> readByte VBK <*> pure []
+    , RegisterInfo SCY "SCY" <$> readPort portSCY <*> pure []
+    , RegisterInfo SCX "SCX" <$> readPort portSCX <*> pure []
+    , RegisterInfo LY "LY" <$> readPort portLY <*> pure []
+    , RegisterInfo LYC "LYC" <$> readPort portLYC <*> pure []
+    , RegisterInfo BGP "BGP" <$> readPort portBGP <*> pure []
+    , RegisterInfo OBP0 "OBP0" <$> readPort portOBP0 <*> pure []
+    , RegisterInfo OBP1 "OBP1" <$> readPort portOBP1 <*> pure []
+    , RegisterInfo WY "WY" <$> readPort portWY <*> pure []
+    , RegisterInfo WX "WX" <$> readPort portWX <*> pure []
+    , RegisterInfo VBK "VBK" <$> readPort portVBK <*> pure []
     ]
  where
   decodeLCDC lcdc =
@@ -240,7 +272,7 @@ graphicsRegisters = do
     , ("Background Code Area", if 0 == lcdc .&. flagBackgroundTileMap then "9800" else "9C00")
     , ("OBJ Height"          , if 0 == lcdc .&. flagOBJSize then "8" else "16")
     , ("OBJ Enable"          , show $ isFlagSet flagOBJEnable lcdc)
-    , ("Background Enable"   , show $ isFlagSet flagBackgroundEnable lcdc) 
+    , ("Background Enable"   , show $ isFlagSet flagBackgroundEnable lcdc)
     ]
   decodeSTAT stat =
     let mode = case stat .&. 0x03 of

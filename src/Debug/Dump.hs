@@ -137,11 +137,13 @@ hexDump base lineData =
 toPrintable :: Char -> Char
 toPrintable c = if c <= ' ' || c >= '\DEL' then '.' else c
 
-dumpGraphics :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
-dumpGraphics register = dumpRegisterInfo . filterRegister register =<< lift graphicsRegisters
+dumpGraphics :: GraphicsState -> Maybe String -> InputT (ReaderT env IO) ()
+dumpGraphics graphics register =
+  dumpRegisterInfo . filterRegister register =<< liftIO (graphicsRegisters graphics)
 
-dumpTimer :: HasTimer env => Maybe String -> InputT (ReaderT env IO) ()
-dumpTimer register = dumpRegisterInfo . filterRegister register =<< lift timerRegisters
+dumpTimer :: TimerState -> Maybe String -> InputT (ReaderT env IO) ()
+dumpTimer timer register =
+  dumpRegisterInfo . filterRegister register =<< liftIO (timerRegisters timer)
 
 dumpInternal :: HasMemory env => Maybe String -> InputT (ReaderT env IO) ()
 dumpInternal register = dumpRegisterInfo . filterRegister register =<< lift internalRegisters

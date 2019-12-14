@@ -12,20 +12,20 @@ module GBC.Emulator
   )
 where
 
-import           Common
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
-import           Data.Bits
 import           Data.Foldable
 import           Data.IORef
 import           Data.Word
 import           GBC.Audio
 import           GBC.CPU
+import           GBC.DMA
 import           GBC.Graphics
 import           GBC.Graphics.VRAM
 import           GBC.Keypad
 import           GBC.Memory
 import           GBC.Mode
+import           GBC.Primitive
 import           GBC.ROM
 import           GBC.Registers
 import           GBC.Timer
@@ -34,14 +34,12 @@ import qualified SDL
 
 data EmulatorState = EmulatorState {
     lastEventPollAt :: !(IORef Word32)
-  , hdmaSource      :: !(IORef Word16)
-  , hdmaDestination :: !(IORef Word16)
-  , hdmaActive      :: !(IORef Bool)
   , breakFlag       :: !(IORef Bool)
   , mode            :: !EmulatorMode
   , memory          :: !Memory
   , vram            :: !VRAM
   , cpu             :: !CPUState
+  , dmaState        :: !DMAState
   , graphicsState   :: !GraphicsState
   , graphicsSync    :: !GraphicsSync
   , keypadState     :: !KeypadState
@@ -57,24 +55,6 @@ instance HasCPU EmulatorState where
   {-# INLINE forCPUState #-}
   forCPUState = cpu
 
-instance HasKeypad EmulatorState where
-  {-# INLINE forKeypadState #-}
-  forKeypadState = keypadState
-
-instance HasTimer EmulatorState where
-  {-# INLINE forTimerState #-}
-  forTimerState = timerState
-
-instance HasAudio EmulatorState where
-  {-# INLINE forAudioState #-}
-  forAudioState = audioState
-
-instance HasGraphics EmulatorState where
-  {-# INLINE forGraphicsState #-}
-  forGraphicsState = graphicsState
-  {-# INLINE forGraphicsSync #-}
-  forGraphicsSync = graphicsSync
-
 -- | Number of milliseconds to wait between polling for events.
 pollDelay :: Word32
 pollDelay = 10
@@ -88,17 +68,30 @@ initEmulatorState rom = do
         CGBIncompatible -> DMG
   lastEventPollAt <- newIORef 0
   breakFlag       <- newIORef False
-  hdmaSource      <- newIORef 0
-  hdmaDestination <- newIORef 0
-  hdmaActive      <- newIORef False
   vram            <- initVRAM mode
-  memory          <- initMemory rom vram mode
-  cpu             <- initCPU mode
+
+  portIF          <- newPort 0x00 0x1F (const . pure)
+  portIE          <- newPort 0x00 0xFF (const . pure)
+
+  cpu             <- initCPU portIF portIE mode
+  dmaState        <- initDMA
   graphicsSync    <- newGraphicsSync
-  graphicsState   <- initGraphics vram
-  keypadState     <- initKeypadState
-  timerState      <- initTimerState
+  graphicsState   <- initGraphics vram portIF
+  keypadState     <- initKeypadState portIF
+  timerState      <- initTimerState portIF
   audioState      <- initAudioState
+
+  let allPorts =
+        cpuPorts cpu
+          ++ dmaPorts dmaState
+          ++ graphicsPorts graphicsState
+          ++ keypadPorts keypadState
+          ++ timerPorts timerState
+          ++ audioPorts audioState
+          ++ [(IF, portIF), (IE, portIE)]
+
+  memory <- initMemory rom vram allPorts mode
+
   pure EmulatorState { .. }
 
 -- | Check if the debug break flag is set.
@@ -112,79 +105,29 @@ clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< ask
 -- | Close all windows.
 killWindows :: ReaderT EmulatorState IO ()
 killWindows = do
-  sync <- asks forGraphicsSync
+  sync <- asks graphicsSync
   liftIO (putMVar (currentLine sync) 255)
 
 -- | Poll and dispatch events.
 handleEvents :: ReaderT EmulatorState IO ()
 handleEvents = do
-  events <- SDL.pollEvents
-  keypadHandleUserEvents events
+  events      <- SDL.pollEvents
+  keypadState <- asks keypadState
+  liftIO $ keypadHandleUserEvents keypadState events
   for_ (SDL.eventPayload <$> events) $ \case
     (SDL.WindowClosedEvent _) -> killWindows
     SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _)) ->
       liftIO . flip writeIORef True . breakFlag =<< ask
     _ -> pure ()
 
--- | Perform a DMA transfer.
-doDMA :: HasMemory env => BusEvent -> ReaderT env IO ()
-doDMA busEvent = when (DMA `elem` writeAddress busEvent) $ do
-  address <- fromIntegral <$> readByte DMA
-  dmaToOAM (address `shiftL` 8)
-
-doGeneralHDMA :: Word8 -> ReaderT EmulatorState IO ()
-doGeneralHDMA hdma5 = do
-  hdma1 <- readByte HDMA1
-  hdma2 <- readByte HDMA2
-  hdma3 <- readByte HDMA3
-  hdma4 <- readByte HDMA4
-  writeByte HDMA5 0xFF
-  go (makeHDMASource hdma1 hdma2) (makeHDMADestination hdma3 hdma4) (hdma5 + 1)
- where
-  go _       _            0      = pure ()
-  go !source !destination !count = do
-    copy16 source destination
-    go (source + 16) (destination + 16) (count - 1)
-
-initHBlankHDMA :: Word8 -> ReaderT EmulatorState IO ()
-initHBlankHDMA hdma5 = do
+pollEvents :: ReaderT EmulatorState IO ()
+pollEvents = do
   EmulatorState {..} <- ask
-  hdma1              <- readByte HDMA1
-  hdma2              <- readByte HDMA2
-  hdma3              <- readByte HDMA3
-  hdma4              <- readByte HDMA4
-  writeByte HDMA5 (hdma5 .&. 0x7F)
-  liftIO $ do
-    writeIORef hdmaSource $! makeHDMASource hdma1 hdma2
-    writeIORef hdmaDestination $! makeHDMADestination hdma3 hdma4
-    writeIORef hdmaActive True
-
-doHBlankHDMA :: ReaderT EmulatorState IO Int
-doHBlankHDMA = do
-  EmulatorState {..} <- ask
-  isActive           <- liftIO $ readIORef hdmaActive
-  if not isActive
-    then pure 0
-    else do
-      source      <- liftIO $ readIORef hdmaSource
-      destination <- liftIO $ readIORef hdmaDestination
-      liftIO $ do
-        writeIORef hdmaSource $! source + 16
-        writeIORef hdmaDestination $! destination + 16
-      copy16 source destination
-
-      hdma5 <- readByte HDMA5
-      writeByte HDMA5 (hdma5 - 1)
-      when (hdma5 == 0) $ liftIO $ writeIORef hdmaActive False
-
-      pure 8
-
-makeHDMASource :: Word8 -> Word8 -> Word16
-makeHDMASource high low = (fromIntegral high `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0)
-
-makeHDMADestination :: Word8 -> Word8 -> Word16
-makeHDMADestination high low =
-  0x8000 + (((fromIntegral high .&. 0x1F) `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0))
+  now                <- SDL.ticks
+  lastPoll           <- liftIO $ readIORef lastEventPollAt
+  when (now - lastPoll > pollDelay) $ do
+    handleEvents
+    liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
 -- | Execute a single step of the emulation.
 step :: ReaderT EmulatorState IO BusEvent
@@ -192,43 +135,28 @@ step = do
   EmulatorState {..} <- ask
   busEvent           <- cpuStep
 
-  for_ (writeAddress busEvent) $ \case
-    HDMA5 -> do
-      hdma5 <- readByte HDMA5
-      if hdma5 .&. 0x80 /= 0
-        then initHBlankHDMA hdma5
-        else do
-          isActive <- liftIO $ readIORef hdmaActive
-          if isActive
-            then do
-              liftIO $ writeIORef hdmaActive False
-              writeByte HDMA5 (hdma5 .|. 0x80)
-            else doGeneralHDMA hdma5
+  pollEvents
 
-    _ -> pure ()
+  doubleSpeed <- getIsDoubleSpeed
+  let cpuClocks = if doubleSpeed then clockAdvance busEvent `div` 2 else clockAdvance busEvent
+  graphicsEvent   <- updateHardware cpuClocks doubleSpeed
 
-  keypadHandleBusEvent busEvent
-  doDMA busEvent
+  dmaClockAdvance <- doPendingDMA dmaState
+  if dmaClockAdvance > 0
+    then do
+      void $ updateHardware dmaClockAdvance doubleSpeed
+      pure (busEvent { clockAdvance = cpuClocks + dmaClockAdvance })
+    else case graphicsEvent of
+      NoGraphicsEvent -> pure busEvent
+      HBlankEvent     -> do
+        hdmaClockAdvance <- doHBlankHDMA dmaState
+        when (hdmaClockAdvance > 0) $ void $ updateHardware hdmaClockAdvance doubleSpeed
+        pure (busEvent { clockAdvance = cpuClocks + hdmaClockAdvance })
 
-  now      <- SDL.ticks
-  lastPoll <- liftIO $ readIORef lastEventPollAt
-  when (now - lastPoll > pollDelay) $ do
-    handleEvents
-    liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
-
-  key1 <- readByte KEY1
-  let cpuClocks = clockAdvance busEvent
-  updateTimer (if isFlagSet flagDoubleSpeed key1 then cpuClocks * 2 else cpuClocks)
-  audioStep busEvent
-  graphicsEvent <- graphicsStep busEvent
-
-  case graphicsEvent of
-    NoGraphicsEvent -> pure busEvent
-    HBlankEvent     -> do
-      dmaClockAdvance <- doHBlankHDMA
-      when (dmaClockAdvance > 0) $ do
-        updateTimer dmaClockAdvance
-        let busEvent2 = BusEvent [] dmaClockAdvance ModeNormal
-        audioStep busEvent2
-        void $ graphicsStep busEvent2
-      pure (busEvent { clockAdvance = clockAdvance busEvent + dmaClockAdvance })
+updateHardware :: Int -> Bool -> ReaderT EmulatorState IO GraphicsBusEvent
+updateHardware clocks doubleSpeed = do
+  EmulatorState {..} <- ask
+  liftIO $ do
+    updateTimer timerState (if doubleSpeed then clocks * 2 else clocks)
+    audioStep audioState clocks
+    graphicsStep graphicsState graphicsSync clocks

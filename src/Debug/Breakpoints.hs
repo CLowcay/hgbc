@@ -35,9 +35,11 @@ shouldBreakOnExecute table = do
   pc <- readPC
   liftIO $ (== Just True) <$> lookup table pc
 
+-- TODO: fix watch points.
 shouldBreakOnWrite :: BreakpointTable -> BusEvent -> ReaderT env IO Bool
-shouldBreakOnWrite table (BusEvent writes _ _) =
-  liftIO $ or . catMaybes <$> traverse (lookup table) writes
+shouldBreakOnWrite _ _ = pure False
+--shouldBreakOnWrite table (BusEvent writes _ _) =
+--  liftIO $ or . catMaybes <$> traverse (lookup table) writes
 
 clearBreakpoint :: BreakpointTable -> Word16 -> IO ()
 clearBreakpoint = delete

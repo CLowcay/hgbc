@@ -24,6 +24,15 @@ module GBC.Primitive
   , newLinearFeedbackShiftRegister
   , initLinearFeedbackShiftRegister
   , nextBit
+  , Port
+  , newPort
+  , newPortWithReadMask
+  , readPort
+  , directReadPort
+  , writePort
+  , directWritePort
+  , setPortBits
+  , clearPortBits
   )
 where
 
@@ -76,7 +85,7 @@ getStateCycle (StateCycle _ states) = do
 data UpdateResult a = NoChange !a | HasChangedTo !a deriving (Eq, Ord, Show)
 
 getUpdateResult :: UpdateResult a -> a
-getUpdateResult (NoChange x) = x
+getUpdateResult (NoChange     x) = x
 getUpdateResult (HasChangedTo x) = x
 
 {-# INLINE updateStateCycle #-}
@@ -176,3 +185,76 @@ nextBit (LinearFeedbackShiftRegister ref) mask = do
         (shifted .&. complement mask) .|. (mask .&. negate (1 .&. (register `xor` shifted)))
   writeIORef ref $! register'
   pure register'
+
+-- | A port is like an IORef but with a custom handler for writes.
+data Port a = Port {
+    portValue     :: !(IORef a)
+  , portReadMask  :: !a
+  , portWriteMask :: !a
+  , portNotify    :: !(a -> a -> IO a)
+}
+
+-- | Create a new port.
+newPort
+  :: Num a
+  => a                  -- ^ Initial value.
+  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO (Port a)
+newPort value0 portWriteMask portNotify = do
+  portValue <- newIORef value0
+  let portReadMask = 0x00
+  pure Port { .. }
+
+-- | Create a new port.
+newPortWithReadMask
+  :: a                  -- ^ Initial value.
+  -> a                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
+  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO (Port a)
+newPortWithReadMask value0 portReadMask portWriteMask portNotify = do
+  portValue <- newIORef value0
+  pure Port { .. }
+
+-- | Read from the port
+{-# INLINE readPort #-}
+readPort :: Bits a => Port a -> IO a
+readPort Port {..} = do
+  value <- readIORef portValue
+  pure (value .|. portReadMask)
+
+-- | Read from the port directly skipping the read mask.
+{-# INLINE directReadPort #-}
+directReadPort :: Port a -> IO a
+directReadPort Port {..} = readIORef portValue
+
+-- | Write to the port and notify any listeners.
+{-# INLINE writePort #-}
+writePort :: Bits a => Port a -> a -> IO ()
+writePort Port {..} newValue = do
+  oldValue  <- readIORef portValue
+  newValue' <- portNotify oldValue
+                          ((oldValue .&. complement portWriteMask) .|. newValue .&. portWriteMask)
+  writeIORef portValue $! newValue'
+
+-- | Write the value of the port directly without any checks or notifications.
+{-# INLINE directWritePort #-}
+directWritePort :: Port a -> a -> IO ()
+directWritePort Port {..} = writeIORef portValue
+
+-- | Set writable bits and notify all listeners.
+{-# INLINE setPortBits #-}
+setPortBits :: Bits a => Port a -> a -> IO ()
+setPortBits Port {..} newValue = do
+  oldValue  <- readIORef portValue
+  newValue' <- portNotify oldValue (oldValue .|. (newValue .&. portWriteMask))
+  writeIORef portValue $! newValue'
+
+-- | Set writable bits and notify all listeners.
+{-# INLINE clearPortBits #-}
+clearPortBits :: Bits a => Port a -> a -> IO ()
+clearPortBits Port {..} newValue = do
+  oldValue  <- readIORef portValue
+  newValue' <- portNotify oldValue (oldValue .&. complement (newValue .&. portWriteMask))
+  writeIORef portValue $! newValue'

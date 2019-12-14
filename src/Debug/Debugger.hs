@@ -30,12 +30,9 @@ import           GBC.Audio
 import           GBC.Emulator
 import           GBC.CPU
 import           GBC.Decode
-import           GBC.Graphics
 import           GBC.ISA
-import           GBC.Keypad
 import           GBC.Memory
 import           GBC.ROM
-import           GBC.Timer
 import           Numeric
 import           System.Console.Haskeline
 import qualified SDL.Time                      as SDL
@@ -97,24 +94,6 @@ instance HasMemory DebugState where
 instance HasCPU DebugState where
   {-# INLINE forCPUState #-}
   forCPUState = forCPUState . emulator
-
-instance HasKeypad DebugState where
-  {-# INLINE forKeypadState #-}
-  forKeypadState = forKeypadState . emulator
-
-instance HasTimer DebugState where
-  {-# INLINE forTimerState #-}
-  forTimerState = forTimerState . emulator
-
-instance HasAudio DebugState where
-  {-# INLINE forAudioState #-}
-  forAudioState = forAudioState . emulator
-
-instance HasGraphics DebugState where
-  {-# INLINE forGraphicsState #-}
-  forGraphicsState = forGraphicsState . emulator
-  {-# INLINE forGraphicsSync #-}
-  forGraphicsSync = forGraphicsSync . emulator
 
 -- | Initialise the debugger.
 initDebug :: ROM -> EmulatorState -> IO DebugState
@@ -271,9 +250,11 @@ doCommand StepOut = do
     unless wasBreakpoint (void (withReaderT emulator step))
   disassembleAtPC
 doCommand Run = do
-  postConditions <- lift (sequence [breakOnBreakpoints])
-  bracket (lift enableAudioOut) (const $ lift disableAudioOut) $ const $ reportingClockStats
-    (lift (doRun [] postConditions))
+  postConditions     <- lift (sequence [breakOnBreakpoints])
+  EmulatorState {..} <- lift (asks emulator)
+  bracket (liftIO $ enableAudioOut audioState) (const $ liftIO $ disableAudioOut audioState)
+    $ const
+    $ reportingClockStats (lift (doRun [] postConditions))
   disassembleAtPC
 doCommand (RunTo breakAddr) = withAddress breakAddr $ \addr -> do
   postConditions <- lift (sequence [breakOnBreakpoints, pure (breakOnPC addr)])
@@ -288,10 +269,14 @@ doCommand (Peek16 addr) = withAddress addr $ \actualAddr -> do
   l <- lift (readByte actualAddr)
   h <- lift (readByte (actualAddr + 1))
   outputStrLn (formatHex ((fromIntegral h `shiftL` 8) .|. fromIntegral l :: Word16))
-doCommand (PokeR8  reg value ) = lift (writeR8 reg value)
-doCommand (PokeR16 reg value ) = lift (writeR16 reg value)
-doCommand (ShowGraphics  r   ) = dumpGraphics r
-doCommand (ShowTimer     r   ) = dumpTimer r
+doCommand (PokeR8  reg value) = lift (writeR8 reg value)
+doCommand (PokeR16 reg value) = lift (writeR16 reg value)
+doCommand (ShowGraphics r   ) = do
+  graphics <- lift (asks (graphicsState . emulator))
+  dumpGraphics graphics r
+doCommand (ShowTimer r) = do
+  timer <- lift (asks (timerState . emulator))
+  dumpTimer timer r
 doCommand (ShowInternal  r   ) = dumpInternal r
 doCommand (ShowMBC       r   ) = dumpMBC r
 doCommand (AddBreakpoint addr) = withAddress addr $ \breakAddr -> do

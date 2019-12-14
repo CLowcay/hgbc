@@ -2,33 +2,45 @@
 module GBC.Timer
   ( TimerState
   , initTimerState
-  , HasTimer(..)
+  , timerPorts
   , timerRegisters
   , updateTimer
   )
 where
 
-import           Data.IORef
-import           GBC.Memory
-import           GBC.CPU
-import           GBC.Registers
 import           Common
 import           Control.Monad.Reader
-import           Data.Word
 import           Data.Bits
+import           Data.IORef
+import           Data.Word
+import           GBC.Interrupts
+import           GBC.Primitive
+import           GBC.Registers
 
 -- | Number of clocks until the next timer tick
 data TimerState = TimerState {
     clockCounter :: IORef Word16
   , timerCounter :: IORef Word16
+  , portDIV      :: !(Port Word8)
+  , portTIMA     :: !(Port Word8)
+  , portTMA      :: !(Port Word8)
+  , portTAC      :: !(Port Word8)
+  , portIF       :: !(Port Word8)
 }
 
 -- | Create the initial timer state.
-initTimerState :: IO TimerState
-initTimerState = TimerState <$> newIORef 0 <*> newIORef 0
+initTimerState :: Port Word8 -> IO TimerState
+initTimerState portIF = do
+  clockCounter <- newIORef 0
+  timerCounter <- newIORef 0
+  portDIV      <- newPort 0x00 0xFF (const . pure)
+  portTIMA     <- newPort 0x00 0xFF (const . pure)
+  portTMA      <- newPort 0x00 0xFF (const . pure)
+  portTAC      <- newPort 0x00 0xFF (const . pure)
+  pure TimerState { .. }
 
-class HasMemory env => HasTimer env where
-  forTimerState :: env -> TimerState
+timerPorts :: TimerState -> [(Word16, Port Word8)]
+timerPorts TimerState {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
 
 -- | Select the relevant bits from the timer state given the low 2 bits of the
 -- TAC register.
@@ -44,12 +56,12 @@ timerStarted :: Word8 -> Bool
 timerStarted = (`testBit` 2)
 
 -- | Prepare a status report on the timer registers.
-timerRegisters :: HasTimer env => ReaderT env IO [RegisterInfo]
-timerRegisters = do
-  tac <- readByte TAC
+timerRegisters :: TimerState -> IO [RegisterInfo]
+timerRegisters TimerState {..} = do
+  tac <- readPort portTAC
   sequence
-    [ RegisterInfo DIV "DIV" <$> readByte DIV <*> pure []
-    , RegisterInfo TIMA "TIMA" <$> readByte TIMA <*> pure []
+    [ RegisterInfo DIV "DIV" <$> readPort portDIV <*> pure []
+    , RegisterInfo TIMA "TIMA" <$> readPort portTIMA <*> pure []
     , pure (RegisterInfo TAC "TAC" tac (decodeTAC tac))
     ]
  where
@@ -60,35 +72,35 @@ timerRegisters = do
 
 -- | Update the timer state.
 {-# INLINABLE updateTimer #-}
-updateTimer :: HasTimer env => Int -> ReaderT env IO ()
-updateTimer advance = do
+updateTimer :: TimerState -> Int -> IO ()
+updateTimer TimerState {..} advance = do
   -- Update the internal clock count
-  TimerState {..} <- asks forTimerState
-  clocks          <- liftIO (readIORef clockCounter)
+  clocks <- readIORef clockCounter
   let clocks' = clocks + fromIntegral advance
-  liftIO (writeIORef clockCounter clocks')
+  writeIORef clockCounter clocks'
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
-    $ writeByte DIV (fromIntegral (clocks' `unsafeShiftR` 8) :: Word8)
+    $ directWritePort portDIV (fromIntegral (clocks' `unsafeShiftR` 8) :: Word8)
 
   -- Update the TIMA register
-  tac <- readByte TAC
+  tac <- directReadPort portTAC
   when (timerStarted tac) $ do
-    timer <- liftIO (readIORef timerCounter)
+    timer <- readIORef timerCounter
     let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus (tac .&. 3)
-    liftIO (writeIORef timerCounter timer')
+    writeIORef timerCounter timer'
 
     -- Update required
     when (timerAdvance > 0) $ do
-      tima <- readByte TIMA
+      tima <- directReadPort portTIMA
       let tima' = fromIntegral tima + timerAdvance
       if tima' < 0xFF
-        then writeByte TIMA (fromIntegral tima')
+        then directWritePort portTIMA (fromIntegral tima')
         else do
           -- Handle overflow by loading from TMA
-          raiseInterrupt 2
-          tma <- readByte TMA
+          raiseInterrupt portIF InterruptTimerOverflow
+          tma <- directReadPort portTMA
           if tma == 0xFF
-            then writeByte TIMA 0xFF
-            else writeByte TIMA (tma + ((fromIntegral timerAdvance - 1) `mod` (0xFF - tma)))
+            then directWritePort portTIMA 0xFF
+            else directWritePort portTIMA
+                                 (tma + ((fromIntegral timerAdvance - 1) `mod` (0xFF - tma)))

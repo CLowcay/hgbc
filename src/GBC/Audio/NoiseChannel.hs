@@ -1,4 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecursiveDo #-}
+
 module GBC.Audio.NoiseChannel where
 
 import           Common
@@ -9,99 +11,95 @@ import           Data.Bits
 import           GBC.Audio.Common
 import           GBC.Audio.Envelope
 import           GBC.Audio.Length
-import           GBC.Memory
 import           GBC.Primitive
-import           GBC.Registers
 
 data NoiseChannel = NoiseChannel {
     enable           :: !(IORef Bool)
   , dacEnable        :: !(IORef Bool)
   , output           :: !(IORef Int)
+  , port1            :: !(Port Word8)
+  , port2            :: !(Port Word8)
+  , port3            :: !(Port Word8)
+  , port4            :: !(Port Word8)
+  , port52           :: !(Port Word8)
   , lengthCounter    :: !Length
   , envelope         :: !Envelope
   , frequencyCounter :: !Counter
   , lfsr             :: !(LinearFeedbackShiftRegister Word16)
 }
 
-newNoiseChannel :: IO NoiseChannel
-newNoiseChannel = do
-  enable           <- newIORef False
-  dacEnable        <- newIORef True
-  output           <- newIORef 0
+newNoiseChannel :: Port Word8 -> IO NoiseChannel
+newNoiseChannel port52 = mdo
+  enable    <- newIORef False
+  dacEnable <- newIORef True
+  output    <- newIORef 0
+
+  port1     <- newPortWithReadMask 0xFF 0xFF 0x3F $ \_ register1 -> do
+    register4 <- readPort port4
+    when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
+    pure register4
+
+  port2 <- newPortWithReadMask 0xFF 0x00 0xFF $ \_ register2 -> do
+    let isDacEnabled = register2 .&. 0xF8 /= 0
+    unless isDacEnabled $ disableIO port52 output enable
+    writeIORef dacEnable isDacEnabled
+    pure register2
+
+  port3 <- newPortWithReadMask 0xFF 0x00 0xFF $ \_ register3 -> do
+    reloadCounter frequencyCounter (timerPeriod register3)
+    pure register3
+
+  port4 <- newPortWithReadMask 0xFF 0xBF 0xC0 $ \_ register4 -> do
+    when (isFlagSet flagTrigger register4) $ do
+      register2    <- readPort port2
+      register3    <- readPort port3
+      isDacEnabled <- readIORef dacEnable
+      writeIORef enable isDacEnabled
+      updateStatus port52 flagChannel4Enable isDacEnabled
+      initLength lengthCounter
+      initEnvelope envelope register2
+      initLinearFeedbackShiftRegister 0xFFFF lfsr
+      reloadCounter frequencyCounter (timerPeriod register3)
+    pure register4
+
   lengthCounter    <- newLength 0x3F
   envelope         <- newEnvelope
   frequencyCounter <- newCounter
   lfsr             <- newLinearFeedbackShiftRegister
   pure NoiseChannel { .. }
 
-disableIO :: NoiseChannel -> IO ()
-disableIO NoiseChannel {..} = do
+disableIO :: Port Word8 -> IORef Int -> IORef Bool -> IO ()
+disableIO port52 output enable = do
   writeIORef output 0
   writeIORef enable False
+  updateStatus port52 flagChannel4Enable False
 
 instance Channel NoiseChannel where
-  getOutput NoiseChannel {..} = liftIO $ readIORef output
+  getOutput NoiseChannel {..} = readIORef output
+  disable NoiseChannel {..} = disableIO port52 output enable
+  getStatus NoiseChannel {..} = readIORef enable
+  getPorts NoiseChannel {..} = [(1, port1), (2, port2), (3, port3), (4, port4)]
 
-  disable = liftIO . disableIO
-
-  getStatus NoiseChannel {..} = liftIO $ readIORef enable
-
-  trigger NoiseChannel {..} = do
-    register2 <- readByte NR42
-    liftIO $ do
-      isDacEnabled <- readIORef dacEnable
-      writeIORef enable isDacEnabled
-      initLength lengthCounter
-      initEnvelope envelope register2
-      initLinearFeedbackShiftRegister 0xFFFF lfsr
-    reloadCounter frequencyCounter =<< getTimerPeriod
-
-  frameSequencerClock channel@NoiseChannel {..} FrameSequencerOutput {..} = do
-    register4 <- readByte NR44
-    liftIO $ do
-      when (lengthClock && isFlagSet flagLength register4)
-        $ clockLength lengthCounter (disableIO channel)
-      when envelopeClock $ clockEnvelope envelope
+  frameSequencerClock NoiseChannel {..} FrameSequencerOutput {..} = do
+    register4 <- readPort port4
+    when (lengthClock && isFlagSet flagLength register4)
+      $ clockLength lengthCounter (disableIO port52 output enable)
+    when envelopeClock $ clockEnvelope envelope
 
   masterClock NoiseChannel {..} clockAdvance = do
-    isEnabled <- liftIO $ readIORef enable
+    isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      width <- getWidthMask
-      liftIO $ do
-        registerOut <- nextBit lfsr width
-        sample      <- envelopeVolume envelope
-        writeIORef output $! (if registerOut .&. 1 == 0 then sample else 0) - 8
-      getTimerPeriod
+      register3   <- readPort port3
+      registerOut <- nextBit lfsr (widthMask register3)
+      sample      <- envelopeVolume envelope
+      writeIORef output $! (if registerOut .&. 1 == 0 then sample else 0) - 8
+      pure (timerPeriod register3)
 
-  writeX0 _ = pure ()
+widthMask :: Word8 -> Word16
+widthMask register3 = if register3 `testBit` 3 then 0x0040 else 0x4000
 
-  writeX1 NoiseChannel {..} = do
-    register4 <- readByte NR44
-    when (isFlagSet flagLength register4) $ do
-      register1 <- readByte NR41
-      liftIO $ reloadLength lengthCounter register1
-
-  writeX2 channel@NoiseChannel {..} = do
-    register2 <- readByte NR42
-    let isDacEnabled = register2 .&. 0xF8 /= 0
-    unless isDacEnabled $ disable channel
-    liftIO $ writeIORef dacEnable isDacEnabled
-
-  writeX3 NoiseChannel {..} = reloadCounter frequencyCounter =<< getTimerPeriod
-
-  writeX4 channel@NoiseChannel {..} = do
-    register4 <- readByte NR44
-    when (isFlagSet flagTrigger register4) $ trigger channel
-
-getWidthMask :: HasMemory env => ReaderT env IO Word16
-getWidthMask = do
-  register3 <- readByte NR43
-  pure (if register3 `testBit` 3 then 0x0040 else 0x4000)
-
-getTimerPeriod :: HasMemory env => ReaderT env IO Int
-getTimerPeriod = do
-  register3 <- readByte NR43
-  pure (timerPeriod (fromIntegral register3 `unsafeShiftR` 4) (fromIntegral register3 .&. 0x07))
-
-timerPeriod :: Int -> Int -> Int
-timerPeriod shiftClock ratio = 32 `max` (4 * (ratio + 1) * (1 `unsafeShiftL` (shiftClock + 1)))
+timerPeriod :: Word8 -> Int
+timerPeriod register3 =
+  let shiftClock = fromIntegral register3 `unsafeShiftR` 4
+      ratio      = fromIntegral register3 .&. 0x07
+  in  32 `max` (4 * (ratio + 1) * (1 `unsafeShiftL` (shiftClock + 1)))
