@@ -149,7 +149,7 @@ class HasMemory env => HasCPU env where
 initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> IO CPUState
 initCPU portIF portIE cpuType = do
   registers   <- mallocForeignPtr
-  portKEY1    <- newPort 0x00 0x01 (const . pure)
+  portKEY1    <- newPort 0x00 0x01 alwaysUpdate
   cpuMode     <- newIORef ModeNormal
   pure CPUState { .. }
 

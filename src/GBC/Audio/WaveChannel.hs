@@ -71,7 +71,7 @@ newWaveChannel port52 = mdo
       updateStatus port52 flagChannel3Enable enabled
     pure register4
 
-  wavePort <- newPort 0x00 0x00 (const . pure)
+  wavePort <- newPort 0x00 0x00 alwaysUpdate
   let portWaveTable = V.replicate 16 wavePort
 
   frequencyCounter <- newCounter

@@ -67,10 +67,10 @@ initDMA = mdo
     writeIORef pendingDMA $! Pending dma
     pure dma
 
-  portHDMA1 <- newPort 0x00 0xFF (const . pure)
-  portHDMA2 <- newPort 0x00 0xF0 (const . pure)
-  portHDMA3 <- newPort 0x00 0x1F (const . pure)
-  portHDMA4 <- newPort 0x00 0xF0 (const . pure)
+  portHDMA1 <- newPort 0x00 0xFF alwaysUpdate
+  portHDMA2 <- newPort 0x00 0xF0 alwaysUpdate
+  portHDMA3 <- newPort 0x00 0x1F alwaysUpdate
+  portHDMA4 <- newPort 0x00 0xF0 alwaysUpdate
   portHDMA5 <- newPort 0x00 0xFF $ \_ hdma5 -> if hdma5 .&. 0x80 /= 0
     then do
       loadHDMATargets

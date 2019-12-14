@@ -70,8 +70,8 @@ initEmulatorState rom = do
   breakFlag       <- newIORef False
   vram            <- initVRAM mode
 
-  portIF          <- newPort 0x00 0x1F (const . pure)
-  portIE          <- newPort 0x00 0xFF (const . pure)
+  portIF          <- newPort 0x00 0x1F alwaysUpdate
+  portIE          <- newPort 0x00 0xFF alwaysUpdate
 
   cpu             <- initCPU portIF portIE mode
   dmaState        <- initDMA
@@ -82,15 +82,15 @@ initEmulatorState rom = do
   audioState      <- initAudioState
 
   let allPorts =
-        cpuPorts cpu
+        (IF, portIF)
+          :  cpuPorts cpu
           ++ dmaPorts dmaState
           ++ graphicsPorts graphicsState
           ++ keypadPorts keypadState
           ++ timerPorts timerState
           ++ audioPorts audioState
-          ++ [(IF, portIF), (IE, portIE)]
 
-  memory <- initMemory rom vram allPorts mode
+  memory <- initMemory rom vram allPorts portIE mode
 
   pure EmulatorState { .. }
 

@@ -72,8 +72,8 @@ initAudioState = mdo
   sampler        <- newCounter
   frameSequencer <- newStateCycle frameSequencerStates
 
-  port50         <- newPort 0xFF 0xFF (const . pure)
-  port51         <- newPort 0xFF 0xFF (const . pure)
+  port50         <- newPort 0xFF 0xFF alwaysUpdate
+  port51         <- newPort 0xFF 0xFF alwaysUpdate
   port52         <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
     let masterPower  = isFlagSet flagMasterPower register52
     let masterPower' = isFlagSet flagMasterPower register52'

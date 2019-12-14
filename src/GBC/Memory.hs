@@ -44,6 +44,7 @@ data Memory = Memory {
   , memRam         :: !(ForeignPtr Word8)
   , ramBankOffset  :: !(IORef Int)
   , ports          :: !(V.Vector (Port Word8))
+  , portIE         :: !(Port Word8)
   , memHigh        :: !(ForeignPtr Word8)
   , mode           :: !EmulatorMode
   , vram           :: !VRAM
@@ -61,11 +62,11 @@ portOffset :: Word16 -> Int
 portOffset = subtract 0xFF00 . fromIntegral
 
 -- | The initial memory state.
-initMemory :: ROM -> VRAM -> [(Word16, Port Word8)] -> EmulatorMode -> IO Memory
-initMemory romInfo@(ROM _ romHeader rom) vram rawPorts mode = do
+initMemory :: ROM -> VRAM -> [(Word16, Port Word8)] -> Port Word8 -> EmulatorMode -> IO Memory
+initMemory romInfo@(ROM _ romHeader rom) vram rawPorts portIE mode = do
   memRam        <- mallocForeignPtrArray 0x10000
   memHigh       <- mallocForeignPtrArray 0x80
-  emptyPort     <- newPort 0xFF 0x00 (const . pure)
+  emptyPort     <- newPort 0xFF 0x00 neverUpdate
 
   ramBankOffset <- newIORef 0
   svbk          <- newPort 0xF8 0x03 $ \_ newValue -> do
@@ -156,6 +157,7 @@ readByte addr = do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
+      | addr == IE -> liftIO $ readPort portIE
       | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF80)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
@@ -193,7 +195,8 @@ writeByte addr value = do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
       | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
-      | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF00) value
+      | addr == IE -> liftIO $ writePort portIE value
+      | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF80) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 

@@ -92,19 +92,19 @@ initGraphics vram portIF = mdo
       directWritePort portLY 0
     when (not lcdEnabled' && lcdEnabled) $ directWritePort portLY 0
     pure lcdc
-  portSTAT <- newPort 0xFF 0x78 (const . pure)
-  portSCY  <- newPort 0xFF 0xFF (const . pure)
-  portSCX  <- newPort 0xFF 0xFF (const . pure)
-  portLY   <- newPort 0xFF 0x00 (const . pure)
+  portSTAT <- newPort 0xFF 0x78 alwaysUpdate
+  portSCY  <- newPort 0xFF 0xFF alwaysUpdate
+  portSCX  <- newPort 0xFF 0xFF alwaysUpdate
+  portLY   <- newPort 0xFF 0x00 alwaysUpdate
   portLYC  <- newPort 0xFF 0xFF $ \_ lyc -> do
     ly <- readPort portLY
     checkLY portIF portSTAT ly lyc
     pure lyc
-  portBGP  <- newPort 0xFF 0xFF (const . pure)
-  portOBP0 <- newPort 0xFF 0xFF (const . pure)
-  portOBP1 <- newPort 0xFF 0xFF (const . pure)
-  portWY   <- newPort 0xFF 0xFF (const . pure)
-  portWX   <- newPort 0xFF 0xFF (const . pure)
+  portBGP  <- newPort 0xFF 0xFF alwaysUpdate
+  portOBP0 <- newPort 0xFF 0xFF alwaysUpdate
+  portOBP1 <- newPort 0xFF 0xFF alwaysUpdate
+  portWY   <- newPort 0xFF 0xFF alwaysUpdate
+  portWX   <- newPort 0xFF 0xFF alwaysUpdate
   portBCPS <- newPort 0xFF 0xBF $ \_ bcps -> do
     directWritePort portBCPD =<< readPalette vram False bcps
     pure bcps

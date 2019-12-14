@@ -1,24 +1,50 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module GBC.DecodeSpec where
 
 import           Control.Monad.Reader
 import           Data.Word
-import           Foreign.Ptr
 import           GBC.Decode
+import           GBC.Graphics.VRAM
 import           GBC.ISA
 import           GBC.Memory
+import           GBC.Mode
+import           GBC.Primitive
 import           GBC.ROM
 import           Test.Hspec
 import qualified Data.ByteString               as B
 
 makeROM :: [Word8] -> ROM
 makeROM d =
-  ROM "test" $ B.take (32 * 1024 * 1024) $ B.pack (0xFF : d) <> B.replicate (32 * 1024 * 1024) 0
+  let size = 32 * 1024 * 1024
+  in  ROM "test" (blankHeader size) $ B.take size $ B.pack (0xFF : d) <> B.replicate
+        (32 * 1024 * 1024)
+        0
+
+blankHeader :: Int -> Header
+blankHeader romSize = Header { startAddress          = 0
+                             , nintendoCharacterData = ""
+                             , gameTitle             = ""
+                             , gameCode              = ""
+                             , cgbSupport            = CGBCompatible
+                             , makerCode             = ""
+                             , sgbSupport            = GBOnly
+                             , cartridgeType         = CartridgeType Nothing False False
+                             , romSize               = romSize
+                             , externalRAM           = 0
+                             , destination           = Overseas
+                             , oldLicenseCode        = 0
+                             , maskROMVersion        = 0
+                             }
 
 decodesTo :: [Word8] -> Instruction -> IO ()
 decodesTo encoding expectedDecoding = do
-  memory               <- initMemory (makeROM encoding) (VideoBuffers nullPtr nullPtr)
+  vram   <- initVRAM DMG
+  portIE <- newPort 0x00 0xFF (const . pure)
+  memory    <- initMemory (makeROM encoding) vram [] portIE DMG
+
   (instruction, addr1) <- runReaderT (runDecode 1 decode) memory
   instruction `shouldBe` expectedDecoding
   addr1 `shouldBe` 1 + fromIntegral (length encoding)

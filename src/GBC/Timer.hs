@@ -33,10 +33,10 @@ initTimerState :: Port Word8 -> IO TimerState
 initTimerState portIF = do
   clockCounter <- newIORef 0
   timerCounter <- newIORef 0
-  portDIV      <- newPort 0x00 0xFF (const . pure)
-  portTIMA     <- newPort 0x00 0xFF (const . pure)
-  portTMA      <- newPort 0x00 0xFF (const . pure)
-  portTAC      <- newPort 0x00 0xFF (const . pure)
+  portDIV      <- newPort 0x00 0xFF alwaysUpdate
+  portTIMA     <- newPort 0x00 0xFF alwaysUpdate
+  portTMA      <- newPort 0x00 0xFF alwaysUpdate
+  portTAC      <- newPort 0x00 0xFF alwaysUpdate
   pure TimerState { .. }
 
 timerPorts :: TimerState -> [(Word16, Port Word8)]

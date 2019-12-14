@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 module GBC.CPUSpec where
 
 import           Common
@@ -6,21 +7,40 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Foldable
 import           Data.Function
 import           Data.Int
 import           Data.Maybe
 import           Data.Word
-import           Foreign.Marshal.Array
 import           GBC.CPU
+import           GBC.Graphics.VRAM
 import           GBC.ISA
 import           GBC.Memory
+import           GBC.Mode
+import           GBC.Primitive
 import           GBC.ROM
+import           GBC.Registers
 import           Test.Hspec
 import qualified Data.ByteString               as B
-import           Data.Foldable
 
 blankROM :: ROM
-blankROM = ROM "testRom" (B.replicate (32 * 1024 * 1024) 0)
+blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)
+
+blankHeader :: Int -> Header
+blankHeader romSize = Header { startAddress          = 0
+                             , nintendoCharacterData = ""
+                             , gameTitle             = ""
+                             , gameCode              = ""
+                             , cgbSupport            = CGBCompatible
+                             , makerCode             = ""
+                             , sgbSupport            = GBOnly
+                             , cartridgeType         = CartridgeType Nothing False False
+                             , romSize               = romSize
+                             , externalRAM           = 0
+                             , destination           = Overseas
+                             , oldLicenseCode        = 0
+                             , maskROMVersion        = 0
+                             }
 
 data CPUTestState = CPUTestState {
     testCPU :: !CPUState
@@ -34,9 +54,12 @@ instance HasMemory CPUTestState where
   forMemory = testMemory
 
 withNewCPU :: ReaderT CPUTestState IO () -> IO ()
-withNewCPU computation = allocaArray 0x2000 $ \pVRAM -> allocaArray 160 $ \pOAM -> do
-  mem <- initMemory blankROM (VideoBuffers pVRAM pOAM)
-  cpu <- initCPU
+withNewCPU computation = do
+  vram   <- initVRAM DMG
+  portIF <- newPort 0x00 0x1F alwaysUpdate
+  portIE <- newPort 0x00 0xFF alwaysUpdate
+  mem <- initMemory blankROM vram [(IF, portIF)] portIE DMG
+  cpu <- initCPU portIF portIE DMG
   void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where
   computationWithVerification = do
@@ -318,13 +341,13 @@ spec = do
     ev   <- executeInstruction HALT
     mode <- getMode
     liftIO $ do
-      ev `shouldBe` BusEvent [] 4 ModeHalt
+      ev `shouldBe` BusEvent 4 ModeHalt
       mode `shouldBe` ModeHalt
   describe "STOP" $ it "stops the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
     ev   <- executeInstruction STOP
     mode <- getMode
     liftIO $ do
-      ev `shouldBe` BusEvent [] 4 ModeStop
+      ev `shouldBe` BusEvent 4 ModeStop
       mode `shouldBe` ModeStop
   describe "DI"
     $ it "disables the master interrupt flat"
@@ -368,13 +391,13 @@ spec = do
   describe "DAA"       testDAA
 
 didRead :: BusEvent
-didRead = BusEvent [] 8 ModeNormal
+didRead = BusEvent 8 ModeNormal
 
 noWrite :: BusEvent
-noWrite = BusEvent [] 4 ModeNormal
+noWrite = BusEvent 4 ModeNormal
 
 didWrite :: [Word16] -> BusEvent
-didWrite w = BusEvent w 8 ModeNormal
+didWrite w = BusEvent 8 ModeNormal
 
 expectClocks :: Int -> BusEvent -> BusEvent
 expectClocks c e = e { clockAdvance = c }
@@ -445,30 +468,30 @@ simpleLoads = do
       r  <- readR8 RegA
       liftIO $ verifyLoad r 0x42 ev didRead
   describe "LDA_CI" $ it "works for LD A, (C)" $ withNewCPU $ do
-    writeR8 RegC 0x44
-    writeByte 0xFF44 (0x42 :: Word8)
+    writeR8 RegC 0x80
+    writeByte 0xFF80 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
       ev <- executeInstruction LDA_CI
       r  <- readR8 RegA
       liftIO $ verifyLoad r 0x42 ev didRead
   describe "LDCI_A" $ it "works for LD (C), A" $ withNewCPU $ do
-    writeR8 RegC 0x44
+    writeR8 RegC 0x80
     writeR8 RegA 0x42
     withAllFlagCombos $ withNoChangeToRegisters $ do
       ev <- executeInstruction LDCI_A
-      r  <- readByte 0xFF44
+      r  <- readByte 0xFF80
       liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44])
   describe "LDA_I8I" $ it "works for LD A, (i8)" $ withNewCPU $ do
-    writeByte 0xFF44 (0x42 :: Word8)
+    writeByte 0xFF80 (0x42 :: Word8)
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDA_I8I 0x44
+      ev <- executeInstruction $ LDA_I8I 0x80
       r  <- readR8 RegA
       liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 12)
   describe "LDI8I_A" $ it "works for LD (i8), A" $ withNewCPU $ do
     writeR8 RegA 0x42
     withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDI8I_A 0x44
-      r  <- readByte 0xFF44
+      ev <- executeInstruction $ LDI8I_A 0x80
+      r  <- readByte 0xFF80
       liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44] & expectClocks 12)
   describe "LDA_I16I" $ it "works for LD A, (i16)" $ withNewCPU $ do
     writeByte 0xC000 (0x42 :: Word8)
@@ -747,7 +770,8 @@ incdec instruction value expected expectedFlags = do
       ev <- executeInstruction $ instruction SmallHLI
       r  <- readByte 0xC000
       liftIO $ do
-        ev `shouldBe` BusEvent [0xC000] 12 ModeNormal
+        --ev `shouldBe` BusEvent [0xC000] 12 ModeNormal
+        ev `shouldBe` BusEvent 12 ModeNormal
         r `shouldBe` expected
 
 addHL :: Word16 -> Word16 -> Word16 -> Word8 -> Spec
@@ -851,7 +875,8 @@ shiftRotate instruction (carry, value) (expectedCarry, expected) = do
           ev <- executeInstruction $ instruction SmallHLI
           r  <- readByte 0xC000
           liftIO $ do
-            ev `shouldBe` BusEvent [0xC000] 16 ModeNormal
+            -- ev `shouldBe` BusEvent [0xC000] 16 ModeNormal
+            ev `shouldBe` BusEvent 16 ModeNormal
             r `shouldBe` expected
           pure r
 
@@ -902,9 +927,11 @@ setReset instruction doSet = do
       $ do
           writeR16 RegHL 0xC000
           doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0)
-            $ BusEvent [0xC000] 16 ModeNormal
+            -- $ BusEvent [0xC000] 16 ModeNormal
+                                                                         $ BusEvent 16 ModeNormal
           doTest SmallHLI bitIndex 0xFF (if doSet then 0xFF else complement (bit bitIndex))
-            $ BusEvent [0xC000] 16 ModeNormal
+            -- $ BusEvent [0xC000] 16 ModeNormal
+            $ BusEvent 16 ModeNormal
 
  where
   doTest op8 bitIndex value result expectedBusEvent = do
@@ -1089,12 +1116,12 @@ interrupt = do
     if ime then setIME else clearIME
     withNoChangeToRegisters $ preservingPC $ do
       pc <- readPC
-      writeByte 0xFFFF fif
-      writeByte 0xFF0F fie
+      writeByte IF fif
+      writeByte IE fie
       ev  <- cpuStep
       pc1 <- readPC
       liftIO $ do
-        ev `shouldBe` BusEvent [] 4 ModeNormal
+        ev `shouldBe` BusEvent 4 ModeNormal
         pc1 `shouldBe` (pc + 1)
   testInterrupt :: Word8 -> Word8 -> Word16 -> IO ()
   testInterrupt fif fie vector =
@@ -1109,8 +1136,8 @@ interrupt = do
     setIME
     pc0 <- readPC
     writeR16 RegSP 0xC000
-    writeByte 0xFFFF fif
-    writeByte 0xFF0F fie
+    writeByte IF fif
+    writeByte IE fie
     ev  <- cpuStep
     pc1 <- readPC
     sp1 <- readR16 RegSP
@@ -1118,7 +1145,8 @@ interrupt = do
     sh  <- readByte 0xBFFF
     ime <- testIME
     liftIO $ do
-      ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28 ModeNormal
+      --ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28 ModeNormal
+      ev `shouldBe` BusEvent 28 ModeNormal
       pc1 `shouldBe` vector
       sp1 `shouldBe` 0xBFFE
       fromIntegral sl .|. (fromIntegral sh `shiftL` 8) `shouldBe` pc0

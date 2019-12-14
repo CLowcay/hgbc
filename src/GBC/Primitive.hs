@@ -27,6 +27,8 @@ module GBC.Primitive
   , Port
   , newPort
   , newPortWithReadMask
+  , alwaysUpdate
+  , neverUpdate
   , readPort
   , directReadPort
   , writePort
@@ -216,6 +218,12 @@ newPortWithReadMask
 newPortWithReadMask value0 portReadMask portWriteMask portNotify = do
   portValue <- newIORef value0
   pure Port { .. }
+
+alwaysUpdate :: Applicative f => a -> b -> f b
+alwaysUpdate _ = pure
+
+neverUpdate :: Applicative f => a -> b -> f a
+neverUpdate = const . pure
 
 -- | Read from the port
 {-# INLINE readPort #-}
