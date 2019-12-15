@@ -92,36 +92,36 @@ initGraphics vram portIF = mdo
       directWritePort portLY 0
     when (not lcdEnabled' && lcdEnabled) $ directWritePort portLY 0
     pure lcdc'
-  portSTAT <- newPort 0xFF 0x78 alwaysUpdate
-  portSCY  <- newPort 0xFF 0xFF alwaysUpdate
-  portSCX  <- newPort 0xFF 0xFF alwaysUpdate
-  portLY   <- newPort 0xFF 0x00 alwaysUpdate
-  portLYC  <- newPort 0xFF 0xFF $ \_ lyc -> do
-    ly <- readPort portLY
+  portSTAT <- newPort 0x00 0x78 alwaysUpdate
+  portSCY  <- newPort 0x00 0xFF alwaysUpdate
+  portSCX  <- newPort 0x00 0xFF alwaysUpdate
+  portLY   <- newPort 0x00 0x00 neverUpdate
+  portLYC  <- newPort 0x00 0xFF $ \_ lyc -> do
+    ly <- directReadPort portLY
     checkLY portIF portSTAT ly lyc
     pure lyc
   portBGP  <- newPort 0xFF 0xFF alwaysUpdate
   portOBP0 <- newPort 0xFF 0xFF alwaysUpdate
   portOBP1 <- newPort 0xFF 0xFF alwaysUpdate
-  portWY   <- newPort 0xFF 0xFF alwaysUpdate
-  portWX   <- newPort 0xFF 0xFF alwaysUpdate
-  portBCPS <- newPort 0xFF 0xBF $ \_ bcps -> do
+  portWY   <- newPort 0x00 0xFF alwaysUpdate
+  portWX   <- newPort 0x00 0xFF alwaysUpdate
+  portBCPS <- newPort 0x00 0xBF $ \_ bcps -> do
     directWritePort portBCPD =<< readPalette vram False bcps
     pure bcps
-  portBCPD <- newPort 0xFF 0xFF $ \_ bcpd -> do
+  portBCPD <- newPort 0x00 0xFF $ \_ bcpd -> do
     bcps <- readPort portBCPS
     writePalette vram False bcps bcpd
     when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
     pure bcpd
-  portOCPS <- newPort 0xFF 0xBF $ \_ ocps -> do
-    directWritePort portBCPD =<< readPalette vram True ocps
+  portOCPS <- newPort 0x00 0xBF $ \_ ocps -> do
+    directWritePort portOCPD =<< readPalette vram True ocps
     pure ocps
-  portOCPD <- newPort 0xFF 0xFF $ \_ ocpd -> do
-    ocps <- readPort portBCPS
+  portOCPD <- newPort 0x00 0xFF $ \_ ocpd -> do
+    ocps <- readPort portOCPS
     writePalette vram True ocps ocpd
-    when (isFlagSet flagPaletteIncrement ocps) $ writePort portBCPS ((ocps .&. 0xBF) + 1)
+    when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
     pure ocpd
-  portVBK <- newPort 0xFF 0x01 $ \_ vbk -> do
+  portVBK <- newPort 0x00 0x01 $ \_ vbk -> do
     setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
     pure vbk
 

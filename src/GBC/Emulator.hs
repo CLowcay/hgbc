@@ -147,7 +147,7 @@ step = do
       void $ updateHardware dmaClockAdvance doubleSpeed
       pure (busEvent { clockAdvance = cpuClocks + dmaClockAdvance })
     else case graphicsEvent of
-      NoGraphicsEvent -> pure busEvent
+      NoGraphicsEvent -> pure (busEvent { clockAdvance = cpuClocks})
       HBlankEvent     -> do
         hdmaClockAdvance <- doHBlankHDMA dmaState
         when (hdmaClockAdvance > 0) $ void $ updateHardware hdmaClockAdvance doubleSpeed

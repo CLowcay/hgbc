@@ -69,7 +69,7 @@ initMemory romInfo@(ROM _ romHeader rom) vram rawPorts portIE mode = do
   emptyPort     <- newPort 0xFF 0x00 neverUpdate
 
   ramBankOffset <- newIORef 0
-  svbk          <- newPort 0xF8 0x03 $ \_ newValue -> do
+  svbk          <- newPort 0xF8 0x07 $ \_ newValue -> do
     let bank = fromIntegral (newValue .&. 7)
     writeIORef ramBankOffset $! 0 `max` ((bank - 1) * 0x1000)
     pure newValue

@@ -85,7 +85,7 @@ initDMA = mdo
         else do
           loadHDMATargets
           writeIORef pendingHDMA $! Pending hdma5
-          pure hdma5
+          pure 0xFF
 
   pure DMAState { .. }
 
@@ -96,12 +96,15 @@ doPendingDMA DMAState {..} = do
   maybeDMA <- liftIO $ readIORef pendingDMA
   case maybeDMA of
     None        -> pure ()
-    Pending dma -> dmaToOAM (fromIntegral dma `shiftL` 8)
+    Pending dma -> do
+      liftIO $ writeIORef pendingDMA None
+      dmaToOAM (fromIntegral dma `shiftL` 8)
 
   maybeHDMA <- liftIO $ readIORef pendingHDMA
   case maybeHDMA of
     None         -> pure 0
     Pending hdma -> do
+      liftIO $ writeIORef pendingHDMA None
       source0      <- liftIO $ readIORef hdmaSource
       destination0 <- liftIO $ readIORef hdmaDestination
       go source0 destination0 (hdma + 1)
