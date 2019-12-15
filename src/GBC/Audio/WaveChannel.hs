@@ -43,26 +43,26 @@ newWaveChannel port52 = mdo
   output <- newIORef 0
   enable <- newIORef False
 
-  port0  <- newPortWithReadMask 0xFF 0x7F 0x80 $ \_ register0 -> do
+  port0  <- newPortWithReadMask 0x00 0x7F 0x80 $ \_ register0 -> do
     unless (isFlagSet flagMasterEnable register0) $ disableIO port52 output enable
     pure register0
 
   port1 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register1 -> do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register1
 
-  port2 <- newPortWithReadMask 0xFF 0x9F 0x60 (const . pure)
+  port2 <- newPortWithReadMask 0xFF 0x9F 0x60 alwaysUpdate
 
   port3 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register3 -> do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
     pure register3
 
   port4 <- newPortWithReadMask 0xFF 0xBF 0xC7 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
-      register0 <- readPort port0
-      register3 <- readPort port3
+      register0 <- directReadPort port0
+      register3 <- directReadPort port3
       initLength lengthCounter
       reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
       resetStateCycle sample waveSamplerStates
@@ -71,8 +71,7 @@ newWaveChannel port52 = mdo
       updateStatus port52 flagChannel3Enable enabled
     pure register4
 
-  wavePort <- newPort 0x00 0x00 alwaysUpdate
-  let portWaveTable = V.replicate 16 wavePort
+  portWaveTable    <- V.replicateM 16 (newPort 0x00 0xFF alwaysUpdate)
 
   frequencyCounter <- newCounter
   sample           <- newStateCycle waveSamplerStates
@@ -94,7 +93,7 @@ instance Channel WaveChannel where
       ++ ([22 ..] `zip` toList portWaveTable)
 
   frameSequencerClock WaveChannel {..} FrameSequencerOutput {..} = do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (lengthClock && isFlagSet flagLength register4)
       $ clockLength lengthCounter (disableIO port52 output enable)
 
@@ -102,16 +101,16 @@ instance Channel WaveChannel where
     isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle sample 1 $ \i -> do
-        sampleByte <- readPort (portWaveTable V.! (i `unsafeShiftR` 1))
-        register2  <- readPort port2
+        sampleByte <- directReadPort (portWaveTable V.! (i `unsafeShiftR` 1))
+        register2  <- directReadPort port2
         let volume = getVolume register2
         let rawSampleValue =
               if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
         writeIORef output (fromIntegral sampleValue - 8)
-      register3 <- readPort port3
-      register4 <- readPort port4
+      register3 <- directReadPort port3
+      register4 <- directReadPort port4
       pure (getTimerPeriod (getFrequency register3 register4))
 
 flagMasterEnable :: Word8

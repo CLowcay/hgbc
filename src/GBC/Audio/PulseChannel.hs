@@ -47,33 +47,34 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
   let port0ReadMask  = if hasSweepUnit then 0x80 else 0xFF
   let port0WriteMask = if hasSweepUnit then 0x7F else 0x00
   port0 <- newPortWithReadMask 0xFF port0ReadMask port0WriteMask $ \_ register0 -> do
-    hasNegated <- hasPerformedSweepCalculationInNegateMode sweepUnit
-    when (hasNegated && not (isFlagSet flagNegate register0))
-      $ disableIO port52 channelEnabledFlag output enable
+    when hasSweepUnit $ do
+      hasNegated <- hasPerformedSweepCalculationInNegateMode sweepUnit
+      when (hasNegated && not (isFlagSet flagNegate register0))
+        $ disableIO port52 channelEnabledFlag output enable
     pure register0
 
   port1 <- newPortWithReadMask 0xFF 0x3F 0xFF $ \_ register1 -> do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register1
 
-  port2 <- newPortWithReadMask 0xFF 0x00 0xFF $ \_ register2 -> do
+  port2 <- newPort 0xFF 0xFF $ \_ register2 -> do
     let isDacEnabled = register2 .&. 0xF8 /= 0
     unless isDacEnabled $ disableIO port52 channelEnabledFlag output enable
     writeIORef dacEnable isDacEnabled
     pure register2
 
   port3 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register3 -> do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     let frequency = getFrequency register3 register4
     reloadCounter frequencyCounter (getTimerPeriod frequency)
     pure register3
 
   port4 <- newPortWithReadMask 0xFF 0xBF 0xC7 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
-      register0 <- readPort port0
-      register2 <- readPort port2
-      register3 <- readPort port3
+      register0 <- directReadPort port0
+      register2 <- directReadPort port2
+      register3 <- directReadPort port3
       let frequency = getFrequency register3 register4
 
       isDacEnabled <- readIORef dacEnable
@@ -108,23 +109,23 @@ instance Channel PulseChannel where
   getPorts PulseChannel {..} = [(0, port0), (1, port1), (2, port2), (3, port3), (4, port4)]
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (lengthClock && isFlagSet flagLength register4)
       $ clockLength lengthCounter (disable channel)
     when envelopeClock $ clockEnvelope envelope
     when (sweepClock && hasSweepUnit) $ do
-      register0 <- readPort port0
+      register0 <- directReadPort port0
       clockSweep sweepUnit register0 (disable channel)
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle dutyCycle 1 $ \i -> do
-        dutyCycleNumber <- getDutyCycle <$> readPort port1
+        dutyCycleNumber <- getDutyCycle <$> directReadPort port1
         sample          <- envelopeVolume envelope
         writeIORef output $! (if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8
-      register3 <- readPort port3
-      register4 <- readPort port4
+      register3 <- directReadPort port3
+      register4 <- directReadPort port4
       pure (getTimerPeriod (getFrequency register3 register4))
 
 getDutyCycle :: Word8 -> Word8

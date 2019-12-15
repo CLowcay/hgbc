@@ -72,6 +72,11 @@ initAudioState = mdo
   sampler        <- newCounter
   frameSequencer <- newStateCycle frameSequencerStates
 
+  channel1       <- newPulseChannel True port52 flagChannel1Enable
+  channel2       <- newPulseChannel False port52 flagChannel2Enable
+  channel3       <- newWaveChannel port52
+  channel4       <- newNoiseChannel port52
+
   port50         <- newPort 0xFF 0xFF alwaysUpdate
   port51         <- newPort 0xFF 0xFF alwaysUpdate
   port52         <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
@@ -91,10 +96,6 @@ initAudioState = mdo
       directWritePort port51 0
     pure register52'
 
-  channel1 <- newPulseChannel True port52 flagChannel1Enable
-  channel2 <- newPulseChannel False port52 flagChannel2Enable
-  channel3 <- newWaveChannel port52
-  channel4 <- newNoiseChannel port52
   pure AudioState { .. }
 
 audioPorts :: AudioState -> [(Word16, Port Word8)]
@@ -145,7 +146,7 @@ mixOutputChannel AudioState {..} channelFlags = do
 
 audioStep :: AudioState -> Int -> IO ()
 audioStep audioState@AudioState {..} clockAdvance = do
-  register52 <- readPort port52
+  register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52) $ do
     void $ updateStateCycle frameSequencer clockAdvance $ \state ->
       let frameSequencerOutput = case state of
@@ -169,8 +170,8 @@ audioStep audioState@AudioState {..} clockAdvance = do
     masterClock channel4 clockAdvance
 
     updateCounter sampler clockAdvance $ do
-      register50 <- readPort port50
-      register51 <- readPort port51
+      register50 <- directReadPort port50
+      register51 <- directReadPort port51
       let volumeLeft  = 8 - (register50 `unsafeShiftR` 4 .&. 0x07)
       let volumeRight = 8 - (register50 .&. 0x07)
       let left        = register51 `unsafeShiftR` 4

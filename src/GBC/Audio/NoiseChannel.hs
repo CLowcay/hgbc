@@ -35,7 +35,7 @@ newNoiseChannel port52 = mdo
   output    <- newIORef 0
 
   port1     <- newPortWithReadMask 0xFF 0xFF 0x3F $ \_ register1 -> do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register4
 
@@ -51,8 +51,8 @@ newNoiseChannel port52 = mdo
 
   port4 <- newPortWithReadMask 0xFF 0xBF 0xC0 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
-      register2    <- readPort port2
-      register3    <- readPort port3
+      register2    <- directReadPort port2
+      register3    <- directReadPort port3
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       updateStatus port52 flagChannel4Enable isDacEnabled
@@ -81,7 +81,7 @@ instance Channel NoiseChannel where
   getPorts NoiseChannel {..} = [(1, port1), (2, port2), (3, port3), (4, port4)]
 
   frameSequencerClock NoiseChannel {..} FrameSequencerOutput {..} = do
-    register4 <- readPort port4
+    register4 <- directReadPort port4
     when (lengthClock && isFlagSet flagLength register4)
       $ clockLength lengthCounter (disableIO port52 output enable)
     when envelopeClock $ clockEnvelope envelope
@@ -89,7 +89,7 @@ instance Channel NoiseChannel where
   masterClock NoiseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      register3   <- readPort port3
+      register3   <- directReadPort port3
       registerOut <- nextBit lfsr (widthMask register3)
       sample      <- envelopeVolume envelope
       writeIORef output $! (if registerOut .&. 1 == 0 then sample else 0) - 8

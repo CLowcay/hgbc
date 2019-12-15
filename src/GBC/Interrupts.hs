@@ -22,9 +22,9 @@ data Interrupt = InterruptVBlank
 flagInterrupt :: Interrupt -> Word8
 flagInterrupt InterruptVBlank            = 0x01
 flagInterrupt InterruptLCDCStat          = 0x02
-flagInterrupt InterruptTimerOverflow     = 0x03
-flagInterrupt InterruptEndSerialTransfer = 0x04
-flagInterrupt InterruptP1Low             = 0x05
+flagInterrupt InterruptTimerOverflow     = 0x04
+flagInterrupt InterruptEndSerialTransfer = 0x08
+flagInterrupt InterruptP1Low             = 0x10
 
 {-# INLINE raiseInterrupt #-}
 raiseInterrupt :: Port Word8 -> Interrupt -> IO ()

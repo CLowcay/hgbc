@@ -49,9 +49,9 @@ updateFrequency :: Port Word8 -> Port Word8 -> Int -> IO ()
 updateFrequency port3 port4 frequency = do
   let lsb = fromIntegral (frequency .&. 0xFF)
   let msb = fromIntegral ((frequency `unsafeShiftR` 8) .&. 0x07)
-  register4 <- readPort port4
-  writePort port3 lsb
-  writePort port4 ((register4 .&. 0xF8) .|. msb)
+  register4 <- directReadPort port4
+  directWritePort port3 lsb
+  directWritePort port4 ((register4 .&. 0xF8) .|. msb)
 
 flagChannel1Enable, flagChannel2Enable, flagChannel3Enable, flagChannel4Enable :: Word8
 flagChannel1Enable = 0x01

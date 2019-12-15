@@ -91,7 +91,7 @@ initGraphics vram portIF = mdo
       resetStateCycle lcdState lcdStates
       directWritePort portLY 0
     when (not lcdEnabled' && lcdEnabled) $ directWritePort portLY 0
-    pure lcdc
+    pure lcdc'
   portSTAT <- newPort 0xFF 0x78 alwaysUpdate
   portSCY  <- newPort 0xFF 0xFF alwaysUpdate
   portSCX  <- newPort 0xFF 0xFF alwaysUpdate
@@ -114,11 +114,11 @@ initGraphics vram portIF = mdo
     when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
     pure bcpd
   portOCPS <- newPort 0xFF 0xBF $ \_ ocps -> do
-    directWritePort portBCPD =<< readPalette vram False ocps
+    directWritePort portBCPD =<< readPalette vram True ocps
     pure ocps
   portOCPD <- newPort 0xFF 0xFF $ \_ ocpd -> do
     ocps <- readPort portBCPS
-    writePalette vram False ocps ocpd
+    writePalette vram True ocps ocpd
     when (isFlagSet flagPaletteIncrement ocps) $ writePort portBCPS ((ocps .&. 0xBF) + 1)
     pure ocpd
   portVBK <- newPort 0xFF 0x01 $ \_ vbk -> do

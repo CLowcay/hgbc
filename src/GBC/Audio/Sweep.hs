@@ -11,7 +11,6 @@ where
 
 import           Common
 import           Control.Monad
-import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
@@ -57,13 +56,13 @@ overflowCheck Sweep {..} register disableIO = do
 
 clockSweep :: Sweep -> Word8 -> IO () -> IO ()
 clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
-  isEnabled <- liftIO $ readIORef enable
+  isEnabled <- readIORef enable
   when (isEnabled && getPeriod register /= 0) $ do
-    frequency' <- liftIO $ overflowCheck sweep register disableIO
+    frequency' <- overflowCheck sweep register disableIO
     when (getShift register /= 0) $ do
-      liftIO $ writeIORef frequencyRef $! frequency'
+      writeIORef frequencyRef $! frequency'
       updateFrequency port3 port4 frequency'
-      void $ liftIO $ overflowCheck sweep register disableIO
+      void $ overflowCheck sweep register disableIO
   pure ((getPeriod register - 1) .&. 7)
 
 hasPerformedSweepCalculationInNegateMode :: Sweep -> IO Bool
@@ -73,8 +72,7 @@ flagNegate :: Word8
 flagNegate = 0x08
 
 getPeriod :: Word8 -> Int
-getPeriod register = fromIntegral register `unsafeShiftR` 4
+getPeriod register = (fromIntegral register `unsafeShiftR` 4) .&. 0x07
 
 getShift :: Word8 -> Int
 getShift register = fromIntegral register .&. 0x07
-

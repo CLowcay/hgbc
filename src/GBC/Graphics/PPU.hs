@@ -106,7 +106,7 @@ startOutput memory buffers sync mode = do
 
   void $ forkOS $ do
     void (SDL.glCreateContext window)
-    SDL.swapInterval $= SDL.ImmediateUpdates 
+    SDL.swapInterval $= SDL.SynchronizedUpdates 
     lineAssemblySpace    <- mallocForeignPtrBytes 160
     spritePriorityBuffer <- mallocForeignPtrBytes 160
     glState              <- setUpOpenGL
