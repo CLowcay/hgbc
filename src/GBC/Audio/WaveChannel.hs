@@ -18,10 +18,11 @@ import           Data.Word
 import           GBC.Audio.Common
 import           GBC.Audio.Length
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 import qualified Data.Vector                   as V
 
 data WaveChannel = WaveChannel {
-    output           :: !(IORef Int)
+    output           :: !(UnboxedRef Int)
   , enable           :: !(IORef Bool)
   , port0            :: !(Port Word8)
   , port1            :: !(Port Word8)
@@ -40,7 +41,7 @@ waveSamplerStates = [0 .. 31] <&> (, 1)
 
 newWaveChannel :: Port Word8 -> IO WaveChannel
 newWaveChannel port52 = mdo
-  output <- newIORef 0
+  output <- newUnboxedRef 0
   enable <- newIORef False
 
   port0  <- newPortWithReadMask 0x00 0x7F 0x80 $ \_ register0 -> do
@@ -78,14 +79,14 @@ newWaveChannel port52 = mdo
   lengthCounter    <- newLength 0xFF
   pure WaveChannel { .. }
 
-disableIO :: Port Word8 -> IORef Int -> IORef Bool -> IO ()
+disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
-  writeIORef output 0
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 flagChannel3Enable False
 
 instance Channel WaveChannel where
-  getOutput WaveChannel {..} = readIORef output
+  getOutput WaveChannel {..} = readUnboxedRef output
   disable WaveChannel {..} = disableIO port52 output enable
   getStatus WaveChannel {..} = readIORef enable
   getPorts WaveChannel {..} =
@@ -108,7 +109,7 @@ instance Channel WaveChannel where
               if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
         let sampleValue =
               if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
-        writeIORef output (fromIntegral sampleValue - 8)
+        writeUnboxedRef output (fromIntegral sampleValue - 8)
       register3 <- directReadPort port3
       register4 <- directReadPort port4
       pure (getTimerPeriod (getFrequency register3 register4))

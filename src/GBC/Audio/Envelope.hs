@@ -11,22 +11,22 @@ where
 import           Common
 import           Control.Monad
 import           Data.Bits
-import           Data.IORef
 import           Data.Word
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 
 data Envelope = Envelope {
-    volumeRef        :: !(IORef Int)
-  , volumeDeltaRef   :: !(IORef Int)
-  , envelopePeriodRef:: !(IORef Int)
+    volumeRef        :: !(UnboxedRef Int)
+  , volumeDeltaRef   :: !(UnboxedRef Int)
+  , envelopePeriodRef:: !(UnboxedRef Int)
   , envelopeCounter  :: !Counter
 }
 
 newEnvelope :: IO Envelope
 newEnvelope = do
-  volumeRef         <- newIORef 0
-  volumeDeltaRef    <- newIORef 1
-  envelopePeriodRef <- newIORef 0
+  volumeRef         <- newUnboxedRef 0
+  volumeDeltaRef    <- newUnboxedRef 1
+  envelopePeriodRef <- newUnboxedRef 0
   envelopeCounter   <- newCounter
   pure Envelope { .. }
 
@@ -34,21 +34,21 @@ initEnvelope :: Envelope -> Word8 -> IO ()
 initEnvelope Envelope {..} register = do
   let envelopePeriod = getEnvelopePeriod register
   reloadCounter envelopeCounter ((envelopePeriod - 1) .&. 7)
-  writeIORef envelopePeriodRef envelopePeriod
-  writeIORef volumeDeltaRef    (getVolumeDelta register)
-  writeIORef volumeRef         (getVolume register)
+  writeUnboxedRef envelopePeriodRef envelopePeriod
+  writeUnboxedRef volumeDeltaRef    (getVolumeDelta register)
+  writeUnboxedRef volumeRef         (getVolume register)
 
 clockEnvelope :: Envelope -> IO ()
 clockEnvelope Envelope {..} = do
-  envelopePeriod <- readIORef envelopePeriodRef
+  envelopePeriod <- readUnboxedRef envelopePeriodRef
   when (envelopePeriod /= 0) $ updateCounter envelopeCounter 1 $ do
-    volume      <- readIORef volumeRef
-    volumeDelta <- readIORef volumeDeltaRef
-    writeIORef volumeRef $! ((volume + volumeDelta) `min` 15) `max` 0
+    volume      <- readUnboxedRef volumeRef
+    volumeDelta <- readUnboxedRef volumeDeltaRef
+    writeUnboxedRef volumeRef $! ((volume + volumeDelta) `min` 15) `max` 0
     pure ((envelopePeriod - 1) .&. 7)
 
 envelopeVolume :: Envelope -> IO Int
-envelopeVolume Envelope {..} = readIORef volumeRef
+envelopeVolume Envelope {..} = readUnboxedRef volumeRef
 
 flagDirection :: Word8
 flagDirection = 0x08

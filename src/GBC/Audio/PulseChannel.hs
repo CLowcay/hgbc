@@ -18,9 +18,10 @@ import           GBC.Audio.Envelope
 import           GBC.Audio.Length
 import           GBC.Audio.Sweep
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 
 data PulseChannel = PulseChannel {
-    output             :: !(IORef Int)
+    output             :: !(UnboxedRef Int)
   , enable             :: !(IORef Bool)
   , dacEnable          :: !(IORef Bool)
   , port0              :: !(Port Word8)
@@ -40,7 +41,7 @@ data PulseChannel = PulseChannel {
 
 newPulseChannel :: Bool -> Port Word8 -> Word8 -> IO PulseChannel
 newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
-  output    <- newIORef 0
+  output    <- newUnboxedRef 0
   enable    <- newIORef False
   dacEnable <- newIORef True
 
@@ -96,14 +97,14 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
   lengthCounter    <- newLength 0x3F
   pure PulseChannel { .. }
 
-disableIO :: Port Word8 -> Word8 -> IORef Int -> IORef Bool -> IO ()
+disableIO :: Port Word8 -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 channelEnabledFlag output enable = do
-  writeIORef output 0
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 channelEnabledFlag False
 
 instance Channel PulseChannel where
-  getOutput PulseChannel {..} = readIORef output
+  getOutput PulseChannel {..} = readUnboxedRef output
   disable PulseChannel {..} = disableIO port52 channelEnabledFlag output enable
   getStatus PulseChannel {..} = readIORef enable
   getPorts PulseChannel {..} = [(0, port0), (1, port1), (2, port2), (3, port3), (4, port4)]
@@ -123,7 +124,7 @@ instance Channel PulseChannel where
       void $ updateStateCycle dutyCycle 1 $ \i -> do
         dutyCycleNumber <- getDutyCycle <$> directReadPort port1
         sample          <- envelopeVolume envelope
-        writeIORef output $! (if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8
+        writeUnboxedRef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
       register3 <- directReadPort port3
       register4 <- directReadPort port4
       pure (getTimerPeriod (getFrequency register3 register4))

@@ -23,9 +23,9 @@ flagTrigger = 0x80
 flagLength = 0x40
 
 data FrameSequencerOutput = FrameSequencerOutput {
-    lengthClock :: !Bool
+    lengthClock   :: !Bool
   , envelopeClock :: !Bool
-  , sweepClock :: !Bool
+  , sweepClock    :: !Bool
 }
 
 noFrameSequencerOutput :: FrameSequencerOutput

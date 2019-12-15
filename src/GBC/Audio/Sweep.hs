@@ -16,13 +16,14 @@ import           Data.IORef
 import           Data.Word
 import           GBC.Audio.Common
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 
 data Sweep = Sweep {
     enable       :: !(IORef Bool)
   , hasNegated   :: !(IORef Bool)
   , port3        :: !(Port Word8)
   , port4        :: !(Port Word8)
-  , frequencyRef :: !(IORef Int)
+  , frequencyRef :: !(UnboxedRef Int)
   , counter      :: !Counter
 }
 
@@ -30,14 +31,14 @@ newSweep :: Port Word8 -> Port Word8 -> IO Sweep
 newSweep port3 port4 = do
   enable       <- newIORef False
   hasNegated   <- newIORef False
-  frequencyRef <- newIORef 0
+  frequencyRef <- newUnboxedRef 0
   counter      <- newCounter
   pure Sweep { .. }
 
 initSweep :: Sweep -> Int -> Word8 -> IO () -> IO ()
 initSweep sweep@Sweep {..} frequency0 register disableIO = do
-  writeIORef hasNegated   False
-  writeIORef frequencyRef frequency0
+  writeIORef hasNegated False
+  writeUnboxedRef frequencyRef frequency0
   reloadCounter counter ((getPeriod register - 1) .&. 7)
   writeIORef enable (getPeriod register /= 0 || getShift register /= 0)
   when (getShift register /= 0) $ void $ overflowCheck sweep register disableIO
@@ -48,7 +49,7 @@ nextFrequency frequency0 sweepShift True  = frequency0 - (frequency0 `unsafeShif
 
 overflowCheck :: Sweep -> Word8 -> IO () -> IO Int
 overflowCheck Sweep {..} register disableIO = do
-  frequency <- readIORef frequencyRef
+  frequency <- readUnboxedRef frequencyRef
   let isNegate   = isFlagSet flagNegate register
   let frequency' = nextFrequency frequency (getShift register) isNegate
   when isNegate $ writeIORef hasNegated True
@@ -60,7 +61,7 @@ clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
   when (isEnabled && getPeriod register /= 0) $ do
     frequency' <- overflowCheck sweep register disableIO
     when (getShift register /= 0) $ do
-      writeIORef frequencyRef $! frequency'
+      writeUnboxedRef frequencyRef frequency'
       updateFrequency port3 port4 frequency'
       void $ overflowCheck sweep register disableIO
   pure ((getPeriod register - 1) .&. 7)

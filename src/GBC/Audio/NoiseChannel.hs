@@ -5,18 +5,19 @@ module GBC.Audio.NoiseChannel where
 
 import           Common
 import           Control.Monad.Reader
+import           Data.Bits
 import           Data.IORef
 import           Data.Word
-import           Data.Bits
 import           GBC.Audio.Common
 import           GBC.Audio.Envelope
 import           GBC.Audio.Length
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 
 data NoiseChannel = NoiseChannel {
     enable           :: !(IORef Bool)
   , dacEnable        :: !(IORef Bool)
-  , output           :: !(IORef Int)
+  , output           :: !(UnboxedRef Int)
   , port1            :: !(Port Word8)
   , port2            :: !(Port Word8)
   , port3            :: !(Port Word8)
@@ -32,7 +33,7 @@ newNoiseChannel :: Port Word8 -> IO NoiseChannel
 newNoiseChannel port52 = mdo
   enable    <- newIORef False
   dacEnable <- newIORef True
-  output    <- newIORef 0
+  output    <- newUnboxedRef 0
 
   port1     <- newPortWithReadMask 0xFF 0xFF 0x3F $ \_ register1 -> do
     register4 <- directReadPort port4
@@ -68,14 +69,14 @@ newNoiseChannel port52 = mdo
   lfsr             <- newLinearFeedbackShiftRegister
   pure NoiseChannel { .. }
 
-disableIO :: Port Word8 -> IORef Int -> IORef Bool -> IO ()
+disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
-  writeIORef output 0
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 flagChannel4Enable False
 
 instance Channel NoiseChannel where
-  getOutput NoiseChannel {..} = readIORef output
+  getOutput NoiseChannel {..} = readUnboxedRef output
   disable NoiseChannel {..} = disableIO port52 output enable
   getStatus NoiseChannel {..} = readIORef enable
   getPorts NoiseChannel {..} = [(1, port1), (2, port2), (3, port3), (4, port4)]
@@ -92,7 +93,7 @@ instance Channel NoiseChannel where
       register3   <- directReadPort port3
       registerOut <- nextBit lfsr (widthMask register3)
       sample      <- envelopeVolume envelope
-      writeIORef output $! (if registerOut .&. 1 == 0 then sample else 0) - 8
+      writeUnboxedRef output ((if registerOut .&. 1 == 0 then sample else 0) - 8)
       pure (timerPeriod register3)
 
 widthMask :: Word8 -> Word16

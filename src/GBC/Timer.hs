@@ -11,16 +11,16 @@ where
 import           Common
 import           Control.Monad.Reader
 import           Data.Bits
-import           Data.IORef
 import           Data.Word
 import           GBC.Interrupts
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 import           GBC.Registers
 
 -- | Number of clocks until the next timer tick
 data TimerState = TimerState {
-    clockCounter :: IORef Word16
-  , timerCounter :: IORef Word16
+    clockCounter :: !(UnboxedRef Word16)
+  , timerCounter :: !(UnboxedRef Word16)
   , portDIV      :: !(Port Word8)
   , portTIMA     :: !(Port Word8)
   , portTMA      :: !(Port Word8)
@@ -31,8 +31,8 @@ data TimerState = TimerState {
 -- | Create the initial timer state.
 initTimerState :: Port Word8 -> IO TimerState
 initTimerState portIF = do
-  clockCounter <- newIORef 0
-  timerCounter <- newIORef 0
+  clockCounter <- newUnboxedRef 0
+  timerCounter <- newUnboxedRef 0
   portDIV      <- newPort 0x00 0xFF alwaysUpdate
   portTIMA     <- newPort 0x00 0xFF alwaysUpdate
   portTMA      <- newPort 0x00 0xFF alwaysUpdate
@@ -75,9 +75,9 @@ timerRegisters TimerState {..} = do
 updateTimer :: TimerState -> Int -> IO ()
 updateTimer TimerState {..} advance = do
   -- Update the internal clock count
-  clocks <- readIORef clockCounter
+  clocks <- readUnboxedRef clockCounter
   let clocks' = clocks + fromIntegral advance
-  writeIORef clockCounter clocks'
+  writeUnboxedRef clockCounter clocks'
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
@@ -86,9 +86,9 @@ updateTimer TimerState {..} advance = do
   -- Update the TIMA register
   tac <- directReadPort portTAC
   when (timerStarted tac) $ do
-    timer <- readIORef timerCounter
+    timer <- readUnboxedRef timerCounter
     let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus (tac .&. 3)
-    writeIORef timerCounter timer'
+    writeUnboxedRef timerCounter timer'
 
     -- Update required
     when (timerAdvance > 0) $ do
