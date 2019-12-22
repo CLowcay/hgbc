@@ -20,6 +20,7 @@ where
 import           Common
 import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
+import           Data.Bifunctor
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
@@ -30,19 +31,19 @@ import           GBC.Errors
 import           GBC.Graphics.VRAM
 import           GBC.Mode
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 import           GBC.ROM
 import           GBC.Registers
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Unsafe        as B
 import qualified Data.Vector                   as V
-import           Data.Bifunctor
 
 data Memory = Memory {
     mbc            :: !MBC
   , romHeader      :: !Header
   , rom            :: !B.ByteString
   , memRam         :: !(ForeignPtr Word8)
-  , ramBankOffset  :: !(IORef Int)
+  , ramBankOffset  :: !(UnboxedRef Int)
   , ports          :: !(V.Vector (Port Word8))
   , portIE         :: !(Port Word8)
   , memHigh        :: !(ForeignPtr Word8)
@@ -68,10 +69,10 @@ initMemory romInfo@(ROM _ romHeader rom) vram rawPorts portIE mode = do
   memHigh       <- mallocForeignPtrArray 0x80
   emptyPort     <- newPort 0xFF 0x00 neverUpdate
 
-  ramBankOffset <- newIORef 0
+  ramBankOffset <- newUnboxedRef 0
   svbk          <- newPort 0xF8 0x07 $ \_ newValue -> do
     let bank = fromIntegral (newValue .&. 7)
-    writeIORef ramBankOffset $! 0 `max` ((bank - 1) * 0x1000)
+    writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
     pure newValue
 
   let ports = V.accum (flip const)
@@ -120,7 +121,7 @@ dmaToOAM source = do
       | source < 0xD000 || mode == DMG -> withForeignPtr memRam
       $  \ram -> copyToOAM vram (ram `plusPtr` offset 0xC000)
       | otherwise -> do
-        bankOffset <- readIORef ramBankOffset
+        bankOffset <- readUnboxedRef ramBankOffset
         withForeignPtr memRam $ \ram -> copyToOAM vram (ram `plusPtr` (bankOffset + offset 0xC000))
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
@@ -146,7 +147,7 @@ readByte addr = do
     6
       | addr < 0xD000 || mode == DMG -> withForeignPtr memRam (`peekElemOff` offset 0xC000)
       | otherwise -> do
-        bankOffset <- readIORef ramBankOffset
+        bankOffset <- readUnboxedRef ramBankOffset
         withForeignPtr memRam (`peekElemOff` (bankOffset + offset 0xC000))
     7
       | addr < 0xFE00 -> withForeignPtr memRam (`peekElemOff` offset 0xE000)
@@ -186,7 +187,7 @@ writeByte addr value = do
       | addr < 0xD000 || mode == DMG -> withForeignPtr memRam
       $  \ptr -> pokeElemOff ptr (offset 0xC000) value
       | otherwise -> do
-        bankOffset <- readIORef ramBankOffset
+        bankOffset <- readUnboxedRef ramBankOffset
         withForeignPtr memRam $ \ptr -> pokeElemOff ptr (bankOffset + offset 0xC000) value
     7
       | addr < 0xFE00 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xE000) value

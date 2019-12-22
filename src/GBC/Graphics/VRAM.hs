@@ -22,14 +22,15 @@ module GBC.Graphics.VRAM
   )
 where
 
+import           Data.Bits
 import           Data.IORef
 import           Data.Word
-import           Data.Bits
 import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
 import           GBC.Mode
+import           GBC.Primitive.UnboxedRef
 
 data VRAM = VRAM {
     vram           :: !(Ptr Word8)
@@ -38,7 +39,7 @@ data VRAM = VRAM {
   , rgbPalettes    :: !(Ptr Word32)
   , mode           :: !EmulatorMode
   , vramAccessible :: !(IORef Bool)
-  , vramBank       :: !(IORef Int)
+  , vramBank       :: !(UnboxedRef Int)
 }
 
 initVRAM :: EmulatorMode -> IO VRAM
@@ -49,7 +50,7 @@ initVRAM mode = do
   vram           <- mallocBytes size
   oam            <- mallocBytes 160
   vramAccessible <- newIORef True
-  vramBank       <- newIORef 0
+  vramBank       <- newUnboxedRef 0
   rawPalettes    <- mallocArray (8 * 4 * 2)
   rgbPalettes    <- mallocArray (8 * 4 * 2)
   pokeArray rawPalettes (replicate (8 * 4 * 2) 0x7FFF)
@@ -62,7 +63,7 @@ setVRAMAccessible VRAM {..} = writeIORef vramAccessible
 
 {-# INLINE setVRAMBank #-}
 setVRAMBank :: VRAM -> Int -> IO ()
-setVRAMBank VRAM {..} = writeIORef vramBank
+setVRAMBank VRAM {..} = writeUnboxedRef vramBank
 
 -- | Write a palette given the values of the cps and cpd registers.
 {-# INLINE writePalette #-}
@@ -160,7 +161,7 @@ readVRAM VRAM {..} addr = do
     else case mode of
       DMG -> peekElemOff vram (fromIntegral (addr - 0x8000))
       CGB -> do
-        bankOffset <- readIORef vramBank
+        bankOffset <- readUnboxedRef vramBank
         peekElemOff vram (fromIntegral (addr - 0x8000) + bankOffset)
 
 {-# INLINE writeVRAM #-}
@@ -172,7 +173,7 @@ writeVRAM VRAM {..} addr value = do
     else case mode of
       DMG -> pokeElemOff vram (fromIntegral (addr - 0x8000)) value
       CGB -> do
-        bankOffset <- readIORef vramBank
+        bankOffset <- readUnboxedRef vramBank
         pokeElemOff vram (fromIntegral (addr - 0x8000) + bankOffset) value
 
 {-# INLINE copyToOAM #-}
