@@ -3,6 +3,7 @@
 module GBC.EmulatorSpec where
 
 import           Data.List
+import           Foreign.Ptr
 import           GBC.Audio
 import           GBC.CPU
 import           GBC.DMA
@@ -36,7 +37,8 @@ blankHeader romSize = Header { startAddress          = 0
 
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
-  emulator <- initEmulatorState blankROM
+  sync <- newGraphicsSync
+  emulator <- initEmulatorState blankROM sync nullPtr
   let allPorts =
         cpuPorts (cpu emulator)
           ++ dmaPorts (dmaState emulator)
