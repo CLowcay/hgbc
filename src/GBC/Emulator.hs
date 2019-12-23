@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module GBC.Emulator
@@ -17,6 +16,7 @@ import           Control.Monad.Reader
 import           Data.Foldable
 import           Data.IORef
 import           Data.Word
+import           Foreign.Ptr
 import           GBC.Audio
 import           GBC.CPU
 import           GBC.DMA
@@ -60,8 +60,8 @@ pollDelay :: Word32
 pollDelay = 10
 
 -- | Create an initial bus state.
-initEmulatorState :: ROM -> IO EmulatorState
-initEmulatorState rom = do
+initEmulatorState :: ROM -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
+initEmulatorState rom graphicsSync frameBufferBytes = do
   let mode = case cgbSupport (romHeader rom) of
         CGBCompatible   -> CGB
         CGBExclusive    -> CGB
@@ -75,8 +75,7 @@ initEmulatorState rom = do
 
   cpu             <- initCPU portIF portIE mode
   dmaState        <- initDMA
-  graphicsSync    <- newGraphicsSync
-  graphicsState   <- initGraphics vram portIF
+  graphicsState   <- initGraphics vram mode frameBufferBytes portIF
   keypadState     <- initKeypadState portIF
   timerState      <- initTimerState portIF
   audioState      <- initAudioState
@@ -106,7 +105,8 @@ clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< ask
 killWindows :: ReaderT EmulatorState IO ()
 killWindows = do
   sync <- asks graphicsSync
-  liftIO (putMVar (currentLine sync) 255)
+  liftIO (putMVar (signalWindow sync) Quit)
+  pure ()
 
 -- | Poll and dispatch events.
 handleEvents :: ReaderT EmulatorState IO ()
@@ -116,6 +116,8 @@ handleEvents = do
   liftIO $ keypadHandleUserEvents keypadState events
   for_ (SDL.eventPayload <$> events) $ \case
     (SDL.WindowClosedEvent _) -> killWindows
+    SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodeK _)) ->
+      liftIO . flip writeIORef True . breakFlag =<< ask
     SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _)) ->
       liftIO . flip writeIORef True . breakFlag =<< ask
     _ -> pure ()
@@ -147,7 +149,7 @@ step = do
       void $ updateHardware dmaClockAdvance doubleSpeed
       pure (busEvent { clockAdvance = cpuClocks + dmaClockAdvance })
     else case graphicsEvent of
-      NoGraphicsEvent -> pure (busEvent { clockAdvance = cpuClocks})
+      NoGraphicsEvent -> pure (busEvent { clockAdvance = cpuClocks })
       HBlankEvent     -> do
         hdmaClockAdvance <- doHBlankHDMA dmaState
         when (hdmaClockAdvance > 0) $ void $ updateHardware hdmaClockAdvance doubleSpeed

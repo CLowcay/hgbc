@@ -5,7 +5,8 @@ import           Debug.CLI
 import           Debug.Debugger
 import           GBC.CPU
 import           GBC.Emulator
-import           GBC.Graphics.PPU
+import           GBC.Graphics
+import           GBC.Graphics.Window
 import           GBC.ROM
 import           System.Environment
 import           System.Exit
@@ -23,8 +24,9 @@ main = do
       putStrLn $ "Error validating ROM " ++ show file ++ ": " ++ err
       exitFailure
     Right rom -> do
-      emulatorState <- initEmulatorState rom
-      debugState    <- initDebug rom emulatorState
-      void $ startOutput (memory emulatorState) (vram emulatorState) (graphicsSync emulatorState) (mode emulatorState)
+      sync                  <- newGraphicsSync
+      (_, frameBufferBytes) <- startOutput sync
+      emulatorState         <- initEmulatorState rom sync frameBufferBytes
+      debugState            <- initDebug rom emulatorState
       runReaderT reset debugState
       runReaderT (Haskeline.runInputT Haskeline.defaultSettings cli) debugState
