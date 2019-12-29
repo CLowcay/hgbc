@@ -58,8 +58,8 @@ withNewCPU computation = do
   vram   <- initVRAM DMG
   portIF <- newPort 0x00 0x1F alwaysUpdate
   portIE <- newPort 0x00 0xFF alwaysUpdate
-  mem <- initMemory blankROM vram [(IF, portIF)] portIE DMG
-  cpu <- initCPU portIF portIE DMG
+  mem    <- initMemory blankROM vram [(IF, portIF)] portIE DMG
+  cpu    <- initCPU portIF portIE DMG
   void $ runReaderT computationWithVerification $ CPUTestState cpu mem
  where
   computationWithVerification = do
@@ -78,16 +78,16 @@ withNewCPU computation = do
     h  <- readR8 RegH
     l  <- readR8 RegL
     liftIO $ do
-      fromIntegral (bc `unsafeShiftR` 8) `shouldBe` b
-      fromIntegral (de `unsafeShiftR` 8) `shouldBe` d
-      fromIntegral (hl `unsafeShiftR` 8) `shouldBe` h
+      fromIntegral (bc .>>. 8) `shouldBe` b
+      fromIntegral (de .>>. 8) `shouldBe` d
+      fromIntegral (hl .>>. 8) `shouldBe` h
       fromIntegral (bc .&. 0x00FF) `shouldBe` c
       fromIntegral (de .&. 0x00FF) `shouldBe` e
       fromIntegral (hl .&. 0x00FF) `shouldBe` l
 
 withAllFlagCombos :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
 withAllFlagCombos computation = forM_ [0 .. 0xF] $ \flags -> do
-  writeF $ (flags `unsafeShiftL` 4) .|. 0x0A
+  writeF $ (flags .<<. 4) .|. 0x0A
   computation
 
 withNoChangeToRegisters :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
@@ -609,7 +609,7 @@ pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest)
       RegSP -> do
         l <- readF
         h <- readR8 RegA
-        pure $ (fromIntegral h `unsafeShiftL` 8) .|. fromIntegral l
+        pure $ (fromIntegral h .<<. 8) .|. fromIntegral l
       _ -> readR16 dest
     liftIO $ do
       sp' `shouldBe` 0xFFF2

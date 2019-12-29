@@ -26,18 +26,16 @@ mbc5 bankMask ramMask ramAllocator = do
 
   cachedROMOffset     <- newIORef 0x4000
 
-  let
-    updateROMOffset = do
-      low  <- readIORef romB0
-      high <- readIORef romB1
-      writeIORef cachedROMOffset
-                 ((((high `unsafeShiftL` 8) .|. low) .&. bankMask) `unsafeShiftL` 14)
+  let updateROMOffset = do
+        low  <- readIORef romB0
+        high <- readIORef romB1
+        writeIORef cachedROMOffset ((((high .<<. 8) .|. low) .&. bankMask) .<<. 14)
 
   let bankOffset = readIORef cachedROMOffset
 
   let getRAMOffset = do
         bank <- readIORef ramB
-        pure ((bank .&. ramMask) `unsafeShiftL` 13)
+        pure ((bank .&. ramMask) .<<. 13)
 
   let writeROM address value
         | address < 0x2000 = writeIORef ramG (value .&. 0x0F == 0x0A)

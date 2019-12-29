@@ -9,6 +9,7 @@ module GBC.Decode
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
 import           Data.Array
@@ -92,7 +93,7 @@ table = array (0, 0xFF) (doDecode <$> [0 .. 0xFF])
   decodeBytes 3 6  3  = pure DI
   decodeBytes 3 7  3  = pure EI
   decodeBytes 3 cc 4  = if cc .&. 0x04 /= 0
-    then pure (INVALID (0o304 .|. cc `unsafeShiftL` 3))
+    then pure (INVALID (0o304 .|. cc .<<. 3))
     else CALLCC (conditionCode cc) <$> nextWord
   decodeBytes 3 1  5 = CALL <$> nextWord
   decodeBytes 3 3  5 = pure (INVALID 0o335)
@@ -129,7 +130,7 @@ table = array (0, 0xFF) (doDecode <$> [0 .. 0xFF])
       (3, b, r) -> SET b (SmallR8 (register r))
       _         -> INVALID b1
 
-  decodeBytes a b c = pure (INVALID ((a `unsafeShiftL` 6) .|. (b `unsafeShiftL` 3) .|. c))
+  decodeBytes a b c = pure (INVALID ((a .<<. 6) .|. (b .<<. 3) .|. c))
 
   splitByte x = (x `unsafeShiftR` 6 .&. 0x03, x `unsafeShiftR` 3 .&. 0x07, x .&. 0x07)
   register 0o0 = RegB
@@ -190,4 +191,4 @@ nextWord = do
   l    <- lift (readByte addr)
   h    <- lift (readByte (addr + 1))
   modify (+ 2)
-  pure $ (fromIntegral h `unsafeShiftL` 8) .|. fromIntegral l
+  pure $ (fromIntegral h .<<. 8) .|. fromIntegral l

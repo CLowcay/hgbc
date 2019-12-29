@@ -130,7 +130,7 @@ instance Channel PulseChannel where
       pure (getTimerPeriod (getFrequency register3 register4))
 
 getDutyCycle :: Word8 -> Word8
-getDutyCycle register = register `unsafeShiftR` 6
+getDutyCycle register = register .>>. 6
 
 dutyCycleStates :: [(Int, Int)]
 dutyCycleStates = [1, 2, 3, 4, 5, 6, 7, 0] <&> (, 1)

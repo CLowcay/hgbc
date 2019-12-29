@@ -101,6 +101,6 @@ widthMask register3 = if register3 `testBit` 3 then 0x0040 else 0x4000
 
 timerPeriod :: Word8 -> Int
 timerPeriod register3 =
-  let shiftClock = fromIntegral register3 `unsafeShiftR` 4
+  let shiftClock = fromIntegral register3 .>>. 4
       ratio      = fromIntegral register3 .&. 0x07
-  in  32 `max` (4 * (ratio + 1) * (1 `unsafeShiftL` (shiftClock + 1)))
+  in  32 `max` (4 * (ratio + 1) * (1 .<<. (shiftClock + 1)))

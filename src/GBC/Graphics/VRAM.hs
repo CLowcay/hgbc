@@ -22,6 +22,7 @@ module GBC.Graphics.VRAM
   )
 where
 
+import           Common
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
@@ -86,17 +87,17 @@ readRGBPalette VRAM {..} fg addr =
 
 updatePalette :: VRAM -> Bool -> Word8 -> IO ()
 updatePalette VRAM {..} fg cps = do
-  let addr = (if fg then 32 else 0) + fromIntegral ((cps `unsafeShiftR` 1) .&. 0x1F)
+  let addr = (if fg then 32 else 0) + fromIntegral ((cps .>>. 1) .&. 0x1F)
   raw <- peekElemOff rawPalettes addr
   pokeElemOff rgbPalettes addr (encodeColor raw)
 
 encodeColor :: Word16 -> Word32
 encodeColor color =
-  let b            = (color `unsafeShiftR` 10) .&. 0x1F
-      g            = (color `unsafeShiftR` 5) .&. 0x1F
+  let b            = (color .>>. 10) .&. 0x1F
+      g            = (color .>>. 5) .&. 0x1F
       r            = color .&. 0x1F
       (r', g', b') = cgbColors (fromIntegral r, fromIntegral g, fromIntegral b)
-  in  (fromIntegral b' `unsafeShiftL` 16) .|. (fromIntegral g' `unsafeShiftL` 8) .|. fromIntegral r'
+  in  (fromIntegral b' .<<. 16) .|. (fromIntegral g' .<<. 8) .|. fromIntegral r'
 
 type ColorCorrection = (Int, Int, Int) -> (Word8, Word8, Word8)
 

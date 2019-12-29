@@ -102,13 +102,11 @@ instance Channel WaveChannel where
     isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       void $ updateStateCycle sample 1 $ \i -> do
-        sampleByte <- directReadPort (portWaveTable V.! (i `unsafeShiftR` 1))
+        sampleByte <- directReadPort (portWaveTable V.! (i .>>. 1))
         register2  <- directReadPort port2
-        let volume = getVolume register2
-        let rawSampleValue =
-              if i .&. 1 == 0 then sampleByte `unsafeShiftR` 4 else sampleByte .&. 0x0F
-        let sampleValue =
-              if volume == 0 then 0 else rawSampleValue `unsafeShiftR` (fromIntegral volume - 1)
+        let volume         = getVolume register2
+        let rawSampleValue = if i .&. 1 == 0 then sampleByte .>>. 4 else sampleByte .&. 0x0F
+        let sampleValue = if volume == 0 then 0 else rawSampleValue .>>. (fromIntegral volume - 1)
         writeUnboxedRef output (fromIntegral sampleValue - 8)
       register3 <- directReadPort port3
       register4 <- directReadPort port4
@@ -118,7 +116,7 @@ flagMasterEnable :: Word8
 flagMasterEnable = 0x80
 
 getVolume :: Word8 -> Word8
-getVolume register2 = 3 .&. (register2 `unsafeShiftR` 5)
+getVolume register2 = 3 .&. (register2 .>>. 5)
 
 getTimerPeriod :: Int -> Int
 getTimerPeriod f = (2 * (2048 - f)) - 1

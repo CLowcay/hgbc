@@ -1,5 +1,7 @@
 module Common
-  ( isFlagSet
+  ( (.<<.)
+  , (.>>.)
+  , isFlagSet
   , SymbolTable(..)
   , lookupByAddress
   , lookupBySymbol
@@ -13,6 +15,16 @@ where
 import           Data.Bits
 import           Data.Word
 import qualified Data.HashMap.Strict           as HM
+
+infixl 8 .<<.
+{-# INLINE (.<<.) #-}
+(.<<.) :: Bits a => a -> Int -> a
+(.<<.) = unsafeShiftL
+
+infixl 8 .>>.
+{-# INLINE (.>>.) #-}
+(.>>.) :: Bits a => a -> Int -> a
+(.>>.) = unsafeShiftR
 
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
@@ -43,7 +55,7 @@ formatHex n = padLeft width '0' $ encodeHex . toHexit <$> reverse [0 .. lastHexi
  where
   width     = finiteBitSize n `div` 4
   lastHexit = (finiteBitSize n `div` 4) - 1
-  toHexit i = (n `unsafeShiftR` (i * 4)) .&. 0x0F
+  toHexit i = (n .>>. (i * 4)) .&. 0x0F
   encodeHex 0  = '0'
   encodeHex 1  = '1'
   encodeHex 2  = '2'

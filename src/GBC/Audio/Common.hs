@@ -14,6 +14,7 @@ module GBC.Audio.Common
   )
 where
 
+import           Common
 import           Data.Bits
 import           Data.Word
 import           GBC.Primitive
@@ -43,7 +44,7 @@ getFrequency :: Word8 -> Word8 -> Int
 getFrequency register3 register4 =
   let lsb = register3
       msb = register4
-  in  ((fromIntegral msb .&. 0x07) `unsafeShiftL` 8) .|. fromIntegral lsb
+  in  ((fromIntegral msb .&. 0x07) .<<. 8) .|. fromIntegral lsb
 
 updateFrequency :: Port Word8 -> Port Word8 -> Int -> IO ()
 updateFrequency port3 port4 frequency = do

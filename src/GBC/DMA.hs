@@ -13,6 +13,7 @@ module GBC.DMA
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
@@ -137,8 +138,8 @@ doHBlankHDMA DMAState {..} = do
       pure 8
 
 makeHDMASource :: Word8 -> Word8 -> Word16
-makeHDMASource high low = (fromIntegral high `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0)
+makeHDMASource high low = (fromIntegral high .<<. 8) .|. (fromIntegral low .&. 0xF0)
 
 makeHDMADestination :: Word8 -> Word8 -> Word16
 makeHDMADestination high low =
-  0x8000 + (((fromIntegral high .&. 0x1F) `unsafeShiftL` 8) .|. (fromIntegral low .&. 0xF0))
+  0x8000 + (((fromIntegral high .&. 0x1F) .<<. 8) .|. (fromIntegral low .&. 0xF0))

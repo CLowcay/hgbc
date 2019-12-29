@@ -54,7 +54,7 @@ flagDirection :: Word8
 flagDirection = 0x08
 
 getVolume :: Word8 -> Int
-getVolume register = fromIntegral register `unsafeShiftR` 4
+getVolume register = fromIntegral register .>>. 4
 
 getVolumeDelta :: Word8 -> Int
 getVolumeDelta register = if isFlagSet flagDirection register then 1 else (-1)

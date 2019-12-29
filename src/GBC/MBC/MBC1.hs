@@ -36,13 +36,13 @@ mbc1 bankMask ramMask ramAllocator = do
           then pure low
           else do
             high <- readIORef ramOffset
-            pure ((high `unsafeShiftL` 5) .|. low)
-        writeIORef cachedROMOffset ((bank .&. bankMask) `unsafeShiftL` 14)
+            pure ((high .<<. 5) .|. low)
+        writeIORef cachedROMOffset ((bank .&. bankMask) .<<. 14)
 
   let updateRAMOffset = do
         ramBanking <- readIORef ramSelect
         bank       <- if ramBanking then readIORef ramOffset else pure 0
-        writeIORef cachedRAMOffset ((bank .&. ramMask) `unsafeShiftL` 13)
+        writeIORef cachedRAMOffset ((bank .&. ramMask) .<<. 13)
 
   let writeROM address value
         | address < 0x2000

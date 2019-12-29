@@ -124,7 +124,7 @@ audioCallback buffer _ stream len = do
     then pokeArray stream (replicate (fromIntegral len) 128)
     else void $ foldBuffer buffer (fromIntegral len `div` 2) 0 $ \i sample ->
       let left  = fromIntegral (sample .&. 0x00FF)
-          right = fromIntegral (sample `unsafeShiftR` 8)
+          right = fromIntegral (sample .>>. 8)
       in  do
             pokeElemOff stream i       left
             pokeElemOff stream (i + 1) right
@@ -172,9 +172,9 @@ audioStep audioState@AudioState {..} clockAdvance = do
     updateCounter sampler clockAdvance $ do
       register50 <- directReadPort port50
       register51 <- directReadPort port51
-      let volumeLeft  = 8 - (register50 `unsafeShiftR` 4 .&. 0x07)
+      let volumeLeft  = 8 - (register50 .>>. 4 .&. 0x07)
       let volumeRight = 8 - (register50 .&. 0x07)
-      let left        = register51 `unsafeShiftR` 4
+      let left        = register51 .>>. 4
       let right       = register51 .&. 0x0F
       leftSample  <- (`div` volumeLeft) <$> mixOutputChannel audioState left
       rightSample <- (`div` volumeRight) <$> mixOutputChannel audioState right

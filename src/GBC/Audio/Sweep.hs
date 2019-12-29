@@ -44,8 +44,8 @@ initSweep sweep@Sweep {..} frequency0 register disableIO = do
   when (getShift register /= 0) $ void $ overflowCheck sweep register disableIO
 
 nextFrequency :: Int -> Int -> Bool -> Int
-nextFrequency frequency0 sweepShift False = frequency0 + (frequency0 `unsafeShiftR` sweepShift)
-nextFrequency frequency0 sweepShift True  = frequency0 - (frequency0 `unsafeShiftR` sweepShift)
+nextFrequency frequency0 sweepShift False = frequency0 + (frequency0 .>>. sweepShift)
+nextFrequency frequency0 sweepShift True  = frequency0 - (frequency0 .>>. sweepShift)
 
 overflowCheck :: Sweep -> Word8 -> IO () -> IO Int
 overflowCheck Sweep {..} register disableIO = do
@@ -73,7 +73,7 @@ flagNegate :: Word8
 flagNegate = 0x08
 
 getPeriod :: Word8 -> Int
-getPeriod register = (fromIntegral register `unsafeShiftR` 4) .&. 0x07
+getPeriod register = (fromIntegral register .>>. 4) .&. 0x07
 
 getShift :: Word8 -> Int
 getShift register = fromIntegral register .&. 0x07

@@ -25,8 +25,8 @@ mbc3 bankMask ramMask ramAllocator rtc = do
 
   let bankOffset = do
         offset <- readIORef romOffset
-        pure ((offset .&. bankMask) `unsafeShiftL` 14)
-  let getRAMOffset r2 = (r2 .&. ramMask) `unsafeShiftL` 13
+        pure ((offset .&. bankMask) .<<. 14)
+  let getRAMOffset r2 = (r2 .&. ramMask) .<<. 13
 
   let
     writeROM address value

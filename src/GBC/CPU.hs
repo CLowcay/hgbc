@@ -148,9 +148,9 @@ class HasMemory env => HasCPU env where
 -- | Initialize a new CPU.
 initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> IO CPUState
 initCPU portIF portIE cpuType = do
-  registers   <- mallocForeignPtr
-  portKEY1    <- newPort 0x00 0x01 alwaysUpdate
-  cpuMode     <- newIORef ModeNormal
+  registers <- mallocForeignPtr
+  portKEY1  <- newPort 0x00 0x01 alwaysUpdate
+  cpuMode   <- newIORef ModeNormal
   pure CPUState { .. }
 
 cpuPorts :: CPUState -> [(Word16, Port Word8)]
@@ -479,7 +479,7 @@ pop16 = do
   valueL <- readByte sp
   valueH <- readByte (sp + 1)
   writeR16 RegSP (sp + 2)
-  pure ((fromIntegral valueH `unsafeShiftL` 8) .|. fromIntegral valueL)
+  pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
 
 {-# INLINE arithOp8 #-}
 arithOp8 :: HasCPU env => ArithmeticOp -> Operand8 -> Bool -> ReaderT env IO ()
@@ -533,7 +533,7 @@ cpuStep = do
 getIsDoubleSpeed :: HasCPU env => ReaderT env IO Bool
 getIsDoubleSpeed = do
   portKEY1 <- asks (portKEY1 . forCPUState)
-  key1 <- liftIO $ directReadPort portKEY1
+  key1     <- liftIO $ directReadPort portKEY1
   pure (isFlagSet flagDoubleSpeed key1)
 
 {-# INLINE normalClocks #-}
@@ -843,21 +843,21 @@ executeInstruction instruction = case instruction of
   -- SLA \<r8|(HL)\>
   SLA so8 -> do
     value <- readSmallOperand8 so8
-    let r = value `unsafeShiftL` 1
+    let r = value .<<. 1
     setFlags ((if value .&. 0x80 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     writeSmallOperand8 so8 r
     pure (normalClocks instruction)
   -- SRA \<r8|(HL)\>
   SRA so8 -> do
     value <- readSmallOperand8 so8
-    let r = (fromIntegral value `unsafeShiftR` 1) :: Int8
+    let r = (fromIntegral value .>>. 1) :: Int8
     setFlags ((if value .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     writeSmallOperand8 so8 (fromIntegral r)
     pure (normalClocks instruction)
   -- SRL \<r8|(HL)\>
   SRL so8 -> do
     value <- readSmallOperand8 so8
-    let r = value `unsafeShiftR` 1
+    let r = value .>>. 1
     setFlags ((if value .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     writeSmallOperand8 so8 r
     pure (normalClocks instruction)
@@ -865,7 +865,7 @@ executeInstruction instruction = case instruction of
   SWAP so8 -> do
     value <- readSmallOperand8 so8
     setFlags (if value == 0 then flagZ else 0)
-    writeSmallOperand8 so8 ((value `unsafeShiftR` 4) .|. (value `unsafeShiftL` 4))
+    writeSmallOperand8 so8 ((value .>>. 4) .|. (value .<<. 4))
     pure (normalClocks instruction)
   -- BIT b \<r8|(HL)\>
   BIT w8 so8 -> do

@@ -48,7 +48,7 @@ dumpRegisters = do
        , if regHidden .&. flagIME /= 0 then 'I' else 'i'
        ]
     )
-  where assemble h l = (fromIntegral h `unsafeShiftL` 8 .|. fromIntegral l) :: Word16
+  where assemble h l = (fromIntegral h .<<. 8 .|. fromIntegral l) :: Word16
 
 dumpHeader :: Header -> InputT (ReaderT env IO) ()
 dumpHeader Header {..} = do

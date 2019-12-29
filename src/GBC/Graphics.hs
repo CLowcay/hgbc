@@ -328,7 +328,7 @@ getBlendInfo :: Word8 -> Word8
 getBlendInfo attrs =
   let priorityToBackground = isFlagSet flagDisplayPriority attrs
       cgbPalette           = attrs .&. 7
-  in  (if priorityToBackground then 0x80 else 0) .|. (cgbPalette `unsafeShiftL` 2)
+  in  (if priorityToBackground then 0x80 else 0) .|. (cgbPalette .<<. 2)
 
 {-# INLINE getSpriteBlendInfo #-}
 getSpriteBlendInfo :: Word8 -> Word8
@@ -337,12 +337,12 @@ getSpriteBlendInfo attrs =
       dmgPalette           = isFlagSet flagOAMPalette attrs
       cgbPalette           = attrs .&. 7
   in  (if priorityToBackground then 0x80 else 0)
-        .|. (cgbPalette `unsafeShiftL` 2)
+        .|. (cgbPalette .<<. 2)
         .|. (if dmgPalette then 0x40 else 0x20)
 
 decodeBlendInfo :: Word8 -> (Word8, Int)
 decodeBlendInfo blendInfo =
-  let palette = (blendInfo `unsafeShiftR` 5) .&. 3
+  let palette = (blendInfo .>>. 5) .&. 3
       index   = blendInfo .&. 3
   in  (palette, fromIntegral index)
 
@@ -371,9 +371,9 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
   -- Render window data to the assembly area.
   when bgEnabled $ do
-    let yTile      = fromIntegral $ (line + scy) `unsafeShiftR` 3
+    let yTile      = fromIntegral $ (line + scy) .>>. 3
     let yOffset    = fromIntegral $ (line + scy) .&. 0x07
-    let xTile      = fromIntegral $ scx `unsafeShiftR` 3
+    let xTile      = fromIntegral $ scx .>>. 3
     let xOffset    = fromIntegral $ scx .&. 0x07
 
     let bgTiles = if isFlagSet flagBackgroundTileMap lcdc then 0x1C00 else 0x1800
@@ -382,7 +382,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
   -- Render window data to the assembly area.
   when windowEnabled $ do
-    let yTileWindow    = fromIntegral $ (line - wy) `unsafeShiftR` 3
+    let yTileWindow    = fromIntegral $ (line - wy) .>>. 3
     let yOffsetWindow  = fromIntegral $ (line - wy) .&. 0x07
 
     let windowTiles    = if isFlagSet flagWindowTileMap lcdc then 0x1C00 else 0x1800
@@ -427,10 +427,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
   {-# INLINE decodePixel #-}
   decodePixel byte0 byte1 offset =
-    0x03
-      .&. (   ((byte0 `unsafeShiftR` offset) .&. 0x01)
-          .|. ((byte1 `unsafeShiftR` offset) `unsafeShiftL` 1)
-          )
+    0x03 .&. (((byte0 .>>. offset) .&. 0x01) .|. ((byte1 .>>. offset) .<<. 1))
 
   -- Write pixels to the assembly area. Takes two bytes containing the pixel
   -- data, the bit offset into the bytes, and the x position to output the
@@ -514,7 +511,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
                 1 -> obp0
                 2 -> obp1
                 _ -> error "Framebuffer corrupted"
-          let pixel = (3 - ((paletteData `unsafeShiftR` (fromIntegral index * 2)) .&. 0x03)) * 85
+          let pixel = (3 - ((paletteData .>>. (fromIntegral index * 2)) .&. 0x03)) * 85
           let outputOffset = offset * 4
           pokeElemOff outputBase outputOffset       pixel
           pokeElemOff outputBase (outputOffset + 1) pixel

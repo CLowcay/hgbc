@@ -8,13 +8,14 @@ module GBC.Keypad
   )
 where
 
+import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Function
 import           Data.IORef
 import           Data.Word
-import           GBC.Primitive
 import           GBC.Interrupts
+import           GBC.Primitive
 import           GBC.Registers
 import           SDL.Event
 import           SDL.Input.Keyboard
@@ -71,7 +72,7 @@ refreshKeypad :: Word8 -> Port Word8 -> Word8 -> Word8 -> IO Word8
 refreshKeypad keypad portIF _ p1 = do
   let p1' = case (p1 `testBit` 4, p1 `testBit` 5) of
         (True , False) -> complement keypad .&. 0x0F
-        (False, True ) -> complement (keypad `unsafeShiftR` 4)
+        (False, True ) -> complement (keypad .>>. 4)
         (True , True ) -> 0xFF
         (False, False) -> 0
   when (0 /= 0x0F .&. p1 .&. complement p1') (raiseInterrupt portIF InterruptP1Low)

@@ -104,7 +104,7 @@ getMbcRegisters = do
 dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
-  liftIO $ case source `unsafeShiftR` 13 of
+  liftIO $ case source .>>. 13 of
     0 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
     1 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
     2 -> do
@@ -131,7 +131,7 @@ dmaToOAM source = do
 readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
-  liftIO $ case addr `unsafeShiftR` 13 of
+  liftIO $ case addr .>>. 13 of
     0 -> pure $ rom `B.unsafeIndex` fromIntegral addr
     1 -> pure $ rom `B.unsafeIndex` fromIntegral addr
     2 -> do
@@ -167,14 +167,14 @@ readByte addr = do
 writeWord :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
 writeWord addr value = do
   writeByte addr       (fromIntegral (value .&. 0xFF))
-  writeByte (addr + 1) (fromIntegral (value `unsafeShiftR` 8))
+  writeByte (addr + 1) (fromIntegral (value .>>. 8))
 
 -- | Write to memory.
 {-# INLINABLE writeByte #-}
 writeByte :: HasMemory env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
   Memory {..} <- asks forMemory
-  liftIO $ case addr `unsafeShiftR` 13 of
+  liftIO $ case addr .>>. 13 of
     0 -> writeROM mbc addr value
     1 -> writeROM mbc addr value
     2 -> writeROM mbc addr value
