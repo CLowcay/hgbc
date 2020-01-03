@@ -10,6 +10,7 @@ module GBC.Memory
   , getMbcRegisters
   , dmaToOAM
   , readByte
+  , readWord
   , writeByte
   , writeWord
   , copy16
@@ -162,6 +163,13 @@ readByte addr = do
       | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF80)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
+
+{-# INLINABLE readWord #-}
+readWord :: HasMemory env => Word16 -> ReaderT env IO Word16
+readWord addr = do
+  l <- readByte addr
+  h <- readByte (addr + 1)
+  pure ((fromIntegral h .<<. 8) .|. fromIntegral l)
 
 {-# INLINABLE writeWord #-}
 writeWord :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()

@@ -81,7 +81,7 @@ updateTimer TimerState {..} advance = do
 
   -- Update the DIV register if required.
   when (clocks .&. 0xFF00 /= clocks' .&. 0xFF00)
-    $ directWritePort portDIV (fromIntegral (clocks' `unsafeShiftR` 8) :: Word8)
+    $ directWritePort portDIV (fromIntegral (clocks' .>>. 8) :: Word8)
 
   -- Update the TIMA register
   tac <- directReadPort portTAC

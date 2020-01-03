@@ -1,3 +1,8 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -8,13 +13,11 @@ module GBC.CPU
   , CPUMode(..)
   , CPUState(..)
   , HasCPU(..)
-  , BusEvent(..)
   , initCPU
   , cpuPorts
   , getMode
-  , getIsDoubleSpeed
+  , getCPUCycleClocks
   , reset
-  , decodeOnly
   , getRegisterFile
   , readR8
   , writeR8
@@ -37,10 +40,6 @@ module GBC.CPU
   , flagIME
   , flagDoubleSpeed
   , testCondition
-  , readOperand8
-  , readSmallOperand8
-  , writeSmallOperand8
-  , executeInstruction
   , cpuStep
   , internalRegisters
   )
@@ -56,14 +55,16 @@ import           Data.Maybe
 import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Storable
-import           GBC.Decode
+import           GBC.CPU.Decode
+import           GBC.CPU.ISA
 import           GBC.Errors
-import           GBC.ISA
 import           GBC.Interrupts
 import           GBC.Memory
 import           GBC.Mode
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 import           GBC.Registers
+import qualified Data.Vector                   as V
 
 -- | The register file.
 data RegisterFile = RegisterFile {
@@ -123,23 +124,18 @@ instance Storable RegisterFile where
     pokeByteOff ptr offsetPC     regPC
     pokeByteOff ptr offsetHidden regHidden
 
--- | Information for the debugger.
-data BusEvent = BusEvent {
-   clockAdvance :: !Int
- , currentMode :: !CPUMode
-} deriving (Eq, Ord, Show)
-
 -- | The current CPU mode.
 data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | The internal CPU state.
 data CPUState = CPUState {
-    registers    :: !(ForeignPtr RegisterFile)
-  , portIF       :: !(Port Word8)
-  , portIE       :: !(Port Word8)
-  , portKEY1     :: !(Port Word8)
-  , cpuMode      :: !(IORef CPUMode)
-  , cpuType      :: !EmulatorMode
+    cpuType        :: !EmulatorMode
+  , registers      :: !(ForeignPtr RegisterFile)
+  , portIF         :: !(Port Word8)
+  , portIE         :: !(Port Word8)
+  , portKEY1       :: !(Port Word8)
+  , cpuMode        :: !(IORef CPUMode)
+  , cpuCycleClocks :: !(UnboxedRef Int)
 }
 
 class HasMemory env => HasCPU env where
@@ -148,9 +144,10 @@ class HasMemory env => HasCPU env where
 -- | Initialize a new CPU.
 initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> IO CPUState
 initCPU portIF portIE cpuType = do
-  registers <- mallocForeignPtr
-  portKEY1  <- newPort 0x00 0x01 alwaysUpdate
-  cpuMode   <- newIORef ModeNormal
+  registers      <- mallocForeignPtr
+  portKEY1       <- newPort 0x00 0x01 alwaysUpdate
+  cpuMode        <- newIORef ModeNormal
+  cpuCycleClocks <- newUnboxedRef 4
   pure CPUState { .. }
 
 cpuPorts :: CPUState -> [(Word16, Port Word8)]
@@ -193,16 +190,16 @@ writeRegister offset value = do
 
 -- | Read a single register.
 {-# INLINABLE readR8 #-}
-readR8 :: HasCPU env => Register8 -> ReaderT env IO Word8
+readR8 :: HasCPU env => RegisterR -> ReaderT env IO Word8
 readR8 = readRegister . offsetR8
 
 -- | Write a single register.
 {-# INLINABLE writeR8 #-}
-writeR8 :: HasCPU env => Register8 -> Word8 -> ReaderT env IO ()
+writeR8 :: HasCPU env => RegisterR -> Word8 -> ReaderT env IO ()
 writeR8 register = writeRegister $ offsetR8 register
 
 -- | Get the offset in the register file of a single register.
-offsetR8 :: Register8 -> Int
+offsetR8 :: RegisterR -> Int
 offsetR8 RegA = offsetA
 offsetR8 RegB = offsetB
 offsetR8 RegC = offsetC
@@ -213,20 +210,37 @@ offsetR8 RegL = offsetL
 
 -- | Read a 16-bit register.
 {-# INLINABLE readR16 #-}
-readR16 :: HasCPU env => Register16 -> ReaderT env IO Word16
+readR16 :: HasCPU env => RegisterSS -> ReaderT env IO Word16
 readR16 = readRegister . offsetR16
 
 -- | Write a 16-bit register.
 {-# INLINABLE writeR16 #-}
-writeR16 :: HasCPU env => Register16 -> Word16 -> ReaderT env IO ()
+writeR16 :: HasCPU env => RegisterSS -> Word16 -> ReaderT env IO ()
 writeR16 register = writeRegister $ offsetR16 register
 
 -- | Get the offset in the register file of a register pair.
-offsetR16 :: Register16 -> Int
+offsetR16 :: RegisterSS -> Int
 offsetR16 RegBC = offsetC
 offsetR16 RegDE = offsetE
 offsetR16 RegHL = offsetL
 offsetR16 RegSP = offsetSP
+
+-- | Read a 16-bit register.
+{-# INLINABLE readR16qq #-}
+readR16qq :: HasCPU env => RegisterQQ -> ReaderT env IO Word16
+readR16qq = readRegister . offsetR16qq
+
+-- | Write a 16-bit register.
+{-# INLINABLE writeR16qq #-}
+writeR16qq :: HasCPU env => RegisterQQ -> Word16 -> ReaderT env IO ()
+writeR16qq register = writeRegister $ offsetR16qq register
+
+-- | Get the offset in the register file of a register pair.
+offsetR16qq :: RegisterQQ -> Int
+offsetR16qq PushPopBC = offsetC
+offsetR16qq PushPopDE = offsetE
+offsetR16qq PushPopHL = offsetL
+offsetR16qq PushPopAF = offsetF
 
 -- | Read the PC register.
 {-# INLINABLE readPC #-}
@@ -237,37 +251,6 @@ readPC = readRegister offsetPC
 {-# INLINABLE writePC #-}
 writePC :: HasCPU env => Word16 -> ReaderT env IO ()
 writePC = writeRegister offsetPC
-
--- | Read the AF register.
-{-# INLINABLE readAF #-}
-readAF :: HasCPU env => ReaderT env IO Word16
-readAF = readRegister offsetF
-
--- | Write the AF register.
-{-# INLINABLE writeAF #-}
-writeAF :: HasCPU env => Word16 -> ReaderT env IO ()
-writeAF = writeRegister offsetF
-
--- | Read from a 'Operand8'. Returns a list of addresses that were read from.
-{-# INLINE readOperand8 #-}
-readOperand8 :: HasCPU env => Operand8 -> ReaderT env IO Word8
-readOperand8 (R8 register) = readR8 register
-readOperand8 (I8 value   ) = pure value
-readOperand8 HLI           = readByte =<< readR16 RegHL
-
--- | Read from a 'SmallOperand8'.  Returns a list of addresses that were read from.
-{-# INLINE readSmallOperand8 #-}
-readSmallOperand8 :: HasCPU env => SmallOperand8 -> ReaderT env IO Word8
-readSmallOperand8 (SmallR8 register) = readR8 register
-readSmallOperand8 SmallHLI           = readOperand8 HLI
-
--- | Write to a 'SmallOperand8'.  Returns a list of addresses that were written to.
-{-# INLINE writeSmallOperand8 #-}
-writeSmallOperand8 :: HasCPU env => SmallOperand8 -> Word8 -> ReaderT env IO ()
-writeSmallOperand8 (SmallR8 register) value = writeR8 register value
-writeSmallOperand8 SmallHLI           value = do
-  hl <- readR16 RegHL
-  writeByte hl value
 
 type Flag = Word8
 flagZ, flagN, flagH, flagCY :: Flag
@@ -319,8 +302,8 @@ setFlagsMask
   -> Word8 -- ^ new flags values.
   -> ReaderT env IO ()
 setFlagsMask mask flags = do
-  oldFlags <- readRegister offsetF
-  writeRegister offsetF ((oldFlags .&. complement mask) .|. (flags .&. mask))
+  oldFlags <- readF
+  writeF ((oldFlags .&. complement mask) .|. (flags .&. mask))
 
 -- | Set the master interrupt flag.
 {-# INLINE setIME #-}
@@ -412,6 +395,7 @@ adder8 op a1 a2 carry =
         OpSub -> wa1 - wa2 - (if carry then 1 else 0)
       r       = fromIntegral wr
       carryH  = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
+      -- TODO: simplify?
       carryCY = (wa1 .&. 0x0100) `xor` (wa2 .&. 0x0100) /= (wr .&. 0x0100)
       flags =
           (if r == 0 then flagZ else 0)
@@ -434,23 +418,6 @@ inc8 op value =
             .|. (if carryH then flagH else 0)
   in  (r, flags)
 
--- | Decode an instruction and advance the PC.
-{-# INLINE decodeAndAdvancePC #-}
-decodeAndAdvancePC :: HasCPU env => Decode a -> ReaderT env IO a
-decodeAndAdvancePC action = do
-  pc       <- readPC
-  (r, pc') <- runDecode pc action
-  writePC pc'
-  pure r
-
--- | Decode an instruction.
-{-# INLINE decodeOnly #-}
-decodeOnly :: HasCPU env => Decode a -> ReaderT env IO a
-decodeOnly action = do
-  pc     <- readPC
-  (r, _) <- runDecode pc action
-  pure r
-
 flagDoubleSpeed :: Word8
 flagDoubleSpeed = 0x80
 
@@ -464,35 +431,9 @@ interruptVector InterruptTimerOverflow     = 0x50
 interruptVector InterruptEndSerialTransfer = 0x58
 interruptVector InterruptP1Low             = 0x60
 
-{-# INLINE push16 #-}
-push16 :: HasCPU env => Word16 -> ReaderT env IO ()
-push16 value = do
-  sp <- readR16 RegSP
-  let sp' = sp - 2
-  writeWord sp' value
-  writeR16 RegSP sp'
-
-{-# INLINE pop16 #-}
-pop16 :: HasCPU env => ReaderT env IO Word16
-pop16 = do
-  sp     <- readR16 RegSP
-  valueL <- readByte sp
-  valueH <- readByte (sp + 1)
-  writeR16 RegSP (sp + 2)
-  pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
-
-{-# INLINE arithOp8 #-}
-arithOp8 :: HasCPU env => ArithmeticOp -> Operand8 -> Bool -> ReaderT env IO ()
-arithOp8 op o8 carry = do
-  a   <- readR8 RegA
-  arg <- readOperand8 o8
-  let (r, flags) = adder8 op a arg carry
-  writeR8 RegA r
-  setFlags flags
-
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE cpuStep #-}
-cpuStep :: HasCPU env => ReaderT env IO BusEvent
+cpuStep :: HasCPU env => ReaderT env IO Int
 cpuStep = do
   CPUState {..} <- asks forCPUState
 
@@ -503,19 +444,17 @@ cpuStep = do
   -- Deal with HALT mode
   mode          <- liftIO (readIORef cpuMode)
   case mode of
-    ModeNormal -> if interrupts /= 0 && ime
-      then handleInterrupt interrupts
-      else executeInstruction =<< decodeAndAdvancePC decode
-    ModeHalt -> if interrupts /= 0
+    ModeNormal -> if interrupts /= 0 && ime then handleInterrupt interrupts else executeInstruction
+    ModeHalt   -> if interrupts /= 0
       then do
         liftIO (writeIORef cpuMode ModeNormal)
         cpuStep
-      else pure (BusEvent 32 ModeHalt)
+      else pure 8
     ModeStop -> if interrupts /= 0
       then do
         liftIO (writeIORef cpuMode ModeNormal)
         cpuStep
-      else pure (BusEvent 32 ModeHalt)
+      else pure 8
 
  where
   handleInterrupt interrupts = do
@@ -527,412 +466,432 @@ cpuStep = do
     clearIME
     CPUState {..} <- asks forCPUState
     liftIO $ clearInterrupt portIF nextInterrupt
-    pure (BusEvent 28 ModeNormal) -- TODO: Number of clocks here is just a guess
+    pure 7  -- TODO: Number of clocks here is just a guess
 
-{-# INLINE getIsDoubleSpeed #-}
-getIsDoubleSpeed :: HasCPU env => ReaderT env IO Bool
-getIsDoubleSpeed = do
-  portKEY1 <- asks (portKEY1 . forCPUState)
-  key1     <- liftIO $ directReadPort portKEY1
-  pure (isFlagSet flagDoubleSpeed key1)
+{-# INLINE getCPUCycleClocks #-}
+getCPUCycleClocks :: HasCPU env => ReaderT env IO Int
+getCPUCycleClocks = do
+  CPUState {..} <- asks forCPUState
+  liftIO (readUnboxedRef cpuCycleClocks)
 
-{-# INLINE normalClocks #-}
-normalClocks :: Instruction -> BusEvent
-normalClocks instruction = BusEvent (clocks instruction True) ModeNormal
-
-{-# INLINE longClocks #-}
-longClocks :: Instruction -> Bool -> BusEvent
-longClocks instruction isLongClocks = BusEvent (clocks instruction isLongClocks) ModeNormal
-
--- | Execute a single instruction.
+{-# SPECIALIZE table0 :: HasCPU env => V.Vector (CPUM env Int) #-}
+{-# SPECIALIZE table1 :: HasCPU env => V.Vector (CPUM env Int) #-}
+{-# SPECIALIZE fetchAndExecute :: HasCPU env => CPUM env Int #-}
 {-# INLINABLE executeInstruction #-}
-executeInstruction :: HasCPU env => Instruction -> ReaderT env IO BusEvent
-executeInstruction instruction = case instruction of
-  -- LD r8 \<r8|im8|(HL)\>
-  LD_R8 r8 o8 -> do
-    value <- readOperand8 o8
-    writeR8 r8 value
-    pure (normalClocks instruction)
-  -- LD (HL) r8
-  LDHLI_R8 r8 -> do
-    value <- readR8 r8
-    hl    <- readR16 RegHL
-    writeByte hl value
-    pure (normalClocks instruction)
-  -- LD (HL) im8
-  LDHLI_I8 im8 -> do
+executeInstruction :: HasCPU env => ReaderT env IO Int
+executeInstruction = runCPUM fetchAndExecute
+
+newtype CPUM env a = CPUM {runCPUM :: ReaderT env IO a}
+  deriving (Functor, Applicative, Monad, MonadIO)
+
+instance HasCPU env => MonadFetch (CPUM env) where
+  nextByte = CPUM $ do
+    pc <- readPC
+    writePC (pc + 1)
+    readByte pc
+  nextWord = CPUM $ do
+    pc <- readPC
+    writePC (pc + 2)
+    readWord pc
+
+instance HasCPU env => MonadGMBZ80 (CPUM env) where
+  type ExecuteResult (CPUM env) = Int
+  ldrr r r' = CPUM $ do
+    writeR8 r =<< readR8 r'
+    pure 1
+  ldrn r n = CPUM $ do
+    writeR8 r n
+    pure 2
+  ldrHL r = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl im8
-    pure (normalClocks instruction)
-  -- LD A (BC)
-  LDA_BCI -> do
-    bc    <- readR16 RegBC
-    value <- readByte bc
-    writeR8 RegA value
-    pure (normalClocks instruction)
-  -- LD A (DE)
-  LDA_DEI -> do
-    de    <- readR16 RegDE
-    value <- readByte de
-    writeR8 RegA value
-    pure (normalClocks instruction)
-  -- LD A (C)
-  LDA_CI -> do
+    writeR8 r =<< readByte hl
+    pure 2
+  ldHLr r = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< readR8 r
+    pure 2
+  ldHLn n = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl n
+    pure 3
+  ldaBC = CPUM $ do
+    bc <- readR16 RegBC
+    writeR8 RegA =<< readByte bc
+    pure 2
+  ldaDE = CPUM $ do
+    de <- readR16 RegDE
+    writeR8 RegA =<< readByte de
+    pure 2
+  ldaC = CPUM $ do
     c <- readR8 RegC
-    let addr = fromIntegral c + 0xFF00
-    value <- readByte addr
-    writeR8 RegA value
-    pure (normalClocks instruction)
-  -- LD (C) A
-  LDCI_A -> do
+    writeR8 RegA =<< readByte (0xFF00 + fromIntegral c)
+    pure 2
+  ldCa = CPUM $ do
     c <- readR8 RegC
-    let addr = fromIntegral c + 0xFF00
-    value <- readR8 RegA
-    writeByte addr value
-    pure (normalClocks instruction)
-  -- LD A (im8)
-  LDA_I8I w8 -> do
-    let addr = fromIntegral w8 + 0xFF00
-    value <- readByte addr
-    writeR8 RegA value
-    pure (normalClocks instruction)
-  -- LD (im8) A
-  LDI8I_A w8 -> do
-    let addr = fromIntegral w8 + 0xFF00
-    value <- readR8 RegA
-    writeByte addr value
-    pure (normalClocks instruction)
-  -- LD A (im16)
-  LDA_I16I w16 -> do
-    value <- readByte w16
-    writeR8 RegA value
-    pure (normalClocks instruction)
-  -- LD (im16) A
-  LDI16I_A w16 -> do
-    value <- readR8 RegA
-    writeByte w16 value
-    pure (normalClocks instruction)
-  -- LD A (HL++)
-  LDA_INC -> do
-    hl    <- readR16 RegHL
-    value <- readByte hl
-    writeR8 RegA value
+    writeByte (0xFF00 + fromIntegral c) =<< readR8 RegA
+    pure 2
+  ldan n = CPUM $ do
+    writeR8 RegA =<< readByte (0xFF00 + fromIntegral n)
+    pure 3
+  ldna n = CPUM $ do
+    writeByte (0xFF00 + fromIntegral n) =<< readR8 RegA
+    pure 3
+  ldann nn = CPUM $ do
+    writeR8 RegA =<< readByte nn
+    pure 4
+  ldnna nn = CPUM $ do
+    writeByte nn =<< readR8 RegA
+    pure 4
+  ldaHLI = CPUM $ do
+    hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    pure (normalClocks instruction)
-  -- LD A (HL--)
-  LDA_DEC -> do
-    hl    <- readR16 RegHL
-    value <- readByte hl
-    writeR8 RegA value
+    writeR8 RegA =<< readByte hl
+    pure 2
+  ldaHLD = CPUM $ do
+    hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    pure (normalClocks instruction)
-  -- LD (BC) A
-  LDBCI_A -> do
-    value <- readR8 RegA
-    addr  <- readR16 RegBC
-    writeByte addr value
-    pure (normalClocks instruction)
-  -- LD (DE) A
-  LDDEI_A -> do
-    value <- readR8 RegA
-    addr  <- readR16 RegDE
-    writeByte addr value
-    pure (normalClocks instruction)
-  -- LD (HL++) A
-  LDHLI_INC -> do
-    value <- readR8 RegA
-    hl    <- readR16 RegHL
-    writeByte hl value
+    writeR8 RegA =<< readByte hl
+    pure 2
+  ldBCa = CPUM $ do
+    bc <- readR16 RegBC
+    writeByte bc =<< readR8 RegA
+    pure 2
+  ldDEa = CPUM $ do
+    de <- readR16 RegDE
+    writeByte de =<< readR8 RegA
+    pure 2
+  ldHLIa = CPUM $ do
+    hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    pure (normalClocks instruction)
-  -- LD (HL--) A
-  LDHLI_DEC -> do
-    value <- readR8 RegA
-    hl    <- readR16 RegHL
-    writeByte hl value
+    writeByte hl =<< readR8 RegA
+    pure 2
+  ldHLDa = CPUM $ do
+    hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    pure (normalClocks instruction)
-  -- LD r16 im16
-  LD16_I16 r16 w16 -> do
-    writeR16 r16 w16
-    pure (normalClocks instruction)
-  -- LD SP HL
-  LDSP -> do
+    writeByte hl =<< readR8 RegA
+    pure 2
+  ldddnn dd nn = CPUM $ do
+    writeR16 dd nn
+    pure 3
+  ldSPHL = CPUM $ do
     writeR16 RegSP =<< readR16 RegHL
-    pure (normalClocks instruction)
-  -- PUSH r16
-  PUSH r16 -> do
-    value <- if r16 == RegSP then readAF else readR16 r16
-    push16 value
-    pure (normalClocks instruction)
-  -- POP r16
-  POP r16 -> do
-    value <- pop16
-    if r16 == RegSP then writeAF (value .&. 0xFFF0) else writeR16 r16 value
-    pure (normalClocks instruction)
-  -- LDHL SP im8
-  LDHL i8 -> do
+    pure 2
+  push qq = CPUM $ do
+    push16 =<< readR16qq qq
+    pure 4
+  pop qq = CPUM $ do
+    writeR16qq qq =<< pop16
+    pure 3
+  ldhl i = CPUM $ do
     sp <- fromIntegral <$> readR16 RegSP
-    let wi8     = fromIntegral i8 :: Int32
-    let wr      = sp + wi8
-    let carryH = (sp .&. 0x00000010) `xor` (wi8 .&. 0x00000010) /= (wr .&. 0x00000010)
-    let carryCY = (sp .&. 0x00000100) `xor` (wi8 .&. 0x00000100) /= (wr .&. 0x00000100)
+    let wi      = fromIntegral i :: Int32
+    let wr      = sp + wi
+    let carryH = (sp .&. 0x00000010) `xor` (wi .&. 0x00000010) /= (wr .&. 0x00000010)
+    let carryCY = (sp .&. 0x00000100) `xor` (wi .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
     setFlags ((if carryCY then flagCY else 0) .|. (if carryH then flagH else 0))
-    pure (normalClocks instruction)
-  -- LD (im16) SP
-  LDI16I_SP w16 -> do
-    sp <- readR16 RegSP
-    writeWord w16 sp
-    pure (normalClocks instruction)
-  -- ADD \<r8|im8|(HL)\>
-  ADD o8 -> do
-    arithOp8 OpAdd o8 False
-    pure (normalClocks instruction)
-  -- ADC \<r8|im8|(HL)\>
-  ADC o8 -> do
-    carry <- testFlag flagCY
-    arithOp8 OpAdd o8 carry
-    pure (normalClocks instruction)
-  -- SUB \<r8|im8|(HL)\>
-  SUB o8 -> do
-    arithOp8 OpSub o8 False
-    pure (normalClocks instruction)
-  -- SBC \<r8|im8|(HL)\>
-  SBC o8 -> do
-    carry <- testFlag flagCY
-    arithOp8 OpSub o8 carry
-    pure (normalClocks instruction)
-  -- AND \<r8|im8|(HL)\>
-  AND o8 -> do
-    a   <- readR8 RegA
-    arg <- readOperand8 o8
-    let r = a .&. arg
-    writeR8 RegA r
-    setFlags (flagH .|. (if r == 0 then flagZ else 0))
-    pure (normalClocks instruction)
-  -- OR \<r8|im8|(HL)\>
-  OR o8 -> do
-    a   <- readR8 RegA
-    arg <- readOperand8 o8
-    let r = a .|. arg
-    writeR8 RegA r
-    setFlags (if r == 0 then flagZ else 0)
-    pure (normalClocks instruction)
-  -- XOR \<r8|im8|(HL)\>
-  XOR o8 -> do
-    a   <- readR8 RegA
-    arg <- readOperand8 o8
-    let r = a `xor` arg
-    writeR8 RegA r
-    setFlags (if r == 0 then flagZ else 0)
-    pure (normalClocks instruction)
-  -- CP \<r8|im8|(HL)\>
-  CP o8 -> do
-    a   <- readR8 RegA
-    arg <- readOperand8 o8
-    let (_, flags) = adder8 OpSub a arg False
+    pure 3
+  ldnnSP nn = CPUM $ do
+    writeWord nn =<< readR16 RegSP
+    pure 5
+  addr r = CPUM $ do
+    v <- readR8 r
+    arithOp8 OpAdd v False
+    pure 1
+  addn n = CPUM $ do
+    arithOp8 OpAdd n False
+    pure 2
+  addhl = CPUM $ do
+    v <- readByte =<< readR16 RegHL
+    arithOp8 OpAdd v False
+    pure 2
+  adcr r = CPUM $ do
+    v <- readR8 r
+    arithOp8 OpAdd v True
+    pure 1
+  adcn n = CPUM $ do
+    arithOp8 OpAdd n True
+    pure 2
+  adchl = CPUM $ do
+    v <- readByte =<< readR16 RegHL
+    arithOp8 OpAdd v True
+    pure 2
+  subr r = CPUM $ do
+    v <- readR8 r
+    arithOp8 OpSub v False
+    pure 1
+  subn n = CPUM $ do
+    arithOp8 OpSub n False
+    pure 2
+  subhl = CPUM $ do
+    v <- readByte =<< readR16 RegHL
+    arithOp8 OpSub v False
+    pure 2
+  sbcr r = CPUM $ do
+    v <- readR8 r
+    arithOp8 OpSub v True
+    pure 1
+  sbcn n = CPUM $ do
+    arithOp8 OpSub n True
+    pure 2
+  sbchl = CPUM $ do
+    v <- readByte =<< readR16 RegHL
+    arithOp8 OpSub v True
+    pure 2
+  andr r = CPUM $ do
+    andOp8 =<< readR8 r
+    pure 1
+  andn n = CPUM $ do
+    andOp8 n
+    pure 2
+  andhl = CPUM $ do
+    andOp8 =<< readByte =<< readR16 RegHL
+    pure 2
+  orr r = CPUM $ do
+    orOp8 =<< readR8 r
+    pure 1
+  orn n = CPUM $ do
+    orOp8 n
+    pure 2
+  orhl = CPUM $ do
+    orOp8 =<< readByte =<< readR16 RegHL
+    pure 2
+  xorr r = CPUM $ do
+    xorOp8 =<< readR8 r
+    pure 1
+  xorn n = CPUM $ do
+    xorOp8 n
+    pure 2
+  xorhl = CPUM $ do
+    xorOp8 =<< readByte =<< readR16 RegHL
+    pure 2
+  cpr r = CPUM $ do
+    a <- readR8 RegA
+    v <- readR8 r
+    let (_, flags) = adder8 OpSub a v False
     setFlags flags
-    pure (normalClocks instruction)
-  -- INC \<r8|(HL)\>
-  INC so8 -> do
-    value <- readSmallOperand8 so8
-    let (r, flags) = inc8 OpAdd value
-    writeSmallOperand8 so8 r
-    setFlagsMask (flagH .|. flagN .|. flagZ) flags
-    pure (normalClocks instruction)
-  -- DEC \<r8|(HL)\>
-  DEC so8 -> do
-    value <- readSmallOperand8 so8
-    let (r, flags) = inc8 OpSub value
-    writeSmallOperand8 so8 r
-    setFlagsMask (flagH .|. flagN .|. flagZ) flags
-    pure (normalClocks instruction)
-  -- ADD HL r16
-  ADDHL r16 -> do
+    pure 1
+  cpn n = CPUM $ do
+    a <- readR8 RegA
+    let (_, flags) = adder8 OpSub a n False
+    setFlags flags
+    pure 2
+  cphl = CPUM $ do
+    a <- readR8 RegA
+    v <- readByte =<< readR16 RegHL
+    let (_, flags) = adder8 OpSub a v False
+    setFlags flags
+    pure 2
+  incr r = CPUM $ do
+    v <- readR8 r
+    let (v', flags) = inc8 OpAdd v
+    writeR8 r v'
+    setFlags flags
+    pure 1
+  inchl = CPUM $ do
     hl <- readR16 RegHL
-    ss <- readR16 r16
+    v  <- readByte hl
+    let (v', flags) = inc8 OpAdd v
+    setFlags flags
+    writeByte hl v'
+    pure 3
+  decr r = CPUM $ do
+    v <- readR8 r
+    let (v', flags) = inc8 OpSub v
+    writeR8 r v'
+    setFlags flags
+    pure 1
+  dechl = CPUM $ do
+    hl <- readR16 RegHL
+    v  <- readByte hl
+    let (v', flags) = inc8 OpSub v
+    setFlags flags
+    writeByte hl v'
+    pure 3
+  addhlss ss = CPUM $ do
+    hl <- readR16 RegHL
+    v  <- readR16 ss
     let hl'     = fromIntegral hl
-    let ss'     = fromIntegral ss
-    let wr      = hl' + ss' :: Word32
-    let carryH = (hl' .&. 0x00001000) `xor` (ss' .&. 0x00001000) /= (wr .&. 0x00001000)
-    let carryCY = (hl' .&. 0x00010000) `xor` (ss' .&. 0x00010000) /= (wr .&. 0x00010000)
+    let v'      = fromIntegral v
+    let wr      = hl' + v' :: Word32
+    let carryH = (hl' .&. 0x00001000) `xor` (v' .&. 0x00001000) /= (wr .&. 0x00001000)
+    -- TODO: simplify?
+    let carryCY = (hl' .&. 0x00010000) `xor` (v' .&. 0x00010000) /= (wr .&. 0x00010000)
     writeR16 RegHL (fromIntegral wr)
     setFlagsMask (flagCY .|. flagH .|. flagN)
                  ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    pure (normalClocks instruction)
-  -- ADD SP im8
-  ADDSP i8 -> do
+    pure 2
+  addSP e = CPUM $ do
     sp <- readR16 RegSP
     let sp'     = fromIntegral sp
-    let i8'     = fromIntegral i8
-    let wr      = i8' + sp' :: Int32
-    let carryH = (sp' .&. 0x00000010) `xor` (i8' .&. 0x00000010) /= (wr .&. 0x00000010)
-    let carryCY = (sp' .&. 0x00000100) `xor` (i8' .&. 0x00000100) /= (wr .&. 0x00000100)
+    let e'      = fromIntegral e
+    let wr      = e' + sp' :: Int32
+    let carryH = (sp' .&. 0x00000010) `xor` (e' .&. 0x00000010) /= (wr .&. 0x00000010)
+    -- TODO: simplify?
+    let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    pure (normalClocks instruction)
-  -- INC16 r16
-  INC16 r16 -> do
-    value <- readR16 r16
-    writeR16 r16 (value + 1)
-    pure (normalClocks instruction)
-  -- DEC16 r16
-  DEC16 r16 -> do
-    value <- readR16 r16
-    writeR16 r16 (value - 1)
-    pure (normalClocks instruction)
-  -- RLCA
-  RLCA -> do
-    a <- readR8 RegA
-    setFlags (if a .&. 0x80 /= 0 then flagCY else 0)
-    writeR8 RegA (rotateL a 1)
-    pure (normalClocks instruction)
-  -- RLA
-  RLA -> do
-    a <- readR8 RegA
-    let ir = rotateL a 1
-    hasCY <- testFlag flagCY
-    setFlags (if a .&. 0x80 /= 0 then flagCY else 0)
-    writeR8 RegA (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
-    pure (normalClocks instruction)
-  -- RRCA
-  RRCA -> do
-    a <- readR8 RegA
-    setFlags (if a .&. 0x01 /= 0 then flagCY else 0)
-    writeR8 RegA (rotateR a 1)
-    pure (normalClocks instruction)
-  -- RRA
-  RRA -> do
-    a <- readR8 RegA
-    let ir = rotateR a 1
-    hasCY <- testFlag flagCY
-    setFlags (if a .&. 0x01 /= 0 then flagCY else 0)
-    writeR8 RegA (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
-    pure (normalClocks instruction)
-  -- RLC \<r8|(HL)\>
-  RLC so8 -> do
-    value <- readSmallOperand8 so8
-    setFlags ((if value .&. 0x80 /= 0 then flagCY else 0) .|. (if value == 0 then flagZ else 0))
-    writeSmallOperand8 so8 (rotateL value 1)
-    pure (normalClocks instruction)
-  -- RL \<r8|(HL)\>
-  RL so8 -> do
-    value <- readSmallOperand8 so8
-    let ir = rotateL value 1
-    hasCY <- testFlag flagCY
-    let r = if hasCY then ir .|. 0x01 else ir .&. 0xFE
-    setFlags ((if value .&. 0x80 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    writeSmallOperand8 so8 r
-    pure (normalClocks instruction)
-  -- RRC \<r8|(HL)\>
-  RRC so8 -> do
-    value <- readSmallOperand8 so8
-    setFlags ((if value .&. 0x01 /= 0 then flagCY else 0) .|. (if value == 0 then flagZ else 0))
-    writeSmallOperand8 so8 (rotateR value 1)
-    pure (normalClocks instruction)
-  -- RR \<r8|(HL)\>
-  RR so8 -> do
-    value <- readSmallOperand8 so8
-    let ir = rotateR value 1
-    hasCY <- testFlag flagCY
-    let r = if hasCY then ir .|. 0x80 else ir .&. 0x7F
-    setFlags $ (if value .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0)
-    writeSmallOperand8 so8 r
-    pure (normalClocks instruction)
-  -- SLA \<r8|(HL)\>
-  SLA so8 -> do
-    value <- readSmallOperand8 so8
-    let r = value .<<. 1
-    setFlags ((if value .&. 0x80 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    writeSmallOperand8 so8 r
-    pure (normalClocks instruction)
-  -- SRA \<r8|(HL)\>
-  SRA so8 -> do
-    value <- readSmallOperand8 so8
-    let r = (fromIntegral value .>>. 1) :: Int8
-    setFlags ((if value .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    writeSmallOperand8 so8 (fromIntegral r)
-    pure (normalClocks instruction)
-  -- SRL \<r8|(HL)\>
-  SRL so8 -> do
-    value <- readSmallOperand8 so8
-    let r = value .>>. 1
-    setFlags ((if value .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    writeSmallOperand8 so8 r
-    pure (normalClocks instruction)
-  -- SWAP \<r8|(HL)\>
-  SWAP so8 -> do
-    value <- readSmallOperand8 so8
-    setFlags (if value == 0 then flagZ else 0)
-    writeSmallOperand8 so8 ((value .>>. 4) .|. (value .<<. 4))
-    pure (normalClocks instruction)
-  -- BIT b \<r8|(HL)\>
-  BIT w8 so8 -> do
-    value <- readSmallOperand8 so8
+    pure 4
+  incss ss = CPUM $ do
+    v <- readR16 ss
+    writeR16 ss (v + 1)
+    pure 2
+  decss ss = CPUM $ do
+    v <- readR16 ss
+    writeR16 ss (v - 1)
+    pure 2
+  rlca = CPUM $ do
+    writeR8 RegA =<< rlc =<< readR8 RegA
+    pure 1
+  rla = CPUM $ do
+    writeR8 RegA =<< rl =<< readR8 RegA
+    pure 1
+  rrca = CPUM $ do
+    writeR8 RegA =<< rrc =<< readR8 RegA
+    pure 1
+  rra = CPUM $ do
+    writeR8 RegA =<< rr =<< readR8 RegA
+    pure 1
+  rlcr r = CPUM $ do
+    writeR8 r =<< rlc =<< readR8 r
+    pure 2
+  rlchl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< rlc =<< readByte hl
+    pure 4
+  rlr r = CPUM $ do
+    writeR8 r =<< rl =<< readR8 r
+    pure 2
+  rlhl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< rl =<< readByte hl
+    pure 4
+  rrcr r = CPUM $ do
+    writeR8 r =<< rrc =<< readR8 r
+    pure 2
+  rrchl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< rrc =<< readByte hl
+    pure 4
+  rrr r = CPUM $ do
+    writeR8 r =<< rr =<< readR8 r
+    pure 2
+  rrhl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< rr =<< readByte hl
+    pure 4
+  slar r = CPUM $ do
+    writeR8 r =<< sla =<< readR8 r
+    pure 2
+  slahl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< sla =<< readByte hl
+    pure 4
+  srar r = CPUM $ do
+    writeR8 r =<< sra =<< readR8 r
+    pure 2
+  srahl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< sra =<< readByte hl
+    pure 4
+  srlr r = CPUM $ do
+    writeR8 r =<< srl =<< readR8 r
+    pure 2
+  srlhl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< srl =<< readByte hl
+    pure 4
+  swapr r = CPUM $ do
+    writeR8 r =<< swap =<< readR8 r
+    pure 2
+  swaphl = CPUM $ do
+    hl <- readR16 RegHL
+    writeByte hl =<< swap =<< readByte hl
+    pure 4
+  bitr r b = CPUM $ do
+    v <- readR8 r
     setFlagsMask (flagH .|. flagN .|. flagZ)
-                 (flagH .|. (if value `testBit` fromIntegral w8 then 0 else flagZ))
-    pure (normalClocks instruction)
-  -- SET b \<r8|(HL)\>
-  SET w8 so8 -> do
-    value <- readSmallOperand8 so8
-    writeSmallOperand8 so8 (value `setBit` fromIntegral w8)
-    pure (normalClocks instruction)
-  -- RES b \<r8|(HL)\>
-  RES w8 so8 -> do
-    value <- readSmallOperand8 so8
-    writeSmallOperand8 so8 (value `clearBit` fromIntegral w8)
-    pure (normalClocks instruction)
-  -- JP im16
-  JP w16 -> do
-    writePC w16
-    pure (normalClocks instruction)
-  -- JP cc im16
-  JPCC cc w16 -> do
-    shouldJump <- testCondition cc
-    when shouldJump (writePC w16)
-    pure (longClocks instruction shouldJump)
-  -- JR cc im8
-  JR i8 -> do
-    pc <- readPC
-    writePC (pc + fromIntegral i8)
-    pure (normalClocks instruction)
-  -- JR cc im8
-  JRCC cc i8 -> do
-    shouldJump <- testCondition cc
-    when shouldJump $ do
-      pc <- readPC
-      writePC (pc + fromIntegral i8)
-    pure (longClocks instruction shouldJump)
-  -- JP (HL)
-  JPI -> do
+                 (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    pure 2
+  bithl b = CPUM $ do
+    v <- readByte =<< readR16 RegHL
+    setFlagsMask (flagH .|. flagN .|. flagZ)
+                 (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    pure 3
+  setr r b = CPUM $ do
+    v <- readR8 r
+    writeR8 r (v `setBit` fromIntegral b)
+    pure 2
+  sethl b = CPUM $ do
+    hl <- readR16 RegHL
+    v  <- readByte hl
+    writeByte hl (v `setBit` fromIntegral b)
+    pure 4
+  resr r b = CPUM $ do
+    v <- readR8 r
+    writeR8 r (v `clearBit` fromIntegral b)
+    pure 2
+  reshl b = CPUM $ do
+    hl <- readR16 RegHL
+    v  <- readByte hl
+    writeByte hl (v `clearBit` fromIntegral b)
+    pure 4
+  jpnn nn = CPUM $ do
+    writePC nn
+    pure 4
+  jphl = CPUM $ do
     writePC =<< readR16 RegHL
-    pure (normalClocks instruction)
-  -- CALL im16
-  CALL w16      -> doCall w16 (clocks instruction True)
-  -- CALL cc im16
-  CALLCC cc w16 -> do
-    shouldCall <- testCondition cc
-    if shouldCall then doCall w16 (clocks instruction True) else pure (longClocks instruction False)
-  -- RETI
-  RETI -> do
+    pure 1
+  jpccnn cc nn = CPUM $ do
+    shouldJump <- testCondition cc
+    if shouldJump
+      then do
+        writePC nn
+        pure 4
+      else pure 3
+  jr e = CPUM $ do
+    pc <- readPC
+    writePC (pc + fromIntegral e)
+    pure 3
+  jrcc cc e = CPUM $ do
+    shouldJump <- testCondition cc
+    if shouldJump
+      then do
+        pc <- readPC
+        writePC (pc + fromIntegral e)
+        pure 3
+      else pure 2
+  call nn = CPUM $ do
+    push16 =<< readPC
+    writePC nn
+    pure 6
+  callcc cc nn = CPUM $ do
+    shouldJump <- testCondition cc
+    if shouldJump
+      then do
+        push16 =<< readPC
+        writePC nn
+        pure 6
+      else pure 3
+  ret = CPUM $ do
+    writePC =<< pop16
+    pure 4
+  reti = CPUM $ do
     writePC =<< pop16
     setIME
-    pure (normalClocks instruction)
-  -- RET cc
-  RET      -> doRet (clocks instruction True)
-  -- RET cc
-  RETCC cc -> do
-    shouldRet <- testCondition cc
-    if shouldRet then doRet (clocks instruction True) else pure (longClocks instruction False)
-  -- RST t
-  RST w8 -> do
-    pc <- readPC
-    push16 pc
-    writePC $ 8 * fromIntegral w8
-    pure (normalClocks instruction)
-  -- DAA
-  DAA -> do
+    pure 4
+  retcc cc = CPUM $ do
+    shouldJump <- testCondition cc
+    if shouldJump
+      then do
+        writePC =<< pop16
+        pure 5
+      else pure 2
+  rst t = CPUM $ do
+    push16 =<< readPC
+    writePC $ 8 * fromIntegral t
+    pure 4
+  daa = CPUM $ do
     flags <- readF
     a     <- readR8 RegA
     let isH   = isFlagSet flagH flags
@@ -953,64 +912,147 @@ executeInstruction instruction = case instruction of
     setFlagsMask
       (flagCY .|. flagZ .|. flagH)
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    pure (normalClocks instruction)
-  -- CPL
-  CPL -> do
+    pure 1
+  cpl = CPUM $ do
     a <- readR8 RegA
     writeR8 RegA (complement a)
     setFlagsMask (flagH .|. flagN) (flagH .|. flagN)
-    pure (normalClocks instruction)
-  -- NOP
-  NOP  -> pure (normalClocks instruction)
-  -- HALT
-  HALT -> do
-    setMode ModeHalt
-    pure (BusEvent (clocks instruction True) ModeHalt)
-  -- STOP
-  STOP -> do
-    CPUState {..} <- asks forCPUState
-    key1          <- liftIO $ directReadPort portKEY1
-    if isFlagSet flagSpeedSwitch key1
-      then do
-        liftIO $ directWritePort portKEY1
-                                 (if isFlagSet flagDoubleSpeed key1 then 0 else flagDoubleSpeed)
-        pure (normalClocks instruction)
-      else do
-        setMode ModeStop
-        pure (BusEvent (clocks instruction True) ModeStop)
-  -- EI
-  EI -> do
-    setIME
-    pure (normalClocks instruction)
-  -- DI
-  DI -> do
-    clearIME
-    pure (normalClocks instruction)
-  -- CCF
-  CCF -> do
+    pure 1
+  nop = pure 1
+  ccf = CPUM $ do
     cf <- testFlag flagCY
     setFlagsMask (flagCY .|. flagH .|. flagN) (if cf then 0 else flagCY)
-    pure (normalClocks instruction)
-  -- SCF
-  SCF -> do
+    pure 1
+  scf = CPUM $ do
     setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
-    pure (normalClocks instruction)
-  -- INVALID instruction
-  INVALID w8 -> liftIO (throwIO (InvalidInstruction w8))
+    pure 1
+  di = CPUM $ do
+    clearIME
+    pure 1
+  ei = CPUM $ do
+    setIME
+    pure 1
+  halt = CPUM $ do
+    setMode ModeHalt
+    pure 1
+  stop = CPUM $ do
+    CPUState {..} <- asks forCPUState
+    key1          <- liftIO (directReadPort portKEY1)
+    if isFlagSet flagSpeedSwitch key1
+      then if isFlagSet flagDoubleSpeed key1
+        then liftIO $ do
+          directWritePort portKEY1 0
+          writeUnboxedRef cpuCycleClocks 4
+        else liftIO $ do
+          directWritePort portKEY1 flagDoubleSpeed
+          writeUnboxedRef cpuCycleClocks 2
+      else setMode ModeStop
+    pure 1
+  invalid b = liftIO (throwIO (InvalidInstruction b))
 
-{-# INLINE doCall #-}
-doCall :: HasCPU env => Word16 -> Int -> ReaderT env IO BusEvent
-doCall w16 numberOfClocks = do
-  pc <- readPC
-  push16 pc
-  writePC w16
-  pure (BusEvent numberOfClocks ModeNormal)
+{-# INLINE push16 #-}
+push16 :: HasCPU env => Word16 -> ReaderT env IO ()
+push16 value = do
+  sp <- readR16 RegSP
+  let sp' = sp - 2
+  writeWord sp' value
+  writeR16 RegSP sp'
 
-{-# INLINE doRet #-}
-doRet :: HasCPU env => Int -> ReaderT env IO BusEvent
-doRet numberOfClocks = do
-  writePC =<< pop16
-  pure (BusEvent numberOfClocks ModeNormal)
+{-# INLINE pop16 #-}
+pop16 :: HasCPU env => ReaderT env IO Word16
+pop16 = do
+  sp     <- readR16 RegSP
+  valueL <- readByte sp
+  valueH <- readByte (sp + 1)
+  writeR16 RegSP (sp + 2)
+  pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
+
+{-# INLINE arithOp8 #-}
+arithOp8 :: HasCPU env => ArithmeticOp -> Word8 -> Bool -> ReaderT env IO ()
+arithOp8 op x carry = do
+  a <- readR8 RegA
+  let (a', flags) = adder8 op a x carry
+  writeR8 RegA a'
+  setFlags flags
+
+{-# INLINE andOp8 #-}
+andOp8 :: HasCPU env => Word8 -> ReaderT env IO ()
+andOp8 x = do
+  a <- readR8 RegA
+  let a' = a .&. x
+  writeR8 RegA a'
+  setFlags (flagH .|. (if a' == 0 then flagZ else 0))
+
+{-# INLINE xorOp8 #-}
+xorOp8 :: HasCPU env => Word8 -> ReaderT env IO ()
+xorOp8 x = do
+  a <- readR8 RegA
+  let a' = a `xor` x
+  writeR8 RegA a'
+  setFlags (if a' == 0 then flagZ else 0)
+
+{-# INLINE orOp8 #-}
+orOp8 :: HasCPU env => Word8 -> ReaderT env IO ()
+orOp8 x = do
+  a <- readR8 RegA
+  let a' = a .|. x
+  writeR8 RegA a'
+  setFlags (if a' == 0 then flagZ else 0)
+
+{-# INLINE rlc #-}
+rlc :: HasCPU env => Word8 -> ReaderT env IO Word8
+rlc v = do
+  setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
+  pure (rotateL v 1)
+
+{-# INLINE rl #-}
+rl :: HasCPU env => Word8 -> ReaderT env IO Word8
+rl v = do
+  let ir = rotateL v 1
+  hasCY <- testFlag flagCY
+  setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
+  pure (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
+
+{-# INLINE rrc #-}
+rrc :: HasCPU env => Word8 -> ReaderT env IO Word8
+rrc v = do
+  setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
+  pure (rotateR v 1)
+
+{-# INLINE rr #-}
+rr :: HasCPU env => Word8 -> ReaderT env IO Word8
+rr v = do
+  let ir = rotateR v 1
+  hasCY <- testFlag flagCY
+  setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
+  pure (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
+
+{-# INLINE sla #-}
+sla :: HasCPU env => Word8 -> ReaderT env IO Word8
+sla v = do
+  let r = v .<<. 1
+  setFlags ((if v .&. 0x80 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
+  pure r
+
+{-# INLINE sra #-}
+sra :: HasCPU env => Word8 -> ReaderT env IO Word8
+sra v = do
+  let r = (fromIntegral v .>>. 1) :: Int8
+  setFlags ((if v .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
+  pure (fromIntegral r)
+
+{-# INLINE srl #-}
+srl :: HasCPU env => Word8 -> ReaderT env IO Word8
+srl v = do
+  let r = v .>>. 1
+  setFlags ((if v .&. 0x01 /= 0 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
+  pure r
+
+{-# INLINE swap #-}
+swap :: HasCPU env => Word8 -> ReaderT env IO Word8
+swap v = do
+  setFlags (if v == 0 then flagZ else 0)
+  pure ((v .>>. 4) .|. (v .<<. 4))
 
 internalRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
 internalRegisters = do

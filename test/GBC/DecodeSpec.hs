@@ -1,10 +1,6 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module GBC.DecodeSpec where
 
@@ -15,25 +11,21 @@ import           Data.Bits
 import           Common
 import           Test.Hspec
 import           Control.Monad.State
+import           Control.Monad.Reader
 
-instance MonadFetch (StateT [Word8] Maybe) where
-  nextByte = do
+instance MonadFetch (DisassembleT (StateT [Word8] Maybe)) where
+  nextByte = lift $ do
     b0 : bs <- get
     put bs
     pure b0
-  nextWord = do
+  nextWord = lift $ do
     b0 : b1 : bs <- get
     put bs
     pure ((fromIntegral b1 .<<. 8) .|. fromIntegral b0)
 
-instance FetchAndExecute PureDisassemble (StateT [Word8] Maybe) where
-  type InnerExecuteResult PureDisassemble (StateT [Word8] Maybe) = String
-  execute = pure
-
 decodesTo :: [Word8] -> String -> IO ()
 decodesTo encoding expectedDecoding = do
-  let p      = PureDisassemble (const Nothing)
-  let result = runStateT (fetchAndExecute p) encoding
+  let result = runStateT (runDisassembleT fetchAndExecute (const Nothing)) encoding
   case result of
     Nothing                    -> expectationFailure "Failed to decode instruction"
     Just (decoding, remainder) -> do

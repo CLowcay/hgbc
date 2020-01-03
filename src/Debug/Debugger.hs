@@ -29,8 +29,7 @@ import           Debug.Map
 import           GBC.Audio
 import           GBC.Emulator
 import           GBC.CPU
-import           GBC.Decode
-import           GBC.ISA
+import           GBC.CPU.ISA
 import           GBC.Memory
 import           GBC.ROM
 import           Numeric
@@ -55,8 +54,8 @@ data Command = ShowHeader
              | Poke16 MemAddress Word16
              | Peek8 MemAddress
              | Peek16 MemAddress
-             | PokeR8 Register8 Word8
-             | PokeR16 Register16 Word16
+             | PokeR8 RegisterR Word8
+             | PokeR16 RegisterSS Word16
              | ShowGraphics (Maybe String)
              | ShowTimer (Maybe String)
              | ShowInternal (Maybe String)
@@ -129,7 +128,7 @@ type BreakPreCondition = MonadDebug Bool
 
 -- | A condition to check after executing the next instruction. Break if the
 -- condition is True.
-type BreakPostCondition = BusEvent -> MonadDebug Bool
+type BreakPostCondition = Int -> MonadDebug Bool
 
 -- | Break after a certain number of instructions have been executed.
 breakOnCountOf :: Int -> MonadDebug BreakPreCondition
@@ -149,25 +148,27 @@ breakOnBreakpoints = do
   DebugState {..} <- ask
   pure $ \event -> do
     breakOnExecute <- shouldBreakOnExecute breakpoints
-    breakOnWrite   <- shouldBreakOnWrite watchpoints event
-    pure (breakOnExecute || breakOnWrite)
+    --breakOnWrite   <- shouldBreakOnWrite watchpoints event
+    --pure (breakOnExecute || breakOnWrite)
+    pure breakOnExecute
 
 -- | Break when the PC equals a certain value.
 breakOnPC :: Word16 -> BreakPostCondition
 breakOnPC pc = const ((pc ==) <$> readPC)
 
 -- | Break when a RET instruction is executed with the current stack pointer.
-breakOnRet :: Word16 -> BreakPreCondition
-breakOnRet originalSP = do
-  sp          <- readR16 RegSP
-  instruction <- decodeOnly decode
-  case instruction of
-    RET               -> pure (originalSP == sp)
-    (RETCC condition) -> do
-      shouldRet <- testCondition condition
-      pure (shouldRet && originalSP == sp)
-    RETI -> pure (originalSP == sp)
-    _    -> pure False
+-- TODO: fix this
+--breakOnRet :: Word16 -> BreakPreCondition
+--breakOnRet originalSP = do
+--  sp          <- readR16 RegSP
+--  instruction <- decodeOnly decode
+--  case instruction of
+--    RET               -> pure (originalSP == sp)
+--    (RETCC condition) -> do
+--      shouldRet <- testCondition condition
+--      pure (shouldRet && originalSP == sp)
+--    RETI -> pure (originalSP == sp)
+--    _    -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.
 doRun :: [BreakPreCondition] -> [BreakPostCondition] -> MonadDebug Int
@@ -178,11 +179,11 @@ doRun preConditions postConditions = withReaderT emulator clearBreakFlag >> go 0
     if doPreBreak
       then pure ticks
       else do
-        debugInfo <- withReaderT emulator step
-        let ticks' = ticks + clockAdvance debugInfo
+        clockAdvance <- withReaderT emulator step
+        let ticks' = ticks + clockAdvance
         breakFlag   <- withReaderT emulator isBreakFlagSet
-        doPostBreak <- orM (fmap ($ debugInfo) postConditions)
-        if doPostBreak || breakFlag || currentMode debugInfo == ModeStop
+        doPostBreak <- orM (fmap ($ clockAdvance) postConditions)
+        if doPostBreak || breakFlag
           then pure ticks'
           else go ticks'
 
@@ -241,13 +242,14 @@ doCommand (Step n) = do
   reportingClockStats (lift (doRun preConditions postConditions))
   disassembleAtPC
 doCommand StepOut = do
-  sp             <- lift (readR16 RegSP)
-  postConditions <- lift (sequence [breakOnBreakpoints])
-  reportingClockStats (lift (doRun [breakOnRet sp] postConditions))
-  lift $ do
-    DebugState { breakpoints } <- ask
-    wasBreakpoint              <- shouldBreakOnExecute breakpoints
-    unless wasBreakpoint (void (withReaderT emulator step))
+  -- TODO: fix this
+  --sp             <- lift (readR16 RegSP)
+  --postConditions <- lift (sequence [breakOnBreakpoints])
+  --reportingClockStats (lift (doRun [breakOnRet sp] postConditions))
+  --lift $ do
+  --  DebugState { breakpoints } <- ask
+  --  wasBreakpoint              <- shouldBreakOnExecute breakpoints
+  --  unless wasBreakpoint (void (withReaderT emulator step))
   disassembleAtPC
 doCommand Run = do
   postConditions     <- lift (sequence [breakOnBreakpoints])

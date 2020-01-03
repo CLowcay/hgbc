@@ -14,7 +14,7 @@ import           Data.Void
 import           Data.Word
 import           Debug.Debugger
 import           GBC.Errors
-import           GBC.ISA
+import           GBC.CPU.ISA
 import           System.Console.Haskeline
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
@@ -109,7 +109,7 @@ command =
 optionName :: Parser Option
 optionName = CheckRAMAccess <$ symbol "checkRAMAccess"
 
-register8 :: Parser Register8
+register8 :: Parser RegisterR
 register8 = register <?> "8-bit register"
  where
   register =
@@ -121,6 +121,6 @@ register8 = register <?> "8-bit register"
       <|> (RegH <$ "H")
       <|> (RegL <$ "L")
 
-register16 :: Parser Register16
+register16 :: Parser RegisterSS
 register16 = register <?> "16-bit register"
   where register = (RegBC <$ "BC") <|> (RegDE <$ "DE") <|> (RegHL <$ "HL") <|> (RegSP <$ "SP")

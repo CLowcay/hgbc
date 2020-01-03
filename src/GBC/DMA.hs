@@ -91,7 +91,7 @@ initDMA = mdo
   pure DMAState { .. }
 
 -- | Perform any pending DMA actions for this emulation cycle, and return the
--- number of clock cycles to stall the CPU.
+-- number of clocks to stall the CPU.
 doPendingDMA :: HasMemory env => DMAState -> ReaderT env IO Int
 doPendingDMA DMAState {..} = do
   maybeDMA <- liftIO $ readIORef pendingDMA

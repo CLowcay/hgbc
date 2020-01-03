@@ -4,7 +4,7 @@ module Debug.Breakpoints
   , setBreakpoint
   , getBreakpoint
   , shouldBreakOnExecute
-  , shouldBreakOnWrite
+--  , shouldBreakOnWrite
   , clearBreakpoint
   , listBreakpoints
   )
@@ -36,8 +36,6 @@ shouldBreakOnExecute table = do
   liftIO $ (== Just True) <$> lookup table pc
 
 -- TODO: fix watch points.
-shouldBreakOnWrite :: BreakpointTable -> BusEvent -> ReaderT env IO Bool
-shouldBreakOnWrite _ _ = pure False
 --shouldBreakOnWrite table (BusEvent writes _ _) =
 --  liftIO $ or . catMaybes <$> traverse (lookup table) writes
 

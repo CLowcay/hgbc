@@ -132,33 +132,35 @@ pollEvents = do
     liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
 
 -- | Execute a single step of the emulation.
-step :: ReaderT EmulatorState IO BusEvent
+step :: ReaderT EmulatorState IO Int
 step = do
   EmulatorState {..} <- ask
-  busEvent           <- cpuStep
-
+  cycles             <- cpuStep
   pollEvents
 
-  doubleSpeed <- getIsDoubleSpeed
-  let cpuClocks = if doubleSpeed then clockAdvance busEvent `div` 2 else clockAdvance busEvent
-  graphicsEvent   <- updateHardware cpuClocks doubleSpeed
+  cycleClocks <- getCPUCycleClocks
+  let cpuClocks = cycles * cycleClocks
+
+  graphicsEvent   <- updateHardware cycles cycleClocks
 
   dmaClockAdvance <- doPendingDMA dmaState
   if dmaClockAdvance > 0
     then do
-      void $ updateHardware dmaClockAdvance doubleSpeed
-      pure (busEvent { clockAdvance = cpuClocks + dmaClockAdvance })
+      void $ updateHardware (dmaClockAdvance `div` cycleClocks) cycleClocks
+      pure (cpuClocks + dmaClockAdvance)
     else case graphicsEvent of
-      NoGraphicsEvent -> pure (busEvent { clockAdvance = cpuClocks })
+      NoGraphicsEvent -> pure cpuClocks
       HBlankEvent     -> do
         hdmaClockAdvance <- doHBlankHDMA dmaState
-        when (hdmaClockAdvance > 0) $ void $ updateHardware hdmaClockAdvance doubleSpeed
-        pure (busEvent { clockAdvance = cpuClocks + hdmaClockAdvance })
+        when (hdmaClockAdvance > 0) $ void $ updateHardware (hdmaClockAdvance `div` cycleClocks)
+                                                            cycleClocks
+        pure (cpuClocks + hdmaClockAdvance)
 
-updateHardware :: Int -> Bool -> ReaderT EmulatorState IO GraphicsBusEvent
-updateHardware clocks doubleSpeed = do
+updateHardware :: Int -> Int -> ReaderT EmulatorState IO GraphicsBusEvent
+updateHardware cycles clocksPerCycle = do
   EmulatorState {..} <- ask
   liftIO $ do
-    updateTimer timerState (if doubleSpeed then clocks * 2 else clocks)
+    updateTimer timerState (cycles * 4)
     audioStep audioState clocks
     graphicsStep graphicsState graphicsSync clocks
+  where clocks = cycles * clocksPerCycle

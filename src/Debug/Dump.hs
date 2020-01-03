@@ -1,3 +1,5 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
 module Debug.Dump
   ( dumpRegisters
@@ -17,9 +19,10 @@ import           Data.Bits
 import           Data.Foldable
 import           Data.Word
 import           GBC.CPU
-import           GBC.Decode
+import           GBC.CPU.Decode
+import           GBC.CPU.ISA
+import Control.Monad.State
 import           GBC.Graphics
-import           GBC.ISA
 import           GBC.Memory
 import           GBC.ROM
 import           GBC.Timer
@@ -95,6 +98,22 @@ formatByteCount b | b < 1024        = show b
                   | b < 1024 * 1024 = show (b `div` 1024) ++ "KiB"
                   | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
 
+newtype DumpDisassemblyM env a = DumpDisassemblyM {runDisassembly :: DisassembleT (StateT Word16 (ReaderT env IO)) a}
+  deriving (Functor, Applicative, Monad, MonadIO, MonadGMBZ80)
+
+disassemblerAddress :: DumpDisassemblyM env Word16
+disassemblerAddress = DumpDisassemblyM $ lift get
+
+instance HasMemory env => MonadFetch (DumpDisassemblyM env) where
+  nextByte = DumpDisassemblyM . lift $ do
+    pc <- get
+    put (pc + 1)
+    lift (readByte pc)
+  nextWord = DumpDisassemblyM . lift $ do
+    pc<- get
+    put (pc + 2)
+    lift (readWord pc)
+
 dumpDisassembly
   :: HasMemory env
   => (Word16 -> IO String)
@@ -102,19 +121,23 @@ dumpDisassembly
   -> Word16
   -> Int
   -> InputT (ReaderT env IO) ()
-dumpDisassembly decorator symbolTable base n = do
-  instructions <- lift (decodeN base n)
-  for_ instructions $ \(addr, instruction) -> do
-    decoration <- liftIO (decorator addr)
-    case lookupByAddress symbolTable addr of
-      Nothing    -> pure ()
-      Just label -> outputStrLn ((' ' <$ decoration) ++ label ++ ":")
-    outputStrLn
-      (decoration ++ formatHex addr ++ ": " ++ format instruction ++ extraInfo addr instruction)
- where
-  extraInfo addr (JR e    ) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo addr (JRCC _ e) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo _    _          = ""
+dumpDisassembly decorator symbolTable base n =
+  lift (evalStateT (runDisassembleT (runDisassembly disassemble) (lookupByAddress symbolTable)) base)
+
+  where disassemble = replicateM_ n $ do
+          addr <- disassemblerAddress
+          decoration <- liftIO (decorator addr)
+          case lookupByAddress symbolTable addr of
+            Nothing    -> pure ()
+            Just label -> liftIO $ putStrLn ((' ' <$ decoration) ++ label ++ ":")
+          instruction <- fetchAndExecute
+          liftIO $ putStrLn (decoration ++ formatHex addr ++ ": " ++ instruction)
+
+ -- TODO: fix this
+ --where
+ -- extraInfo addr (JR e    ) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
+ -- extraInfo addr (JRCC _ e) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
+ -- extraInfo _    _          = ""
 
 dumpMem :: HasMemory env => Word16 -> InputT (ReaderT env IO) ()
 dumpMem base = for_ [0 .. 15] $ \line ->
