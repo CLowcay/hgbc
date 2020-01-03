@@ -110,17 +110,11 @@ dumpDisassembly decorator symbolTable base n = do
       Nothing    -> pure ()
       Just label -> outputStrLn ((' ' <$ decoration) ++ label ++ ":")
     outputStrLn
-      (  decoration
-      ++ formatHex addr
-      ++ ": "
-      ++ formatWithSymbolTable symbolTable instruction
-      ++ extraInfo addr instruction
-      )
+      (decoration ++ formatHex addr ++ ": " ++ format instruction ++ extraInfo addr instruction)
  where
-  extraInfo addr (JR e) = " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo addr (JRCC _ e) =
-    " [" ++ formatOrLookup16 symbolTable (addr + 2 + fromIntegral e) ++ "]"
-  extraInfo _ _ = ""
+  extraInfo addr (JR e    ) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo addr (JRCC _ e) = " [" ++ formatHex (addr + 2 + fromIntegral e) ++ "]"
+  extraInfo _    _          = ""
 
 dumpMem :: HasMemory env => Word16 -> InputT (ReaderT env IO) ()
 dumpMem base = for_ [0 .. 15] $ \line ->

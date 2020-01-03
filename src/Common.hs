@@ -41,9 +41,6 @@ data RegisterInfo = RegisterInfo Word16 String Word8 [(String, String)]
 
 class Format c where
   format :: c -> String
-  format = formatWithSymbolTable $ SymbolTable HM.empty HM.empty
-  formatWithSymbolTable :: SymbolTable -> c -> String
-  formatWithSymbolTable _ = format
 
 {-# INLINABLE padLeft #-}
 padLeft :: Int -> Char -> String -> String
