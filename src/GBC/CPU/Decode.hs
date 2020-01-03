@@ -8,6 +8,8 @@ module GBC.CPU.Decode
   ( MonadFetch(..)
   , FetchAndExecute(..)
   , fetchAndExecute
+  , table0
+  , table1
   )
 where
 
@@ -25,6 +27,7 @@ class FetchAndExecute p m where
   type InnerExecuteResult p m
   execute :: ExecuteResult p -> m (InnerExecuteResult p m)
 
+{-# INLINE fetchAndExecute #-}
 fetchAndExecute
   :: (ExecuteUnit p, MonadFetch m, FetchAndExecute p m) => p -> m (InnerExecuteResult p m)
 fetchAndExecute p = do
