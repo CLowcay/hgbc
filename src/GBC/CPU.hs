@@ -395,8 +395,7 @@ adder8 op a1 a2 carry =
         OpSub -> wa1 - wa2 - (if carry then 1 else 0)
       r       = fromIntegral wr
       carryH  = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
-      -- TODO: simplify?
-      carryCY = (wa1 .&. 0x0100) `xor` (wa2 .&. 0x0100) /= (wr .&. 0x0100)
+      carryCY =  (wr .&. 0x0100) /= 0
       flags =
           (if r == 0 then flagZ else 0)
             .|. (if op == OpSub then flagN else 0)
@@ -579,6 +578,10 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
   push qq = CPUM $ do
     push16 =<< readR16qq qq
     pure 4
+  pop PushPopAF = CPUM $ do
+    v <- pop16
+    writeR16qq PushPopAF (v .&. 0xFFF0)
+    pure 3
   pop qq = CPUM $ do
     writeR16qq qq =<< pop16
     pure 3
@@ -606,15 +609,18 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     arithOp8 OpAdd v False
     pure 2
   adcr r = CPUM $ do
-    v <- readR8 r
-    arithOp8 OpAdd v True
+    v  <- readR8 r
+    cf <- testFlag flagCY
+    arithOp8 OpAdd v cf
     pure 1
   adcn n = CPUM $ do
-    arithOp8 OpAdd n True
+    cf <- testFlag flagCY
+    arithOp8 OpAdd n cf
     pure 2
   adchl = CPUM $ do
-    v <- readByte =<< readR16 RegHL
-    arithOp8 OpAdd v True
+    v  <- readByte =<< readR16 RegHL
+    cf <- testFlag flagCY
+    arithOp8 OpAdd v cf
     pure 2
   subr r = CPUM $ do
     v <- readR8 r
@@ -628,15 +634,18 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     arithOp8 OpSub v False
     pure 2
   sbcr r = CPUM $ do
-    v <- readR8 r
-    arithOp8 OpSub v True
+    v  <- readR8 r
+    cf <- testFlag flagCY
+    arithOp8 OpSub v cf
     pure 1
   sbcn n = CPUM $ do
-    arithOp8 OpSub n True
+    cf <- testFlag flagCY
+    arithOp8 OpSub n cf
     pure 2
   sbchl = CPUM $ do
-    v <- readByte =<< readR16 RegHL
-    arithOp8 OpSub v True
+    v  <- readByte =<< readR16 RegHL
+    cf <- testFlag flagCY
+    arithOp8 OpSub v cf
     pure 2
   andr r = CPUM $ do
     andOp8 =<< readR8 r
@@ -686,26 +695,26 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     v <- readR8 r
     let (v', flags) = inc8 OpAdd v
     writeR8 r v'
-    setFlags flags
+    setFlagsMask (flagN .|. flagH .|. flagZ) flags
     pure 1
   inchl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
     let (v', flags) = inc8 OpAdd v
-    setFlags flags
+    setFlagsMask (flagN .|. flagH .|. flagZ) flags
     writeByte hl v'
     pure 3
   decr r = CPUM $ do
     v <- readR8 r
     let (v', flags) = inc8 OpSub v
     writeR8 r v'
-    setFlags flags
+    setFlagsMask (flagN .|. flagH .|. flagZ) flags
     pure 1
   dechl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
     let (v', flags) = inc8 OpSub v
-    setFlags flags
+    setFlagsMask (flagN .|. flagH .|. flagZ) flags
     writeByte hl v'
     pure 3
   addhlss ss = CPUM $ do
@@ -715,8 +724,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let v'      = fromIntegral v
     let wr      = hl' + v' :: Word32
     let carryH = (hl' .&. 0x00001000) `xor` (v' .&. 0x00001000) /= (wr .&. 0x00001000)
-    -- TODO: simplify?
-    let carryCY = (hl' .&. 0x00010000) `xor` (v' .&. 0x00010000) /= (wr .&. 0x00010000)
+    let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
     setFlagsMask (flagCY .|. flagH .|. flagN)
                  ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
@@ -727,7 +735,6 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let e'      = fromIntegral e
     let wr      = e' + sp' :: Int32
     let carryH = (sp' .&. 0x00000010) `xor` (e' .&. 0x00000010) /= (wr .&. 0x00000010)
-    -- TODO: simplify?
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
@@ -741,16 +748,28 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     writeR16 ss (v - 1)
     pure 2
   rlca = CPUM $ do
-    writeR8 RegA =<< rlc =<< readR8 RegA
+    v <- readR8 RegA
+    setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
+    writeR8 RegA (rotateL v 1)
     pure 1
   rla = CPUM $ do
-    writeR8 RegA =<< rl =<< readR8 RegA
+    v <- readR8 RegA
+    let ir = rotateL v 1
+    hasCY <- testFlag flagCY
+    setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
+    writeR8 RegA (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
     pure 1
   rrca = CPUM $ do
-    writeR8 RegA =<< rrc =<< readR8 RegA
+    v <- readR8 RegA
+    setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
+    writeR8 RegA (rotateR v 1)
     pure 1
   rra = CPUM $ do
-    writeR8 RegA =<< rr =<< readR8 RegA
+    v <- readR8 RegA
+    let ir = rotateR v 1
+    hasCY <- testFlag flagCY
+    setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
+    writeR8 RegA (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
     pure 1
   rlcr r = CPUM $ do
     writeR8 r =<< rlc =<< readR8 r
@@ -1002,7 +1021,7 @@ orOp8 x = do
 {-# INLINE rlc #-}
 rlc :: HasCPU env => Word8 -> ReaderT env IO Word8
 rlc v = do
-  setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
+  setFlags (if v == 0 then flagZ else if v .&. 0x80 /= 0 then flagCY else 0)
   pure (rotateL v 1)
 
 {-# INLINE rl #-}
@@ -1010,13 +1029,14 @@ rl :: HasCPU env => Word8 -> ReaderT env IO Word8
 rl v = do
   let ir = rotateL v 1
   hasCY <- testFlag flagCY
-  setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
-  pure (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
+  let r = if hasCY then ir .|. 0x01 else ir .&. 0xFE
+  setFlags ((if r == 0 then flagZ else 0) .|. (if v .&. 0x80 /= 0 then flagCY else 0))
+  pure r
 
 {-# INLINE rrc #-}
 rrc :: HasCPU env => Word8 -> ReaderT env IO Word8
 rrc v = do
-  setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
+  setFlags (if v == 0 then flagZ else if v .&. 0x01 /= 0 then flagCY else 0)
   pure (rotateR v 1)
 
 {-# INLINE rr #-}
@@ -1024,8 +1044,9 @@ rr :: HasCPU env => Word8 -> ReaderT env IO Word8
 rr v = do
   let ir = rotateR v 1
   hasCY <- testFlag flagCY
-  setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
-  pure (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
+  let r = if hasCY then ir .|. 0x80 else ir .&. 0x7F
+  setFlags ((if r == 0 then flagZ else 0) .|. (if v .&. 0x01 /= 0 then flagCY else 0))
+  pure r
 
 {-# INLINE sla #-}
 sla :: HasCPU env => Word8 -> ReaderT env IO Word8
