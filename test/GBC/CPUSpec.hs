@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 module GBC.CPUSpec where
 
 import           Common
@@ -11,10 +13,12 @@ import           Data.Foldable
 import           Data.Function
 import           Data.Int
 import           Data.Maybe
+import           Data.Traversable
 import           Data.Word
 import           GBC.CPU
+import           GBC.CPU.Decode
+import           GBC.CPU.ISA
 import           GBC.Graphics.VRAM
-import           GBC.ISA
 import           GBC.Memory
 import           GBC.Mode
 import           GBC.Primitive
@@ -22,6 +26,19 @@ import           GBC.ROM
 import           GBC.Registers
 import           Test.Hspec
 import qualified Data.ByteString               as B
+
+spec :: Spec
+spec = do
+  loads
+  arithmetic8
+  arithmetic16
+  rotateAndShift
+  bitOperations
+  jumps
+  callAndReturn
+  miscellaneous
+  bcd
+  interrupts
 
 blankROM :: ROM
 blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)
@@ -53,19 +70,39 @@ instance HasCPU CPUTestState where
 instance HasMemory CPUTestState where
   forMemory = testMemory
 
-withNewCPU :: ReaderT CPUTestState IO () -> IO ()
-withNewCPU computation = do
+withNewCPU :: CPUM CPUTestState () -> IO ()
+withNewCPU computation = mdo
   vram   <- initVRAM DMG
   portIF <- newPort 0x00 0x1F alwaysUpdate
   portIE <- newPort 0x00 0xFF alwaysUpdate
-  mem    <- initMemory blankROM vram [(IF, portIF)] portIE DMG
+  mem    <- initMemory blankROM vram ((IF, portIF) : cpuPorts cpu) portIE DMG
   cpu    <- initCPU portIF portIE DMG
-  void $ runReaderT computationWithVerification $ CPUTestState cpu mem
+  void $ runReaderT checkingFlags $ CPUTestState cpu mem
  where
-  computationWithVerification = do
+  checkingFlags = for_ [0 .. 15] $ \flags -> do
     reset
-    computation
+    let flags0 = flags .<<. 4
+    writeF flags0
+    computationWithVerification
+    flags1 <- readF
+    liftIO $ flags1 `shouldBe` flags0
+
+  computationWithVerification = do
+    registers0 <- getRegisterFile
+    mode0      <- getMode
+    clocks0    <- getCPUCycleClocks
+
+    runCPUM computation
+
+    registers1 <- getRegisterFile
+    mode1      <- getMode
+    clocks1    <- getCPUCycleClocks
+
     registersConsistent
+    liftIO $ do
+      registers1 `shouldBe` registers0
+      mode0 `shouldBe` mode1
+      clocks0 `shouldBe` clocks1
 
   registersConsistent = do
     bc <- readR16 RegBC
@@ -77,7 +114,9 @@ withNewCPU computation = do
     e  <- readR8 RegE
     h  <- readR8 RegH
     l  <- readR8 RegL
+    f  <- readF
     liftIO $ do
+      f .&. 0x0F `shouldBe` 0
       fromIntegral (bc .>>. 8) `shouldBe` b
       fromIntegral (de .>>. 8) `shouldBe` d
       fromIntegral (hl .>>. 8) `shouldBe` h
@@ -85,1077 +124,1412 @@ withNewCPU computation = do
       fromIntegral (de .&. 0x00FF) `shouldBe` e
       fromIntegral (hl .&. 0x00FF) `shouldBe` l
 
-withAllFlagCombos :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
-withAllFlagCombos computation = forM_ [0 .. 0xF] $ \flags -> do
-  writeF $ (flags .<<. 4) .|. 0x0A
+alteringRegisters :: [RegisterR] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringRegisters rs computation = do
+  registers <- CPUM getRegisterFile
+  computation
+  CPUM $ for_ rs $ \case
+    RegA -> writeR8 RegA (regA registers)
+    RegB -> writeR8 RegB (regB registers)
+    RegC -> writeR8 RegC (regC registers)
+    RegD -> writeR8 RegD (regD registers)
+    RegE -> writeR8 RegE (regE registers)
+    RegH -> writeR8 RegH (regH registers)
+    RegL -> writeR8 RegL (regL registers)
+
+alteringSSRegisters :: [RegisterSS] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringSSRegisters rs computation = do
+  registers <- CPUM getRegisterFile
+  computation
+  CPUM $ for_ rs $ \case
+    RegBC -> do
+      writeR8 RegB (regB registers)
+      writeR8 RegC (regC registers)
+    RegDE -> do
+      writeR8 RegD (regD registers)
+      writeR8 RegE (regE registers)
+    RegHL -> do
+      writeR8 RegH (regH registers)
+      writeR8 RegL (regL registers)
+    RegSP -> writeR16 RegSP (regSP registers)
+
+alteringQQRegisters :: [RegisterQQ] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringQQRegisters rs computation = do
+  registers <- CPUM getRegisterFile
+  computation
+  CPUM $ for_ rs $ \case
+    PushPopBC -> do
+      writeR8 RegB (regB registers)
+      writeR8 RegC (regC registers)
+    PushPopDE -> do
+      writeR8 RegD (regD registers)
+      writeR8 RegE (regE registers)
+    PushPopHL -> do
+      writeR8 RegH (regH registers)
+      writeR8 RegL (regL registers)
+    PushPopAF -> do
+      writeR8 RegA (regA registers)
+      writeF (regF registers)
+
+alteringSP :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringSP computation = do
+  sp <- CPUM $ readR16 RegSP
+  computation
+  CPUM $ writeR16 RegSP sp
+
+alteringPC :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringPC computation = do
+  pc <- CPUM readPC
+  computation
+  CPUM $ writePC pc
+
+alteringMode :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringMode computation = do
+  mode0 <- CPUM getMode
+  computation
+  CPUM $ setMode mode0
+
+alteringCPUCycleClocks :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringCPUCycleClocks computation = do
+  clocks <- CPUM getCPUCycleClocks
+  computation
+  CPUM $ setCPUCycleClocks clocks
+
+alteringFlags :: Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringFlags mask computation = do
+  flags0 <- CPUM readF
+  computation
+  flags1 <- CPUM readF
+  CPUM $ writeF ((flags0 .&. mask) .|. (flags1 .&. complement mask))
+
+notAlteringFlags :: Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+notAlteringFlags mask computation = do
+  flags0 <- CPUM readF
+  computation
+  flags1 <- CPUM readF
+  liftIO ((flags1 .&. mask) `shouldBe` (flags0 .&. mask))
+
+withPC :: Word16 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withPC address computation = do
+  pc0 <- CPUM readPC
+  CPUM $ writePC address
+  computation
+  CPUM $ writePC pc0
+
+withIME :: Bool -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withIME ime computation = do
+  ime0 <- CPUM testIME
+  CPUM $ if ime then setIME else clearIME
+  computation
+  CPUM $ if ime0 then setIME else clearIME
+
+withMode :: CPUMode -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withMode mode computation = do
+  mode0 <- CPUM getMode
+  CPUM $ setMode mode
+  computation
+  CPUM $ setMode mode0
+
+withValueAt :: RegisterSS -> Word16 -> Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValueAt ss address value computation = alteringSSRegisters [ss] $ do
+  CPUM $ do
+    writeR16 ss address
+    writeByte address value
   computation
 
-withNoChangeToRegisters :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
-withNoChangeToRegisters computation = do
-  registerFile0 <- getRegisterFile
+withValue16At :: RegisterSS -> Word16 -> Word16 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValue16At ss address value computation = alteringSSRegisters [ss] $ do
+  CPUM $ do
+    writeR16 ss address
+    writeWord address value
   computation
-  registerFile1 <- getRegisterFile
-  liftIO $ registerFile1 `shouldBe` registerFile0
 
-withFlagsUpdate :: HasCPU env => Word8 -> Word8 -> ReaderT env IO () -> ReaderT env IO ()
-withFlagsUpdate mask expected = withFlagsUpdateC mask (expected, expected)
-
-withFlagsUpdateC :: HasCPU env => Word8 -> (Word8, Word8) -> ReaderT env IO () -> ReaderT env IO ()
-withFlagsUpdateC mask (expected, expectedCarry) computation = do
-  registerFile0 <- getRegisterFile
-  flags0        <- readF
-  hasCarry      <- testFlag flagCY
+withValueAtC :: Word8 -> Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValueAtC address value computation = alteringRegisters [RegC] $ do
+  CPUM $ do
+    writeR8 RegC address
+    writeByte (0xFF00 + fromIntegral address) value
   computation
-  flags1 <- readF
-  writeF flags0
-  registerFile1 <- getRegisterFile
-  liftIO $ do
-    registerFile1 `shouldBe` registerFile0
-    (flags1 .&. mask) `shouldBe` (if hasCarry then expectedCarry else expected)
 
-withFlagsUpdateZ
-  :: HasCPU env => Word8 -> (Word8, Word8) -> ReaderT env IO Word8 -> ReaderT env IO ()
-withFlagsUpdateZ mask (expected, expectedCarry) computation = do
-  registerFile0 <- getRegisterFile
-  flags0        <- readF
-  hasCarry      <- testFlag flagCY
-  a1            <- computation
-  flags1        <- readF
-  writeF flags0
-  registerFile1 <- getRegisterFile
-  liftIO $ do
-    registerFile1 `shouldBe` registerFile0
-    (flags1 .&. (mask .|. flagZ))
-      `shouldBe` ((if hasCarry then expectedCarry else expected) .|. if a1 == 0 then flagZ else 0)
-
-withIMEUpdate :: HasCPU env => ReaderT env IO () -> ReaderT env IO ()
-withIMEUpdate computation = do
-  ime <- testIME
-  setIME
+withValuesInRegisters :: [(RegisterR, Word8)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInRegisters rvs computation = alteringRegisters (fst <$> rvs) $ do
+  for_ rvs $ \(r, v) -> CPUM $ writeR8 r v
   computation
-  clearIME
+
+withValuesInSSRegisters :: [(RegisterSS, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInSSRegisters rvs computation = alteringSSRegisters (fst <$> rvs) $ do
+  for_ rvs $ \(r, v) -> CPUM $ writeR16 r v
   computation
-  if ime then setIME else clearIME
 
-preservingR8 :: HasCPU env => Register8 -> ReaderT env IO a -> ReaderT env IO a
-preservingR8 register computation = do
-  v <- readR8 register
-  r <- computation
-  writeR8 register v
-  pure r
+withValuesInQQRegisters :: [(RegisterQQ, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInQQRegisters rvs computation = alteringQQRegisters (fst <$> rvs) $ do
+  for_ rvs $ \(r, v) -> CPUM $ writeR16qq r v
+  computation
 
-preservingR16 :: HasCPU env => Register16 -> ReaderT env IO a -> ReaderT env IO a
-preservingR16 register computation = do
-  v <- readR16 register
-  r <- computation
-  writeR16 register v
-  pure r
+setCondition :: ConditionCode -> CPUM CPUTestState ()
+setCondition CondC  = CPUM $ setFlagsMask flagCY flagCY
+setCondition CondNC = CPUM $ setFlagsMask flagCY 0
+setCondition CondZ  = CPUM $ setFlagsMask flagZ flagZ
+setCondition CondNZ = CPUM $ setFlagsMask flagZ 0
 
-verifyLoad :: (Show n, Eq n) => n -> n -> BusEvent -> BusEvent -> IO ()
-verifyLoad r expected ev evExpected = do
-  r `shouldBe` expected
-  ev `shouldBe` evExpected
+clearCondition :: ConditionCode -> CPUM CPUTestState ()
+clearCondition CondC  = CPUM $ setFlagsMask flagCY 0
+clearCondition CondNC = CPUM $ setFlagsMask flagCY flagCY
+clearCondition CondZ  = CPUM $ setFlagsMask flagZ 0
+clearCondition CondNZ = CPUM $ setFlagsMask flagZ flagZ
 
-spec :: Spec
-spec = do
-  describe "LD_R8"    ld_r8
-  describe "LDHLI_R8" ldhli_r8
-  describe "LDHLI_I8" ldhli_i8
-  simpleLoads
-  describe "LDHL" $ do
-    ldhl 0xC000 0     False False
-    ldhl 0xC000 1     False False
-    ldhl 0xC000 42    False False
-    ldhl 0xC000 (-1)  False False
-    ldhl 0xC000 (-42) False False
-    ldhl 0xC00F 1     False True
-    ldhl 0xC0F0 0x10  True  False
-    ldhl 0xC0FF 1     True  True
-    ldhl 0x8FFF 1     True  True
-    ldhl 0xFFFF 127   True  True
-  describe "LDI16I_SP" ldi16i_sp
-  describe "PUSH"      push
-  describe "POP"       pop
-  describe "ADD" $ do
-    arithmeticOp ADD (0   , 1)    (1   , 1)    0
-    arithmeticOp ADD (0   , 0)    (0   , 0)    0
-    arithmeticOp ADD (0x08, 0x08) (0x10, 0x10) flagH
-    arithmeticOp ADD (0x80, 0x80) (0   , 0)    flagCY
-    arithmeticOp ADD (0x88, 0x88) (0x10, 0x10) (flagCY .|. flagH)
-    arithmeticOp ADD (0xFF, 0x01) (0   , 0)    (flagCY .|. flagH)
-    arithmeticOpA (ADD $ R8 RegA) 0x88 (0x10, 0x10) (flagCY .|. flagH, flagCY .|. flagH)
-    arithmeticOpA (ADD $ R8 RegA) 0x80 (0   , 0)    (flagCY          , flagCY)
-  describe "ADC" $ do
-    arithmeticOp ADC (0   , 1)    (1   , 2)    0
-    arithmeticOp ADC (0   , 0)    (0   , 1)    0
-    arithmeticOp ADC (0x08, 0x08) (0x10, 0x11) flagH
-    arithmeticOp ADC (0x80, 0x80) (0   , 1)    flagCY
-    arithmeticOp ADC (0x88, 0x88) (0x10, 0x11) (flagCY .|. flagH)
-    arithmeticOp ADC (0xFF, 0x01) (0   , 1)    (flagCY .|. flagH)
-    arithmeticOpA (ADC $ R8 RegA) 0x88 (0x10, 0x11) (flagCY .|. flagH, flagCY .|. flagH)
-    arithmeticOpA (ADC $ R8 RegA) 0x80 (0   , 1)    (flagCY          , flagCY)
-  describe "SUB" $ do
-    arithmeticOp SUB (0x3E, 0x3E) (0   , 0)    flagN
-    arithmeticOp SUB (3   , 1)    (2   , 2)    flagN
-    arithmeticOp SUB (0x3E, 0x0F) (0x2F, 0x2F) (flagN .|. flagH)
-    arithmeticOp SUB (0x3E, 0x40) (0xFE, 0xFE) (flagN .|. flagCY)
-    arithmeticOp SUB (0   , 1)    (0xFF, 0xFF) (flagN .|. flagCY .|. flagH)
-    arithmeticOpA (SUB $ R8 RegA) 0x88 (0, 0) (flagN, flagN)
-  describe "SBC" $ do
-    arithmeticOp SBC (3, 2) (1   , 0)    flagN
-    arithmeticOp SBC (0, 1) (0xFF, 0xFE) (flagN .|. flagCY .|. flagH)
-    arithmeticOpA (SBC $ R8 RegA) 0x88 (0, 0xFF) (flagN, flagN .|. flagCY .|. flagH)
-  describe "AND" $ do
-    arithmeticOp AND (0x5A, 0x3F) (0x1A, 0x1A) flagH
-    arithmeticOp AND (0x01, 0x02) (0   , 0)    flagH
-    arithmeticOpA (AND $ R8 RegA) 0x5B (0x5B, 0x5B) (flagH, flagH)
-  describe "OR" $ do
-    arithmeticOp OR (0x5A, 0x0F) (0x5F, 0x5F) 0
-    arithmeticOp OR (0   , 0)    (0   , 0)    0
-    arithmeticOpA (OR $ R8 RegA) 0x5B (0x5B, 0x5B) (0, 0)
-  describe "XOR" $ do
-    arithmeticOp XOR (0xFF, 0x0F) (0xF0, 0xF0) 0
-    arithmeticOp XOR (0x3D, 0x3D) (0   , 0)    0
-    arithmeticOpA (XOR $ R8 RegA) 0x5B (0, 0) (0, 0)
-  describe "CP" $ do
-    cp (0x3E, 0x3E) (flagZ .|. flagN)
-    cp (3   , 1)    flagN
-    cp (0x3E, 0x0F) (flagN .|. flagH)
-    cp (0x3E, 0x40) (flagN .|. flagCY)
-    cp (0   , 1)    (flagN .|. flagCY .|. flagH)
-    cpa
-  describe "INC" $ do
-    incdec INC 0    1    0
-    incdec INC 0x0F 0x10 flagH
-    incdec INC 0xFF 0    (flagZ .|. flagH)
-  describe "DEC" $ do
-    incdec DEC 1    0    (flagN .|. flagZ)
-    incdec DEC 0x10 0x0F (flagN .|. flagH)
-    incdec DEC 0    0xFF (flagN .|. flagH)
-  describe "ADDHL" $ do
-    addHL 0      0      0      0
-    addHL 0      1      1      0
-    addHL 0x00FF 1      0x0100 0
-    addHL 0x0800 0x0800 0x1000 flagH
-    addHL 0x8000 0x8000 0x0000 flagCY
-    addHL 0x8800 0x8800 0x1000 (flagCY .|. flagH)
-    addHLHL 0      0      0
-    addHLHL 0x0800 0x1000 flagH
-    addHLHL 0x8000 0x0000 flagCY
-    addHLHL 0x8800 0x1000 (flagCY .|. flagH)
-  describe "ADDSP" $ do
-    addSP 300    1    301    0
-    addSP 300    (-1) 299    (flagCY .|. flagH)
-    addSP 0x00FF 1    0x0100 (flagH .|. flagCY)
-    addSP 0x000F 1    0x0010 flagH
-    addSP 0xFFFF 1    0x0000 (flagH .|. flagCY)
-  describe "INC16" $ do
-    incdec16 INC16 0      1
-    incdec16 INC16 0xFFFF 0
-  describe "DEC16" $ do
-    incdec16 DEC16 3 2
-    incdec16 DEC16 1 0
-    incdec16 DEC16 0 0xFFFF
-  describe "RLCA" $ do
-    rotA RLCA (False, 1)    (False, 2)
-    rotA RLCA (True , 1)    (False, 2)
-    rotA RLCA (False, 0x81) (True , 0x03)
-  describe "RLA" $ do
-    rotA RLA (False, 1)    (False, 2)
-    rotA RLA (True , 1)    (False, 3)
-    rotA RLA (False, 0x81) (True , 0x02)
-    rotA RLA (True , 0x81) (True , 0x03)
-  describe "RRCA" $ do
-    rotA RRCA (False, 1) (True , 0x80)
-    rotA RRCA (True , 1) (True , 0x80)
-    rotA RRCA (False, 2) (False, 1)
-    rotA RRCA (True , 2) (False, 1)
-  describe "RRA" $ do
-    rotA RRA (False, 1) (True , 0)
-    rotA RRA (True , 1) (True , 0x80)
-    rotA RRA (False, 2) (False, 1)
-    rotA RRA (True , 2) (False, 0x81)
-  describe "RLC" $ do
-    shiftRotate RLC (False, 1)    (False, 2)
-    shiftRotate RLC (True , 1)    (False, 2)
-    shiftRotate RLC (False, 0x81) (True , 0x03)
-    shiftRotate RLC (True , 0)    (False, 0)
-  describe "RL" $ do
-    shiftRotate RL (False, 1)    (False, 2)
-    shiftRotate RL (True , 1)    (False, 3)
-    shiftRotate RL (False, 0x81) (True , 0x02)
-    shiftRotate RL (False, 0x80) (True , 0x00)
-  describe "RRC" $ do
-    shiftRotate RRC (False, 1) (True , 0x80)
-    shiftRotate RRC (True , 1) (True , 0x80)
-    shiftRotate RRC (False, 2) (False, 1)
-    shiftRotate RRC (True , 2) (False, 1)
-    shiftRotate RRC (True , 0) (False, 0)
-  describe "RR" $ do
-    shiftRotate RR (False, 1) (True , 0)
-    shiftRotate RR (True , 1) (True , 0x80)
-    shiftRotate RR (False, 2) (False, 1)
-    shiftRotate RR (True , 2) (False, 0x81)
-  describe "SLA" $ do
-    shiftRotate SLA (False, 1)    (False, 2)
-    shiftRotate SLA (False, 0x80) (True , 0)
-  describe "SRA" $ do
-    shiftRotate SRA (False, 1)    (True , 0)
-    shiftRotate SRA (False, 0x80) (False, 0xC0)
-  describe "SRL" $ do
-    shiftRotate SRL (False, 1)    (True , 0)
-    shiftRotate SRL (False, 0x80) (False, 0x40)
-  describe "SWAP" $ do
-    shiftRotate SWAP (False, 0xDE) (False, 0xED)
-    shiftRotate SWAP (True , 0xDE) (False, 0xED)
-    shiftRotate SWAP (True , 0)    (False, 0)
-  describe "BIT " bitTest
-  describe "SET" $ setReset SET True
-  describe "RES" $ setReset RES False
-  jp
-  call
-  rst
-  ret
-  describe "CPL"
-    $ it "works for CPL"
-    $ withNewCPU
-    $ withAllFlagCombos
-    $ withFlagsUpdate (flagH .|. flagN) (flagH .|. flagN)
-    $ preservingR8 RegA
-    $ do
-        writeR8 RegA 0x12
-        ev <- executeInstruction CPL
-        a' <- readR8 RegA
-        liftIO $ do
-          ev `shouldBe` noWrite
-          a' `shouldBe` 0xED
-  describe "NOP"
-    $ it "works for NOP"
-    $ withNewCPU
-    $ withAllFlagCombos
-    $ withNoChangeToRegisters
-    $ do
-        ev <- executeInstruction NOP
-        liftIO $ ev `shouldBe` noWrite
-  describe "HALT" $ it "halts the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
-    ev   <- executeInstruction HALT
-    mode <- getMode
-    liftIO $ do
-      ev `shouldBe` BusEvent 4 ModeHalt
-      mode `shouldBe` ModeHalt
-  describe "STOP" $ it "stops the CPU" $ withNewCPU $ withNoChangeToRegisters $ do
-    ev   <- executeInstruction STOP
-    mode <- getMode
-    liftIO $ do
-      ev `shouldBe` BusEvent 4 ModeStop
-      mode `shouldBe` ModeStop
-  describe "DI"
-    $ it "disables the master interrupt flat"
-    $ withNewCPU
-    $ withNoChangeToRegisters
-    $ withIMEUpdate
-    $ do
-        ev  <- executeInstruction DI
-        ime <- testIME
-        liftIO $ do
-          ev `shouldBe` noWrite
-          ime `shouldBe` False
-  describe "EI"
-    $ it "enables the master interrupt flat"
-    $ withNewCPU
-    $ withNoChangeToRegisters
-    $ withIMEUpdate
-    $ do
-        ev  <- executeInstruction EI
-        ime <- testIME
-        liftIO $ do
-          ev `shouldBe` noWrite
-          ime `shouldBe` True
-  describe "SCF"
-    $ it "sets the carry flag"
-    $ withNewCPU
-    $ withAllFlagCombos
-    $ withFlagsUpdate (flagCY .|. flagH .|. flagN) flagCY
-    $ do
-        ev <- executeInstruction SCF
-        liftIO $ ev `shouldBe` noWrite
-  describe "CCF"
-    $ it "complements the carry flag"
-    $ withNewCPU
-    $ withAllFlagCombos
-    $ withFlagsUpdateC (flagCY .|. flagH .|. flagN) (flagCY, 0)
-    $ do
-        ev <- executeInstruction CCF
-        liftIO $ ev `shouldBe` noWrite
-  describe "Interrupt" interrupt
-  describe "DAA"       testDAA
+registerShouldBe :: RegisterR -> Word8 -> CPUM CPUTestState ()
+registerShouldBe r expected = do
+  v <- CPUM $ readR8 r
+  liftIO (v `shouldBe` expected)
 
-didRead :: BusEvent
-didRead = BusEvent 8 ModeNormal
+registerSSShouldBe :: RegisterSS -> Word16 -> CPUM CPUTestState ()
+registerSSShouldBe r expected = do
+  v <- CPUM $ readR16 r
+  liftIO (v `shouldBe` expected)
 
-noWrite :: BusEvent
-noWrite = BusEvent 4 ModeNormal
+registerQQShouldBe :: RegisterQQ -> Word16 -> CPUM CPUTestState ()
+registerQQShouldBe r expected = do
+  v <- CPUM $ readR16qq r
+  liftIO (v `shouldBe` expected)
 
-didWrite :: [Word16] -> BusEvent
-didWrite w = BusEvent 8 ModeNormal
+shouldHaveCycles :: CPUM CPUTestState Int -> Int -> CPUM CPUTestState ()
+shouldHaveCycles instruction expectedCycles = do
+  cycles <- instruction
+  liftIO (cycles `shouldBe` expectedCycles)
 
-expectClocks :: Int -> BusEvent -> BusEvent
-expectClocks c e = e { clockAdvance = c }
+atAddressShouldBe :: Word16 -> Word8 -> CPUM CPUTestState ()
+atAddressShouldBe address value = do
+  v <- CPUM $ readByte address
+  liftIO (v `shouldBe` value)
 
-ld_r8 :: Spec
-ld_r8 = do
-  forM_ [ (sr, dr) | sr <- [minBound .. maxBound], dr <- [minBound .. maxBound] ]
-    $ \(source, dest) -> it ("works for LD " ++ show dest ++ ", " ++ show source) $ withNewCPU $ do
-        writeR8 source 0x42
-        withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
-          ev <- executeInstruction $ LD_R8 dest (R8 source)
-          r  <- readR8 dest
-          liftIO $ verifyLoad r 0x42 ev noWrite
-  forM_ [minBound .. maxBound] $ \dest -> do
-    it ("works for LD " ++ show dest ++ ", 0x42")
-      $ withNewCPU
-      $ withAllFlagCombos
-      $ withNoChangeToRegisters
-      $ preservingR8 dest
-      $ do
-          ev <- executeInstruction $ LD_R8 dest (I8 0x42)
-          r  <- readR8 dest
-          liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 8)
-    it ("works for LD " ++ show dest ++ ", (HL)") $ withNewCPU $ do
-      writeR16 RegHL 0xC000
-      withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 dest $ do
-        writeByte 0xC000 (0x42 :: Word8)
-        ev <- executeInstruction $ LD_R8 dest HLI
-        r  <- readR8 dest
-        liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 8)
+expectFlags :: Word8 -> Word8 -> CPUM CPUTestState ()
+expectFlags mask expected = do
+  flags <- CPUM readF
+  liftIO ((flags .&. mask) `shouldBe` (expected .&. mask))
 
-ldhli_r8 :: Spec
-ldhli_r8 = forM_ [minBound .. maxBound] $ \source ->
-  it ("works for LD (HL), " ++ show source) $ withNewCPU $ do
-    writeR8 source 0x42
-    writeR16 RegHL 0xC000
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev       <- executeInstruction $ LDHLI_R8 source
-      r        <- readByte 0xC000
-      expected <- case source of
-        RegH -> pure 0xC0
-        RegL -> pure 0x00
-        _    -> pure 0x42
-      liftIO $ verifyLoad r expected ev (didWrite [0xC000])
+expectPC :: Word16 -> CPUM CPUTestState ()
+expectPC expected = do
+  pc <- CPUM readPC
+  liftIO (pc `shouldBe` expected)
 
-ldhli_i8 :: Spec
-ldhli_i8 = it "works for LD (HL) 0x42" $ withNewCPU $ do
-  writeR16 RegHL 0xC000
-  withAllFlagCombos $ withNoChangeToRegisters $ do
-    ev <- executeInstruction $ LDHLI_I8 0x42
-    r  <- readByte 0xC000
-    liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000] & expectClocks 12)
+expectMode :: CPUMode -> CPUM CPUTestState ()
+expectMode expected = do
+  mode <- CPUM getMode
+  liftIO (mode `shouldBe` expected)
 
-simpleLoads :: Spec
-simpleLoads = do
-  describe "LDA_BCI" $ it "works for LD A, (BC)" $ withNewCPU $ do
-    writeR16 RegBC 0xC000
-    writeByte 0xC000 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction LDA_BCI
-      r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev didRead
-  describe "LDA_DEI" $ it "works for LD A, (DE)" $ withNewCPU $ do
-    writeR16 RegDE 0xC000
-    writeByte 0xC000 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction LDA_DEI
-      r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev didRead
-  describe "LDA_CI" $ it "works for LD A, (C)" $ withNewCPU $ do
-    writeR8 RegC 0x80
-    writeByte 0xFF80 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction LDA_CI
-      r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev didRead
-  describe "LDCI_A" $ it "works for LD (C), A" $ withNewCPU $ do
-    writeR8 RegC 0x80
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev <- executeInstruction LDCI_A
-      r  <- readByte 0xFF80
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44])
-  describe "LDA_I8I" $ it "works for LD A, (i8)" $ withNewCPU $ do
-    writeByte 0xFF80 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDA_I8I 0x80
-      r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 12)
-  describe "LDI8I_A" $ it "works for LD (i8), A" $ withNewCPU $ do
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDI8I_A 0x80
-      r  <- readByte 0xFF80
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xFF44] & expectClocks 12)
-  describe "LDA_I16I" $ it "works for LD A, (i16)" $ withNewCPU $ do
-    writeByte 0xC000 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDA_I16I 0xC000
-      r  <- readR8 RegA
-      liftIO $ verifyLoad r 0x42 ev (noWrite & expectClocks 16)
-  describe "LDI16I_A" $ it "works for LD (i16), A" $ withNewCPU $ do
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction $ LDI16I_A 0xC000
-      r  <- readByte 0xC000
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000] & expectClocks 16)
-  describe "LDA_INC" $ it "works for LD A, (HL++)" $ withNewCPU $ do
-    writeR16 RegHL 0xC000
-    writeByte 0xC000 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction LDA_INC
-      r  <- readR8 RegA
-      hl <- readR16 RegHL
-      writeR16 RegHL 0xC000
-      liftIO $ do
-        verifyLoad r 0x42 ev didRead
-        hl `shouldBe` 0xC001
-  describe "LDA_DEC" $ it "works for LD A, (HL--)" $ withNewCPU $ do
-    writeR16 RegHL 0xC000
-    writeByte 0xC000 (0x42 :: Word8)
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR8 RegA $ do
-      ev <- executeInstruction LDA_DEC
-      r  <- readR8 RegA
-      hl <- readR16 RegHL
-      writeR16 RegHL 0xC000
-      liftIO $ do
-        verifyLoad r 0x42 ev didRead
-        hl `shouldBe` 0xBFFF
-  describe "LDBCI_A" $ it "works for LD (BC), A" $ withNewCPU $ do
-    writeR16 RegBC 0xC000
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev <- executeInstruction LDBCI_A
-      r  <- readByte 0xC000
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000])
-  describe "LDDEI_A" $ it "works for LD (DE), A" $ withNewCPU $ do
-    writeR16 RegDE 0xC000
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev <- executeInstruction LDDEI_A
-      r  <- readByte 0xC000
-      liftIO $ verifyLoad r 0x42 ev (didWrite [0xC000])
-  describe "LDHLI_INC" $ it "works for LD (HL++), A" $ withNewCPU $ do
-    writeR16 RegHL 0xC000
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev <- executeInstruction LDHLI_INC
-      r  <- readByte 0xC000
-      hl <- readR16 RegHL
-      writeR16 RegHL 0xC000
-      liftIO $ do
-        verifyLoad r 0x42 ev (didWrite [0xC000])
-        hl `shouldBe` 0xC001
-  describe "LDHLI_DEC" $ it "works for LD (HL--), A" $ withNewCPU $ do
-    writeR16 RegHL 0xC000
-    writeR8 RegA 0x42
-    withAllFlagCombos $ withNoChangeToRegisters $ do
-      ev <- executeInstruction LDHLI_DEC
-      r  <- readByte 0xC000
-      hl <- readR16 RegHL
-      writeR16 RegHL 0xC000
-      liftIO $ do
-        verifyLoad r 0x42 ev (didWrite [0xC000])
-        hl `shouldBe` 0xBFFF
-  describe "LDSP" $ it "works for LD SP, HL" $ withNewCPU $ do
-    writeR16 RegHL 0x5642
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ do
-      ev <- executeInstruction LDSP
-      r  <- readR16 RegSP
-      liftIO $ verifyLoad r 0x5642 ev (noWrite & expectClocks 8)
-  describe "LD16_I16" $ forM_ [minBound .. maxBound] $ \register ->
-    it ("works for LD " ++ show register ++ " 0x5642")
-      $ withNewCPU
-      $ withNoChangeToRegisters
-      $ preservingR16 register
-      $ do
-          ev <- executeInstruction $ LD16_I16 register 0x5642
-          r  <- readR16 register
-          liftIO $ verifyLoad r 0x5642 ev (noWrite & expectClocks 12)
+expectCPUCycleClocks :: Int -> CPUM CPUTestState ()
+expectCPUCycleClocks expected = do
+  clocks <- CPUM getCPUCycleClocks
+  liftIO (clocks `shouldBe` expected)
 
-push :: Spec
-push = forM_ [minBound .. maxBound] $ \source ->
-  it ("works for PUSH " ++ show source) $ withNewCPU $ do
-    writeR16 RegSP 0xFFF0
-    case source of
-      RegSP -> writeR8 RegA 0x42
-      _     -> writeR16 source 0x0102
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ do
-      flags0 <- readF
-      ev     <- executeInstruction $ PUSH source
-      sp'    <- readR16 RegSP
-      l      <- readByte sp'
-      h      <- readByte (sp' + 1)
-      liftIO $ do
-        sp' `shouldBe` 0xFFEE
-        ev `shouldBe` (didWrite [sp', sp' + 1] & expectClocks 16)
-        l `shouldBe` (if source == RegSP then flags0 else 0x02)
-        h `shouldBe` (if source == RegSP then 0x42 else 0x01)
+expectIME :: Bool -> CPUM CPUTestState ()
+expectIME expected = do
+  ime <- CPUM testIME
+  liftIO (ime `shouldBe` expected)
 
-pop :: Spec
-pop = forM_ [minBound .. maxBound] $ \dest -> it ("works for POP " ++ show dest) $ withNewCPU $ do
-  writeR16 RegSP 0xFFF0
-  writeWord 0xFFF0 0x0102
-  withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 RegSP $ specialPreserving16 dest $ do
-    ev  <- executeInstruction $ POP dest
-    sp' <- readR16 RegSP
-    r   <- case dest of
-      RegSP -> do
-        l <- readF
-        h <- readR8 RegA
-        pure $ (fromIntegral h .<<. 8) .|. fromIntegral l
-      _ -> readR16 dest
-    liftIO $ do
-      sp' `shouldBe` 0xFFF2
-      ev `shouldBe` (noWrite & expectClocks 12)
-      r `shouldBe` (if dest == RegSP then 0x0100 else 0x0102)
- where
-  specialPreserving16 RegSP computation = do
-    a <- readR8 RegA
-    f <- readF
-    void computation
-    writeF f
-    writeR8 RegA a
-  specialPreserving16 r computation = do
-    v <- readR16 r
-    void computation
-    writeR16 r v
-
-ldi16i_sp :: Spec
-ldi16i_sp = it "works for LD (0xC000), SP" $ withNewCPU $ do
-  writeR16 RegSP 0xDEAD
-  withAllFlagCombos $ withNoChangeToRegisters $ do
-    ev <- executeInstruction $ LDI16I_SP 0xC000
-    l  <- readByte 0xC000
-    h  <- readByte 0xC001
-    liftIO $ do
-      l `shouldBe` 0xAD
-      h `shouldBe` 0xDE
-      ev `shouldBe` (didWrite [0xC000, 0xC001] & expectClocks 20)
-
-ldhl :: Word16 -> Int8 -> Bool -> Bool -> Spec
-ldhl sp e expectCY expectH = it ("works for LDHL SP, " ++ show e) $ withNewCPU $ do
-  writeR16 RegSP sp
-  withAllFlagCombos
-    $ withFlagsUpdate allFlags ((if expectCY then flagCY else 0) .|. (if expectH then flagH else 0))
-    $ preservingR16 RegHL
-    $ do
-        ev <- executeInstruction $ LDHL e
-        hl <- readR16 RegHL
-        liftIO $ do
-          ev `shouldBe` (noWrite & expectClocks 12)
-          hl `shouldBe` sp + fromIntegral e
+buildFlags :: Bool -> Bool -> Bool -> Bool -> Word8
+buildFlags cy h n z =
+  (if cy then flagCY else 0)
+    .|. (if h then flagH else 0)
+    .|. (if n then flagN else 0)
+    .|. (if z then flagZ else 0)
 
 allFlags :: Word8
-allFlags = flagCY .|. flagH .|. flagZ .|. flagN
+allFlags = 0xF0
 
-arithmeticOp :: (Operand8 -> Instruction) -> (Word8, Word8) -> (Word8, Word8) -> Word8 -> Spec
-arithmeticOp instruction (a, r) (expected, expectedWithCarry) expectedFlags = do
-  forM_ (filter (/= RegA) [minBound .. maxBound]) $ \register ->
-    it ("works for " ++ format (instruction $ R8 register) ++ " " ++ show (a, r)) $ withNewCPU $ do
-      writeR8 RegA     a
-      writeR8 register r
-      withAllFlagCombos
-        $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
-        $ preservingR8 register
-        $ preservingR8 RegA
-        $ do
-            hasCarry <- testFlag flagCY
-            ev       <- executeInstruction $ instruction $ R8 register
-            a'       <- readR8 RegA
-            liftIO $ do
-              ev `shouldBe` noWrite
-              a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
-            pure a'
-  it ("works for " ++ format (instruction $ I8 r) ++ " " ++ show (a, r)) $ withNewCPU $ do
-    writeR8 RegA a
-    withAllFlagCombos
-      $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
-      $ preservingR8 RegA
-      $ do
-          hasCarry <- testFlag flagCY
-          ev       <- executeInstruction $ instruction $ I8 r
-          a'       <- readR8 RegA
-          liftIO $ do
-            ev `shouldBe` (noWrite & expectClocks 8)
-            a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
-          pure a'
-  it ("works for " ++ format (instruction HLI) ++ " " ++ show (a, r)) $ withNewCPU $ do
-    writeR8 RegA a
-    writeR16 RegHL 0xC000
-    writeByte 0xC000 r
-    withAllFlagCombos
-      $ withFlagsUpdateZ allFlags (expectedFlags, expectedFlags)
-      $ preservingR8 RegA
-      $ do
-          hasCarry <- testFlag flagCY
-          ev       <- executeInstruction $ instruction HLI
-          a'       <- readR8 RegA
-          liftIO $ do
-            ev `shouldBe` didRead
-            a' `shouldBe` (if hasCarry then expectedWithCarry else expected)
-          pure a'
+allConditions :: [ConditionCode]
+allConditions = [minBound .. maxBound]
 
-cp :: (Word8, Word8) -> Word8 -> Spec
-cp (a, r) expectedFlags = do
-  forM_ (filter (/= RegA) [minBound .. maxBound]) $ \register ->
-    it ("works for CP " ++ show register ++ " " ++ show (a, r)) $ withNewCPU $ do
-      writeR8 RegA     a
-      writeR8 register r
-      withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
-        ev <- executeInstruction $ CP $ R8 register
-        liftIO $ ev `shouldBe` noWrite
-  it ("works for CP " ++ show r ++ " " ++ show (a, r)) $ withNewCPU $ do
-    writeR8 RegA a
-    withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
-      ev <- executeInstruction $ CP $ I8 r
-      liftIO $ ev `shouldBe` (noWrite & expectClocks 8)
-  it ("works for CP (HL) " ++ show (a, r)) $ withNewCPU $ do
-    writeR8 RegA a
-    writeR16 RegHL 0xC000
-    withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ do
-      writeByte 0xC000 r
-      ev <- executeInstruction $ CP HLI
-      liftIO $ ev `shouldBe` didRead
+allRegisters :: [RegisterR]
+allRegisters = [minBound .. maxBound]
 
-cpa :: Spec
-cpa = it "works for CP A" $ withNewCPU $ do
-  writeR8 RegA 0x3C
-  withAllFlagCombos $ withFlagsUpdate allFlags (flagN .|. flagZ) $ do
-    ev <- executeInstruction $ CP $ R8 RegA
-    liftIO $ ev `shouldBe` noWrite
+allSSRegisters :: [RegisterSS]
+allSSRegisters = [minBound .. maxBound]
 
-arithmeticOpA :: Instruction -> Word8 -> (Word8, Word8) -> (Word8, Word8) -> Spec
-arithmeticOpA instruction value (expected, expectedCarry) (expectedFlags, expectedCarryFlags) =
-  it ("works for " ++ format instruction ++ " " ++ show value) $ withNewCPU $ do
-    writeR8 RegA value
-    withAllFlagCombos
-      $ withFlagsUpdateZ allFlags (expectedFlags, expectedCarryFlags)
-      $ preservingR8 RegA
-      $ do
-          hasCarry <- testFlag flagCY
-          ev       <- executeInstruction instruction
-          value'   <- readR8 RegA
-          liftIO $ do
-            ev `shouldBe` noWrite
-            value' `shouldBe` if hasCarry then expectedCarry else expected
-          pure value'
+allQQRegisters :: [RegisterQQ]
+allQQRegisters = [minBound .. maxBound]
 
-incdec :: (SmallOperand8 -> Instruction) -> Word8 -> Word8 -> Word8 -> Spec
-incdec instruction value expected expectedFlags = do
-  forM_ [minBound .. maxBound] $ \register ->
-    it ("works for " ++ format (instruction $ SmallR8 register) ++ " (" ++ show value ++ ")")
+-- | Check if there is a carry into the specified bit when performing a binary
+-- operation on two values.
+carryIntoBit
+  :: (Integral a, Integral b, Bits a, Bits b)
+  => Int
+  -> a
+  -> b
+  -> (Word32 -> Word32 -> Word32)
+  -> Bool
+carryIntoBit i a b op =
+  ((fromIntegral a `clearBit` i) `op` (fromIntegral b `clearBit` i)) `testBit` i
+
+loads :: Spec
+loads = do
+  describe "LD r, r" $ for_ [ (r, r') | r <- allRegisters, r' <- allRegisters ] $ \(r, r') ->
+    it ("Works for LD " <> format r <> ", " <> format r')
       $ withNewCPU
+      $ alteringRegisters [r]
+      $ withValuesInRegisters [(r', 42)]
       $ do
-          writeR8 register value
-          withAllFlagCombos
-            . withFlagsUpdate (flagH .|. flagN .|. flagZ) expectedFlags
-            $ preservingR8 register
-            $ do
-                ev <- executeInstruction $ instruction $ SmallR8 register
-                r  <- readSmallOperand8 (SmallR8 register)
-                liftIO $ do
-                  ev `shouldBe` noWrite
-                  r `shouldBe` expected
-  it ("works for " ++ format (instruction SmallHLI) ++ " (" ++ show value ++ ")") $ withNewCPU $ do
-    writeR16 RegHL 0xC000
-    withAllFlagCombos $ withFlagsUpdate (flagH .|. flagN .|. flagZ) expectedFlags $ do
-      writeByte 0xC000 value
-      ev <- executeInstruction $ instruction SmallHLI
-      r  <- readByte 0xC000
-      liftIO $ do
-        --ev `shouldBe` BusEvent [0xC000] 12 ModeNormal
-        ev `shouldBe` BusEvent 12 ModeNormal
-        r `shouldBe` expected
+          ldrr r r' `shouldHaveCycles` 1
+          r `registerShouldBe` 42
 
-addHL :: Word16 -> Word16 -> Word16 -> Word8 -> Spec
-addHL value addend expected expectedFlags =
-  forM_ (filter (/= RegHL) [minBound .. maxBound]) $ \register ->
-    it ("works for ADD HL " ++ show register ++ " (" ++ show (value, addend) ++ ")")
+  describe "LD r, n" $ for_ allRegisters $ \r ->
+    it ("Works for LD " <> format r <> ", 42") $ withNewCPU $ alteringRegisters [r] $ do
+      ldrn r 42 `shouldHaveCycles` 2
+      r `registerShouldBe` 42
+
+  describe "LD r, (HL)" $ for_ allRegisters $ \r ->
+    it ("Works for LD " <> format r <> ", (HL)")
       $ withNewCPU
+      $ alteringRegisters [r]
+      $ withValueAt RegHL 0xC000 42
       $ do
-          writeR16 RegHL    value
-          writeR16 register addend
-          withAllFlagCombos
-            $ withFlagsUpdate (flagCY .|. flagH .|. flagN) expectedFlags
-            $ preservingR16 RegHL
-            $ do
-                ev <- executeInstruction $ ADDHL register
-                r  <- readR16 RegHL
-                liftIO $ do
-                  ev `shouldBe` (noWrite & expectClocks 8)
-                  r `shouldBe` expected
+          ldrHL r `shouldHaveCycles` 2
+          r `registerShouldBe` 42
+          RegH `registerShouldBe` (if r == RegH then 42 else 0xC0)
+          RegL `registerShouldBe` (if r == RegL then 42 else 0)
 
-addHLHL :: Word16 -> Word16 -> Word8 -> Spec
-addHLHL value expected expectedFlags =
-  it ("works for ADD HL HL (" ++ show value ++ ")") $ withNewCPU $ do
-    writeR16 RegHL value
-    withAllFlagCombos
-      $ withFlagsUpdate (flagCY .|. flagH .|. flagN) expectedFlags
-      $ preservingR16 RegHL
+  describe "LD (HL), r" $ for_ allRegisters $ \r ->
+    it ("Works for LD (HL), " <> format r)
+      $ withNewCPU
+      $ withValuesInRegisters [(r, 42)]
+      $ withValueAt RegHL 0xC0D0 32
       $ do
-          ev <- executeInstruction $ ADDHL RegHL
-          r  <- readR16 RegHL
-          liftIO $ do
-            ev `shouldBe` (noWrite & expectClocks 8)
-            r `shouldBe` expected
+          ldHLr r `shouldHaveCycles` 2
+          let expected = case r of
+                RegH -> 0xC0
+                RegL -> 0xD0
+                _    -> 42
+          r `registerShouldBe` expected
+          RegH `registerShouldBe` 0xC0
+          RegL `registerShouldBe` 0xD0
+          0xC0D0 `atAddressShouldBe` expected
 
-addSP :: Word16 -> Int8 -> Word16 -> Word8 -> Spec
-addSP value e expected expectedFlags =
-  it ("works for ADD SP e (" ++ show e ++ ")") $ withNewCPU $ do
-    writeR16 RegSP value
-    withAllFlagCombos $ withFlagsUpdate allFlags expectedFlags $ preservingR16 RegSP $ do
-      ev <- executeInstruction $ ADDSP e
-      r  <- readR16 RegSP
-      liftIO $ do
-        ev `shouldBe` (noWrite & expectClocks 16)
-        r `shouldBe` expected
+  describe "LD (HL), n" $ it "Works for LD (HL), 42" $ withNewCPU $ withValueAt RegHL 0xC000 32 $ do
+    ldHLn 42 `shouldHaveCycles` 3
+    0xC000 `atAddressShouldBe` 42
+    RegH `registerShouldBe` 0xC0
+    RegL `registerShouldBe` 0
 
-incdec16 :: (Register16 -> Instruction) -> Word16 -> Word16 -> Spec
-incdec16 instruction value expected = forM_ [minBound .. maxBound] $ \register ->
-  it ("works for " ++ format (instruction register) ++ " (" ++ show value ++ ")") $ withNewCPU $ do
-    writeR16 register value
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingR16 register $ do
-      ev <- executeInstruction $ instruction register
-      r  <- readR16 register
-      liftIO $ do
-        ev `shouldBe` (noWrite & expectClocks 8)
-        r `shouldBe` expected
-
-rotA :: Instruction -> (Bool, Word8) -> (Bool, Word8) -> Spec
-rotA instruction (carry, value) (expectedCarry, expected) =
-  it ("works for " ++ format instruction ++ " " ++ show (value, carry))
+  describe "LD A, (BC)"
+    $ it "Works for LD A, (BC)"
     $ withNewCPU
-    $ withAllFlagCombos
+    $ alteringRegisters [RegA]
+    $ withValueAt RegBC 0xC000 42
     $ do
-        writeR8 RegA value
-        setFlagsMask flagCY (if carry then flagCY else 0)
-        withFlagsUpdate allFlags (if expectedCarry then flagCY else 0) $ preservingR8 RegA $ do
-          ev <- executeInstruction instruction
-          r  <- readR8 RegA
-          liftIO $ do
-            ev `shouldBe` noWrite
-            r `shouldBe` expected
+        ldaBC `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        0xC000 `atAddressShouldBe` 42
+        RegB `registerShouldBe` 0xC0
+        RegC `registerShouldBe` 0
 
-dup :: a -> (a, a)
-dup x = (x, x)
-
-shiftRotate :: (SmallOperand8 -> Instruction) -> (Bool, Word8) -> (Bool, Word8) -> Spec
-shiftRotate instruction (carry, value) (expectedCarry, expected) = do
-  forM_ [minBound .. maxBound] $ \register ->
-    it ("works for " ++ format (instruction $ SmallR8 register) ++ " " ++ show (carry, value))
-      $ withNewCPU
-      $ withAllFlagCombos
-      $ do
-          writeR8 register value
-          setFlagsMask flagCY $ if carry then flagCY else 0
-          withFlagsUpdateZ allFlags (dup $ if expectedCarry then flagCY else 0)
-            $ preservingR8 register
-            $ do
-                ev <- executeInstruction $ instruction $ SmallR8 register
-                r  <- readR8 register
-                liftIO $ do
-                  ev `shouldBe` (noWrite & expectClocks 8)
-                  r `shouldBe` expected
-                pure r
-  it ("works for " ++ format (instruction SmallHLI) ++ show (carry, value))
+  describe "LD A, (DE)"
+    $ it "Works for LD A, (DE)"
     $ withNewCPU
-    $ withAllFlagCombos
+    $ alteringRegisters [RegA]
+    $ withValueAt RegDE 0xC000 42
     $ do
-        writeR16 RegHL 0xC000
-        writeByte 0xC000 value
-        setFlagsMask flagCY $ if carry then flagCY else 0
-        withFlagsUpdateZ allFlags (dup $ if expectedCarry then flagCY else 0) $ do
-          ev <- executeInstruction $ instruction SmallHLI
-          r  <- readByte 0xC000
-          liftIO $ do
-            -- ev `shouldBe` BusEvent [0xC000] 16 ModeNormal
-            ev `shouldBe` BusEvent 16 ModeNormal
-            r `shouldBe` expected
-          pure r
+        ldaDE `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        0xC000 `atAddressShouldBe` 42
+        RegD `registerShouldBe` 0xC0
+        RegE `registerShouldBe` 0
 
-bitTest :: Spec
-bitTest = do
-  forM_ [ (r, i) | r <- [minBound .. maxBound], i <- [0 .. 7] ] $ \(register, bitIndex) ->
-    it ("works for BIT " ++ show register ++ " " ++ show bitIndex)
+  describe "LD A, (C)"
+    $ it "Works for LD A, (C)"
+    $ withNewCPU
+    $ alteringRegisters [RegA]
+    $ withValueAtC 0x80 42
+    $ do
+        ldaC `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        0xFF80 `atAddressShouldBe` 42
+        RegC `registerShouldBe` 0x80
+
+  describe "LD (C), A"
+    $ it "Works for LD (C), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ withValueAtC 0x80 32
+    $ do
+        ldCa `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegC `registerShouldBe` 0x80
+        0xFF80 `atAddressShouldBe` 42
+
+  describe "LD A, (n)" $ it "Works for LD A, (80)" $ withNewCPU $ alteringRegisters [RegA] $ do
+    CPUM $ writeByte 0xFF80 42
+    ldan 0x80 `shouldHaveCycles` 3
+    RegA `registerShouldBe` 42
+    0xFF80 `atAddressShouldBe` 42
+
+  describe "LD (n), A"
+    $ it "Works for LD (80), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ do
+        CPUM $ writeByte 0xFF80 32
+        ldna 0x80 `shouldHaveCycles` 3
+        RegA `registerShouldBe` 42
+        0xFF80 `atAddressShouldBe` 42
+
+  describe "LD A, (nn)" $ it "Works for LD A, (C000)" $ withNewCPU $ alteringRegisters [RegA] $ do
+    CPUM $ writeByte 0xC000 42
+    ldann 0xC000 `shouldHaveCycles` 4
+    RegA `registerShouldBe` 42
+    0xC000 `atAddressShouldBe` 42
+
+  describe "LD (nn), A"
+    $ it "Works for LD (C000), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ do
+        CPUM $ writeByte 0xC000 32
+        ldnna 0xC000 `shouldHaveCycles` 4
+        RegA `registerShouldBe` 42
+        0xC000 `atAddressShouldBe` 42
+
+  describe "LD A, (HLI)"
+    $ it "Works for LD A, (HLI)"
+    $ withNewCPU
+    $ alteringRegisters [RegA]
+    $ withValueAt RegHL 0xC002 42
+    $ do
+        ldaHLI `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegH `registerShouldBe` 0xC0
+        RegL `registerShouldBe` 0x03
+
+  describe "LD A, (HLD)"
+    $ it "Works for LD A, (HLD)"
+    $ withNewCPU
+    $ alteringRegisters [RegA]
+    $ withValueAt RegHL 0xC002 42
+    $ do
+        ldaHLD `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegH `registerShouldBe` 0xC0
+        RegL `registerShouldBe` 0x01
+
+  describe "LD (BC), A"
+    $ it "Works for LD (BC), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ withValueAt RegBC 0xC000 32
+    $ do
+        ldBCa `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegB `registerShouldBe` 0xC0
+        RegC `registerShouldBe` 0x00
+        0xC000 `atAddressShouldBe` 42
+
+  describe "LD (DE), A"
+    $ it "Works for LD (DE), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ withValueAt RegDE 0xC000 32
+    $ do
+        ldDEa `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegD `registerShouldBe` 0xC0
+        RegE `registerShouldBe` 0x00
+        0xC000 `atAddressShouldBe` 42
+
+  describe "LD (HLI), A"
+    $ it "Works for LD (HLI), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ withValueAt RegHL 0xC002 32
+    $ do
+        ldHLIa `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegH `registerShouldBe` 0xC0
+        RegL `registerShouldBe` 0x03
+        0xC002 `atAddressShouldBe` 42
+
+  describe "LD (HLD), A"
+    $ it "Works for LD (HLD), A"
+    $ withNewCPU
+    $ withValuesInRegisters [(RegA, 42)]
+    $ withValueAt RegHL 0xC002 32
+    $ do
+        ldHLDa `shouldHaveCycles` 2
+        RegA `registerShouldBe` 42
+        RegH `registerShouldBe` 0xC0
+        RegL `registerShouldBe` 0x01
+        0xC002 `atAddressShouldBe` 42
+
+  describe "LD dd, nn" $ for_ allSSRegisters $ \ss ->
+    it ("Works for LD " <> format ss <> ", 4243") $ withNewCPU $ alteringSSRegisters [ss] $ do
+      ldddnn ss 0x4232 `shouldHaveCycles` 3
+      ss `registerSSShouldBe` 0x4232
+
+  describe "LD SP, HL"
+    $ it "Works for LD SP, HL"
+    $ withNewCPU
+    $ alteringSP
+    $ withValuesInRegisters [(RegH, 0x42), (RegL, 0x32)]
+    $ do
+        ldSPHL `shouldHaveCycles` 2
+        RegSP `registerSSShouldBe` 0x4232
+        RegHL `registerSSShouldBe` 0x4232
+
+  describe "PUSH qq" $ for_ allQQRegisters $ \qq ->
+    it ("Works for PUSH " <> format qq)
       $ withNewCPU
-      $ withAllFlagCombos
+      $ withValuesInQQRegisters [(qq, 0x4232)]
+      $ withValue16At RegSP 0xFFF0 0x2221
       $ do
-          doTest (SmallR8 register) bitIndex (bit bitIndex) 0 $ noWrite & expectClocks 8
-          doTest (SmallR8 register) bitIndex (complement $ bit bitIndex) flagZ
-            $ noWrite
-            & expectClocks 8
-  forM_ [0 .. 7] $ \bitIndex ->
-    it ("works for BIT (HL) " ++ show bitIndex) $ withNewCPU $ withAllFlagCombos $ do
-      writeR16 RegHL 0xC000
-      doTest SmallHLI bitIndex (bit bitIndex) 0 $ noWrite & expectClocks 12
-      doTest SmallHLI bitIndex (complement $ bit bitIndex) flagZ $ noWrite & expectClocks 12
+          push qq `shouldHaveCycles` 4
+          RegSP `registerSSShouldBe` 0xFFEE
+          0xFFEE `atAddressShouldBe` (if qq == PushPopAF then 0x30 else 0x32)
+          0xFFEF `atAddressShouldBe` 0x42
 
- where
-  doTest op8 bitIndex value expectedFlags expectedBusEvent = do
-    void $ writeSmallOperand8 op8 value
-    withFlagsUpdate (flagH .|. flagN .|. flagZ) (flagH .|. expectedFlags) $ do
-      ev <- executeInstruction $ BIT (fromIntegral bitIndex) op8
-      liftIO $ ev `shouldBe` expectedBusEvent
-
-setReset :: (Word8 -> SmallOperand8 -> Instruction) -> Bool -> Spec
-setReset instruction doSet = do
-  forM_ [ (r, i) | r <- [minBound .. maxBound], i <- [0 .. 7] ] $ \(register, bitIndex) ->
-    it ("works for " ++ format (instruction (fromIntegral bitIndex) (SmallR8 register)))
+  describe "POP qq" $ for_ allQQRegisters $ \qq ->
+    it ("Works for POP " <> format qq)
       $ withNewCPU
-      $ withAllFlagCombos
+      $ alteringQQRegisters [qq]
+      $ withValue16At RegSP 0xFFEE 0x4232
       $ do
-          doTest (SmallR8 register) bitIndex 0 (if doSet then bit bitIndex else 0)
-            $ noWrite
-            & expectClocks 8
-          doTest (SmallR8 register)
-                 bitIndex
-                 0xFF
-                 (if doSet then 0xFF else complement (bit bitIndex))
-            $ noWrite
-            & expectClocks 8
-  forM_ [0 .. 7] $ \bitIndex ->
-    it ("works for " ++ format (instruction (fromIntegral bitIndex) SmallHLI))
+          pop qq `shouldHaveCycles` 3
+          RegSP `registerSSShouldBe` 0xFFF0
+          qq `registerQQShouldBe` (if qq == PushPopAF then 0x4230 else 0x4232)
+          0xFFEE `atAddressShouldBe` 0x32
+          0xFFEF `atAddressShouldBe` 0x42
+
+  describe "LDHL SP, e" $ for_ [ (sp, e) | sp <- [0xF8FF, 0x0012], e <- [-32 .. 32] ] $ \(sp, e) ->
+    it ("Works for LDHL SP, " <> formatHex e <> " ; (SP = " <> formatHex sp <> ")")
       $ withNewCPU
-      $ withAllFlagCombos
+      $ withValuesInSSRegisters [(RegSP, sp)]
+      $ alteringSSRegisters [RegHL]
+      $ alteringFlags allFlags
       $ do
-          writeR16 RegHL 0xC000
-          doTest SmallHLI bitIndex 0 (if doSet then bit bitIndex else 0)
-            -- $ BusEvent [0xC000] 16 ModeNormal
-                                                                         $ BusEvent 16 ModeNormal
-          doTest SmallHLI bitIndex 0xFF (if doSet then 0xFF else complement (bit bitIndex))
-            -- $ BusEvent [0xC000] 16 ModeNormal
-            $ BusEvent 16 ModeNormal
+          ldhl e `shouldHaveCycles` 3
+          RegHL `registerSSShouldBe` (sp + fromIntegral e)
+          let carry  = carryIntoBit 8 sp e (+)
+          let carryH = carryIntoBit 4 sp e (+)
+          expectFlags allFlags ((if carry then flagCY else 0) .|. (if carryH then flagH else 0))
 
- where
-  doTest op8 bitIndex value result expectedBusEvent = do
-    void $ writeSmallOperand8 op8 value
-    withNoChangeToRegisters $ preserving op8 $ do
-      ev <- executeInstruction $ instruction (fromIntegral bitIndex) op8
-      r  <- readSmallOperand8 op8
-      liftIO $ do
-        ev `shouldBe` expectedBusEvent
-        r `shouldBe` result
-  preserving SmallHLI    = id
-  preserving (SmallR8 r) = preservingR8 r
+  describe "LD (nn), SP"
+    $ it "Works for LD (C000), SP"
+    $ withNewCPU
+    $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+    $ do
+        CPUM $ writeWord 0xC000 0101
+        ldnnSP 0xC000 `shouldHaveCycles` 5
+        RegSP `registerSSShouldBe` 0xFFF0
+        0xC000 `atAddressShouldBe` 0xF0
+        0xC001 `atAddressShouldBe` 0xFF
 
-preservingPC :: HasCPU env => ReaderT env IO a -> ReaderT env IO a
-preservingPC computation = do
-  pc <- readPC
-  r  <- computation
-  writePC pc
-  pure r
-
-isConditionTrue :: HasCPU env => Maybe ConditionCode -> ReaderT env IO Bool
-isConditionTrue Nothing       = pure True
-isConditionTrue (Just CondC ) = testFlag flagCY
-isConditionTrue (Just CondNC) = not <$> testFlag flagCY
-isConditionTrue (Just CondZ ) = testFlag flagZ
-isConditionTrue (Just CondNZ) = not <$> testFlag flagZ
-
-jp :: Spec
-jp = do
-  describe "JP" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
-    it ("works for JP " ++ show condition ++ " 0x3242")
-      $ withNewCPU
-      $ withAllFlagCombos
-      $ withNoChangeToRegisters
-      $ preservingPC
-      $ do
-          pc0 <- readPC
-          ev  <- executeInstruction $ case condition of
-            Nothing -> JP 0x3242
-            Just cc -> JPCC cc 0x3242
-          pc1        <- readPC
-          shouldJump <- isConditionTrue condition
-          liftIO $ do
-            ev `shouldBe` (noWrite & expectClocks (if shouldJump then 16 else 12))
-            pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
-  describe "JR"
-    $ forM_
-        [ (condition, value)
-        | condition <- Nothing : (Just <$> [minBound .. maxBound])
-        , value     <- [3, -5]
-        ]
-    $ \(condition, value) ->
-        it ("works for JR " ++ show condition ++ " " ++ show (condition, value))
+arithmetic8 :: Spec
+arithmetic8 = do
+  describe "ADD A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for ADD A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
           $ withNewCPU
-          $ withAllFlagCombos
-          $ withNoChangeToRegisters
-          $ preservingPC
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
           $ do
-              pc0 <- readPC
-              ev  <- executeInstruction $ case condition of
-                Nothing -> JR value
-                Just cc -> JRCC cc value
-              pc1        <- readPC
-              shouldJump <- isConditionTrue condition
-              liftIO $ do
-                ev `shouldBe` (noWrite & expectClocks (if shouldJump then 12 else 8))
-                pc1 `shouldBe` (if shouldJump then pc0 + fromIntegral value else pc0)
-  describe "JP (HL)" $ it "works for JP (HL)" $ withNewCPU $ withAllFlagCombos $ do
-    writeR16 RegHL 0x3242
-    withNoChangeToRegisters $ preservingPC $ do
-      ev <- executeInstruction JPI
-      pc <- readPC
-      liftIO $ do
-        ev `shouldBe` (noWrite & expectClocks 4)
-        pc `shouldBe` 0x3242
+              addr r `shouldHaveCycles` 1
+              let a = if r == RegA then v else 0x11
+              verifyArithmetic8 a v (+) False
 
-call :: Spec
-call = describe "CALL" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
-  it ("works for CALL " ++ show condition ++ " 0x3242") $ withNewCPU $ do
-    writeR16 RegSP 0xC000
-    withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
-      pc0 <- readPC
-      ev  <- executeInstruction $ case condition of
-        Nothing -> CALL 0x3242
-        Just cc -> CALLCC cc 0x3242
-      pc1        <- readPC
-      sp1        <- readR16 RegSP
-      shouldJump <- isConditionTrue condition
-      liftIO $ do
-        ev
-          `shouldBe` (if shouldJump
-                       then didWrite [0xBFFE, 0xBFFF] & expectClocks 24
-                       else noWrite & expectClocks 12
-                     )
-        pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
-        sp1 `shouldBe` (if shouldJump then 0xBFFE else 0xC000)
+  describe "ADD A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for ADD A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          addn v `shouldHaveCycles` 2
+          verifyArithmetic8 0x11 v (+) False
 
-rst :: Spec
-rst = describe "RST" $ forM_ [0 .. 7] $ \op -> it ("works for RST " ++ show op) $ withNewCPU $ do
-  writeR16 RegSP 0xC000
-  withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
-    ev  <- executeInstruction $ RST op
-    pc1 <- readPC
-    sp1 <- readR16 RegSP
-    liftIO $ do
-      ev `shouldBe` (didWrite [0xBFFE, 0xBFFF] & expectClocks 16)
-      pc1 `shouldBe` fromIntegral (op * 8)
-      sp1 `shouldBe` 0xBFFE
+  describe "ADD A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for ADD A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          addhl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          verifyArithmetic8 0x11 v (+) False
 
-ret :: Spec
-ret = do
-  describe "RET" $ forM_ (Nothing : (Just <$> [minBound .. maxBound])) $ \condition ->
-    it ("works for RET " ++ show condition) $ withNewCPU $ do
-      writeR16 RegSP 0xC000
-      writeWord 0xC000 0x3242
-      withAllFlagCombos $ withNoChangeToRegisters $ preservingPC $ preservingR16 RegSP $ do
-        pc0 <- readPC
-        ev  <- executeInstruction $ case condition of
-          Nothing -> RET
-          Just cc -> RETCC cc
-        pc1        <- readPC
-        sp1        <- readR16 RegSP
-        shouldJump <- isConditionTrue condition
-        liftIO $ do
-          ev
-            `shouldBe` (if shouldJump
-                         then noWrite & expectClocks (if isNothing condition then 16 else 20)
-                         else noWrite & expectClocks 8
-                       )
-          pc1 `shouldBe` (if shouldJump then 0x3242 else pc0)
-          sp1 `shouldBe` (if shouldJump then 0xC002 else 0xC000)
-  describe "RETI"
-    $ it "works for RETI"
-    $ withNewCPU
-    $ withAllFlagCombos
-    $ withNoChangeToRegisters
-    $ preservingPC
-    $ preservingR16 RegSP
-    $ withIMEUpdate
-    $ do
-        writeR16 RegSP 0xC000
-        writeWord 0xC000 0x3242
-        ev  <- executeInstruction RETI
-        pc1 <- readPC
-        sp1 <- readR16 RegSP
-        ime <- testIME
-        liftIO $ do
-          ev `shouldBe` (noWrite & expectClocks 16)
-          pc1 `shouldBe` 0x3242
-          sp1 `shouldBe` 0xC002
-          ime `shouldBe` True
+  describe "ADC A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for ADC A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              cy <- CPUM $ testFlag flagCY
+              adcr r `shouldHaveCycles` 1
+              let a = if r == RegA then v else 0x11
+              verifyArithmetic8 a v (\x y -> x + y + (if cy then 1 else 0)) False
 
-interrupt :: Spec
-interrupt = do
-  it "triggers interrupt 0x40" $ testInterrupt 0x01 0x01 0x0040
-  it "triggers interrupt 0x48" $ testInterrupt 0x02 0x02 0x0048
-  it "triggers interrupt 0x50" $ testInterrupt 0x04 0x04 0x0050
-  it "triggers interrupt 0x58" $ testInterrupt 0x08 0x08 0x0058
-  it "triggers interrupt 0x60" $ testInterrupt 0x10 0x10 0x0060
-  it "triggers priority interrupt 0x40" $ testInterrupt 0x1F 0x1F 0x0040
-  it "triggers priority interrupt 0x48" $ testInterrupt 0x1E 0x1F 0x0048
-  it "triggers priority interrupt 0x50" $ testInterrupt 0x1C 0x1F 0x0050
-  it "triggers priority interrupt 0x58" $ testInterrupt 0x18 0x1F 0x0058
-  it "does not trigger disabled interrupt 0x40" $ testNoInterrupt True 0x01 0x1E
-  it "does not trigger disabled interrupt 0x48" $ testNoInterrupt True 0x02 0x1D
-  it "does not trigger disabled interrupt 0x50" $ testNoInterrupt True 0x04 0x1B
-  it "does not trigger disabled interrupt 0x58" $ testNoInterrupt True 0x08 0x17
-  it "does not trigger disabled interrupt 0x60" $ testNoInterrupt True 0x10 0x0F
-  it "does not trigger interrupt 0x40 when interrupts are disabled"
-    $ testNoInterrupt False 0x01 0x1F
-  it "does not trigger interrupt 0x48 when interrupts are disabled"
-    $ testNoInterrupt False 0x02 0x1F
-  it "does not trigger interrupt 0x50 when interrupts are disabled"
-    $ testNoInterrupt False 0x04 0x1F
-  it "does not trigger interrupt 0x58 when interrupts are disabled"
-    $ testNoInterrupt False 0x08 0x1F
-  it "does not trigger interrupt 0x60 when interrupts are disabled"
-    $ testNoInterrupt False 0x10 0x1F
+  describe "ADC A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for ADC A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          adcn v `shouldHaveCycles` 2
+          verifyArithmetic8 0x11 v (\x y -> x + y + (if cy then 1 else 0)) False
+
+  describe "ADC A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for ADC A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          adchl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          verifyArithmetic8 0x11 v (\x y -> x + y + (if cy then 1 else 0)) False
+
+  describe "SUB A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for SUB A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              subr r `shouldHaveCycles` 1
+              let a = if r == RegA then v else 0x11
+              verifyArithmetic8 a v (-) True
+
+  describe "SUB A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SUB A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          subn v `shouldHaveCycles` 2
+          verifyArithmetic8 0x11 v (-) True
+
+  describe "SUB A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SUB A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          subhl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          verifyArithmetic8 0x11 v (-) True
+
+  describe "SBC A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for SBC A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              cy <- CPUM $ testFlag flagCY
+              sbcr r `shouldHaveCycles` 1
+              let a = if r == RegA then v else 0x11
+              verifyArithmetic8 a v (\x y -> x - y - (if cy then 1 else 0)) True
+
+  describe "SBC A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SBC A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          sbcn v `shouldHaveCycles` 2
+          verifyArithmetic8 0x11 v (\x y -> x - y - (if cy then 1 else 0)) True
+
+  describe "SBC A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SBC A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          sbchl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          verifyArithmetic8 0x11 v (\x y -> x - y - (if cy then 1 else 0)) True
+
+  describe "AND A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for AND A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              andr r `shouldHaveCycles` 1
+              let expected = v .&. if r == RegA then v else 0x11
+              RegA `registerShouldBe` expected
+              expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+
+  describe "AND A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for AND A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          andn v `shouldHaveCycles` 2
+          let expected = v .&. 0x11
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+
+  describe "AND A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for AND A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          andhl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          let expected = v .&. 0x11
+          expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+
+  describe "OR A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for OR A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              orr r `shouldHaveCycles` 1
+              let expected = v .|. if r == RegA then v else 0x11
+              RegA `registerShouldBe` expected
+              expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "OR A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for OR A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          orn v `shouldHaveCycles` 2
+          let expected = v .|. 0x11
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "OR A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for OR A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          orhl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          let expected = v .|. 0x11
+          expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "XOR A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for XOR A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              xorr r `shouldHaveCycles` 1
+              let expected = v `xor` if r == RegA then v else 0x11
+              RegA `registerShouldBe` expected
+              expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "XOR A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for XOR A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          xorn v `shouldHaveCycles` 2
+          let expected = v `xor` 0x11
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "XOR A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for XOR A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          xorhl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          let expected = v `xor` 0x11
+          expectFlags allFlags (if expected == 0 then flagZ else 0)
+
+  describe "CP A, r"
+    $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
+    $ \(r, v) ->
+        it ("Works for CP A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInRegisters [(RegA, 0x11), (r, v)]
+          $ alteringFlags allFlags
+          $ do
+              cpr r `shouldHaveCycles` 1
+              let a = if r == RegA then v else 0x11
+              verifyArithmetic8Flags a v (-) True
+
+  describe "CP A, n" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for CP A, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ alteringFlags allFlags
+      $ do
+          cpn v `shouldHaveCycles` 2
+          verifyArithmetic8Flags 0x11 v (-) True
+
+  describe "CP A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for CP A, (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0x11)]
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          cphl `shouldHaveCycles` 2
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` v
+          verifyArithmetic8Flags 0x11 v (-) True
+
+  describe "INC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for INC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ do
+          incr r `shouldHaveCycles` 1
+          let expected = v + 1
+          r `registerShouldBe` expected
+          expectFlags (flagH .|. flagN .|. flagZ)
+                      (buildFlags False (carryIntoBit 4 v (1 :: Word8) (+)) False (expected == 0))
+
+  describe "INC (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for INC (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ do
+          inchl `shouldHaveCycles` 3
+          let expected = v + 1
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` expected
+          expectFlags (flagH .|. flagN .|. flagZ)
+                      (buildFlags False (carryIntoBit 4 v (1 :: Word8) (+)) False (expected == 0))
+
+  describe "DEC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for DEC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ do
+          decr r `shouldHaveCycles` 1
+          let expected = v - 1
+          r `registerShouldBe` expected
+          expectFlags (flagH .|. flagN .|. flagZ)
+                      (buildFlags False (carryIntoBit 4 v (1 :: Word8) (-)) True (expected == 0))
+
+  describe "DEC (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for DEC (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ do
+          dechl `shouldHaveCycles` 3
+          let expected = v - 1
+          RegHL `registerSSShouldBe` 0xC000
+          0xC000 `atAddressShouldBe` expected
+          expectFlags (flagH .|. flagN .|. flagZ)
+                      (buildFlags False (carryIntoBit 4 v (1 :: Word8) (-)) True (expected == 0))
+
+verifyArithmetic8 :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPUM CPUTestState ()
+verifyArithmetic8 a v op n = do
+  let expected = fromIntegral (fromIntegral a `op` fromIntegral v)
+  RegA `registerShouldBe` expected
+  verifyArithmetic8Flags a v op n
+
+verifyArithmetic8Flags
+  :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPUM CPUTestState ()
+verifyArithmetic8Flags a v op n = do
+  let expected = fromIntegral (fromIntegral a `op` fromIntegral v) :: Word8
+  expectFlags allFlags
+              (buildFlags (carryIntoBit 8 a v op) (carryIntoBit 4 a v op) n (expected == 0))
+
+arithmetic16 :: Spec
+arithmetic16 = do
+  describe "ADD HL, ss"
+    $ for_ [ (ss, (v .<<. 8) + 1) | ss <- allSSRegisters, v <- [0 .. 255] ]
+    $ \(ss, v) ->
+        it ("Works for ADD HL, " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInSSRegisters [(RegHL, 0x11FF), (ss, v)]
+          $ alteringFlags (flagCY .|. flagH .|. flagN)
+          $ do
+              addhlss ss `shouldHaveCycles` 2
+              let a        = if ss == RegHL then v else 0x11FF
+              let expected = v + a
+              RegHL `registerSSShouldBe` expected
+              expectFlags
+                (flagCY .|. flagH .|. flagN)
+                (buildFlags (carryIntoBit 16 a v (+)) (carryIntoBit 12 a v (+)) False False)
+
+  describe "ADD SP, e" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for ADD SP, " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInSSRegisters [(RegSP, 0x1111)]
+      $ alteringFlags allFlags
+      $ do
+          addSP v `shouldHaveCycles` 4
+          let a        = 0x1111
+          let expected = a + fromIntegral v
+          RegSP `registerSSShouldBe` expected
+          expectFlags allFlags
+                      (buildFlags (carryIntoBit 8 a v (+)) (carryIntoBit 4 a v (+)) False False)
+
+  describe "INC ss"
+    $ for_ [ (ss, (v .<<. 8) .|. 0xFF) | ss <- allSSRegisters, v <- [0 .. 255] ]
+    $ \(ss, v) ->
+        it ("Works for INC " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInSSRegisters [(ss, v)]
+          $ do
+              incss ss `shouldHaveCycles` 2
+              ss `registerSSShouldBe` (v + 1)
+
+  describe "DEC ss"
+    $ for_ [ (ss, (v .<<. 8) .|. 0xFF) | ss <- allSSRegisters, v <- [0 .. 255] ]
+    $ \(ss, v) ->
+        it ("Works for DEC " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+          $ withNewCPU
+          $ withValuesInSSRegisters [(ss, v)]
+          $ do
+              decss ss `shouldHaveCycles` 2
+              ss `registerSSShouldBe` (v - 1)
+
+rotateAndShift :: Spec
+rotateAndShift = do
+  describe "RLCA" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RLCA ; (A = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, v)]
+      $ alteringFlags allFlags
+      $ do
+          rlca `shouldHaveCycles` 1
+          let expected = (v .<<. 1) .|. (v .>>. 7)
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if v `testBit` 7 then flagCY else 0)
+
+  describe "RLA" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RLA ; (A = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, v)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rla `shouldHaveCycles` 1
+          let expected = (v .<<. 1) .|. (if cy then 1 else 0)
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if v `testBit` 7 then flagCY else 0)
+
+  describe "RRCA" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RRCA ; (A = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, v)]
+      $ alteringFlags allFlags
+      $ do
+          rrca `shouldHaveCycles` 1
+          let expected = (v .>>. 1) .|. (v .<<. 7)
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if v `testBit` 0 then flagCY else 0)
+
+  describe "RRA" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RRA ; (A = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, v)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rra `shouldHaveCycles` 1
+          let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
+          RegA `registerShouldBe` expected
+          expectFlags allFlags (if v `testBit` 0 then flagCY else 0)
+
+  describe "RLC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for RLC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          rlcr r `shouldHaveCycles` 2
+          let expected = (v .<<. 1) .|. (v .>>. 7)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "RL r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for RL " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rlr r `shouldHaveCycles` 2
+          let expected = (v .<<. 1) .|. (if cy then 1 else 0)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "RRC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for RRC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          rrcr r `shouldHaveCycles` 2
+          let expected = (v .>>. 1) .|. (v .<<. 7)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "RR r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for RR " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rrr r `shouldHaveCycles` 2
+          let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "RLC (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RLC (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          rlchl `shouldHaveCycles` 4
+          let expected = (v .<<. 1) .|. (v .>>. 7)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "RL (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RL (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rlhl `shouldHaveCycles` 4
+          let expected = (v .<<. 1) .|. (if cy then 1 else 0)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "RRC (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RRC ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          rrchl `shouldHaveCycles` 4
+          let expected = (v .>>. 1) .|. (v .<<. 7)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "RR (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for RR (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          cy <- CPUM $ testFlag flagCY
+          rrhl `shouldHaveCycles` 4
+          let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "SLA r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for SLA " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          slar r `shouldHaveCycles` 2
+          let expected = v .<<. 1
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "SLA (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SLA (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          slahl `shouldHaveCycles` 4
+          let expected = v .<<. 1
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
+
+  describe "SRA r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for SRA " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          srar r `shouldHaveCycles` 2
+          let expected = (v .>>. 1) .|. (v .&. 0x80)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "SRA (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SRA (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          srahl `shouldHaveCycles` 4
+          let expected = (v .>>. 1) .|. (v .&. 0x80)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "SRL r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for SRL " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          srlr r `shouldHaveCycles` 2
+          let expected = v .>>. 1
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "SRL (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SRL (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          srlhl `shouldHaveCycles` 4
+          let expected = v .>>. 1
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
+
+  describe "SWAP r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
+    it ("Works for SWAP " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValuesInRegisters [(r, v)]
+      $ alteringFlags allFlags
+      $ do
+          swapr r `shouldHaveCycles` 2
+          let expected = (v .>>. 4) .|. (v .<<. 4)
+          r `registerShouldBe` expected
+          expectFlags allFlags (buildFlags False False False (expected == 0))
+
+  describe "SWAP (HL)" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for SWAP (HL) ; ((HL) = " <> formatHex v <> ")")
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags allFlags
+      $ do
+          swaphl `shouldHaveCycles` 4
+          let expected = (v .>>. 4) .|. (v .<<. 4)
+          0xC000 `atAddressShouldBe` expected
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags allFlags (buildFlags False False False (expected == 0))
+
+bitOperations :: Spec
+bitOperations = do
+  describe "BIT b, r"
+    $ for_ [ (r, b, 1 .<<. v) | r <- allRegisters, b <- [0 .. 7], v <- [0 .. 7] ]
+    $ \(r, b, v) ->
+        it ("Works for " <> formatBitR r b v)
+          $ withNewCPU
+          $ withValuesInRegisters [(r, v)]
+          $ alteringFlags (flagH .|. flagN .|. flagZ)
+          $ do
+              bitr r (fromIntegral b) `shouldHaveCycles` 2
+              r `registerShouldBe` v
+              expectFlags (flagH .|. flagN .|. flagZ)
+                          (buildFlags False True False (not (v `testBit` b)))
+
+  describe "BIT b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
+    it ("Works for " <> formatBitHL b v)
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ do
+          bithl (fromIntegral b) `shouldHaveCycles` 3
+          0xC000 `atAddressShouldBe` v
+          RegHL `registerSSShouldBe` 0xC000
+          expectFlags (flagH .|. flagN .|. flagZ)
+                      (buildFlags False True False (not (v `testBit` b)))
+
+  describe "SET b, r"
+    $ for_ [ (r, b, 1 .<<. v) | r <- allRegisters, b <- [0 .. 7], v <- [0 .. 7] ]
+    $ \(r, b, v) ->
+        it ("Works for " <> formatSetR r b v) $ withNewCPU $ withValuesInRegisters [(r, v)] $ do
+          setr r (fromIntegral b) `shouldHaveCycles` 2
+          r `registerShouldBe` (v `setBit` b)
+
+  describe "SET b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
+    it ("Works for " <> formatSetHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
+      sethl (fromIntegral b) `shouldHaveCycles` 4
+      0xC000 `atAddressShouldBe` (v `setBit` b)
+      RegHL `registerSSShouldBe` 0xC000
+
+  describe "RES b, r"
+    $ for_ [ (r, b, 1 .<<. v) | r <- allRegisters, b <- [0 .. 7], v <- [0 .. 7] ]
+    $ \(r, b, v) ->
+        it ("Works for " <> formatResR r b v) $ withNewCPU $ withValuesInRegisters [(r, v)] $ do
+          resr r (fromIntegral b) `shouldHaveCycles` 2
+          r `registerShouldBe` (v `clearBit` b)
+
+  describe "RES b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
+    it ("Works for " <> formatResHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
+      reshl (fromIntegral b) `shouldHaveCycles` 4
+      0xC000 `atAddressShouldBe` (v `clearBit` b)
+      RegHL `registerSSShouldBe` 0xC000
+
  where
-  testNoInterrupt :: Bool -> Word8 -> Word8 -> IO ()
-  testNoInterrupt ime fif fie = withNewCPU $ withAllFlagCombos $ do
-    if ime then setIME else clearIME
-    withNoChangeToRegisters $ preservingPC $ do
-      pc <- readPC
-      writeByte IF fif
-      writeByte IE fie
-      ev  <- cpuStep
-      pc1 <- readPC
-      liftIO $ do
-        ev `shouldBe` BusEvent 4 ModeNormal
-        pc1 `shouldBe` (pc + 1)
-  testInterrupt :: Word8 -> Word8 -> Word16 -> IO ()
-  testInterrupt fif fie vector =
-    withNewCPU
-      $ withAllFlagCombos
-      $ withNoChangeToRegisters
-      $ preservingPC
-      $ preservingR16 RegSP
-      $ withIMEUpdate
-      $ expectInterrupt fif fie vector
-  expectInterrupt fif fie vector = do
-    setIME
-    pc0 <- readPC
-    writeR16 RegSP 0xC000
-    writeByte IF fif
-    writeByte IE fie
-    ev  <- cpuStep
-    pc1 <- readPC
-    sp1 <- readR16 RegSP
-    sl  <- readByte 0xBFFE
-    sh  <- readByte 0xBFFF
-    ime <- testIME
-    liftIO $ do
-      --ev `shouldBe` BusEvent [0xBFFE, 0xBFFF] 28 ModeNormal
-      ev `shouldBe` BusEvent 28 ModeNormal
-      pc1 `shouldBe` vector
-      sp1 `shouldBe` 0xBFFE
-      fromIntegral sl .|. (fromIntegral sh `shiftL` 8) `shouldBe` pc0
-      ime `shouldBe` False
+  formatBitR r b v =
+    "BIT " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+  formatBitHL b v = "BIT " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
+  formatSetR r b v =
+    "SET " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+  formatSetHL b v = "SET " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
+  formatResR r b v =
+    "RES " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+  formatResHL b v = "RES " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
 
-testDAA :: Spec
-testDAA = do
-  traverse_ testAddition    allBCDCombos
-  traverse_ testSubtraction allBCDCombos
+jumps :: Spec
+jumps = do
+  describe "JP nn" $ it "Works for JP 4232" $ withNewCPU $ alteringPC $ do
+    jpnn 0x4232 `shouldHaveCycles` 4
+    expectPC 0x4232
+
+  describe "JP (HL)"
+    $ it "Works for JP (HL) ; (HL = 4232)"
+    $ withNewCPU
+    $ withValuesInSSRegisters [(RegHL, 0x4232)]
+    $ alteringPC
+    $ do
+        jphl `shouldHaveCycles` 1
+        expectPC 0x4232
+        RegHL `registerSSShouldBe` 0x4232
+
+  describe "JP cc, nn"
+    $ for_ [ (cc, shouldJump) | cc <- allConditions, shouldJump <- [True, False] ]
+    $ \(cc, shouldJump) ->
+        it ("Works for JP " <> format cc <> ", 4232 ; when condition is " <> show shouldJump)
+          $ withNewCPU
+          $ alteringFlags allFlags
+          $ if shouldJump
+              then alteringPC $ do
+                setCondition cc
+                notAlteringFlags allFlags $ do
+                  jpccnn cc 0x4232 `shouldHaveCycles` 4
+                  expectPC 0x4232
+              else do
+                clearCondition cc
+                notAlteringFlags allFlags $ jpccnn cc 0x4232 `shouldHaveCycles` 3
+
+  describe "JR e" $ for_ [-8 .. 8] $ \e ->
+    it ("Works for JR " <> formatHex e) $ withNewCPU $ withPC 0x4000 $ do
+      jr e `shouldHaveCycles` 3
+      expectPC (0x4000 + fromIntegral e)
+
+  describe "JR cc, e"
+    $ for_
+        [ (cc, shouldJump, e) | cc <- allConditions, shouldJump <- [True, False], e <- [-8 .. 8] ]
+    $ \(cc, shouldJump, e) ->
+        it ("Works for " <> formatJRcc cc e shouldJump)
+          $ withNewCPU
+          $ alteringFlags allFlags
+          $ if shouldJump
+              then withPC 0x4000 $ do
+                setCondition cc
+                notAlteringFlags allFlags $ do
+                  jrcc cc e `shouldHaveCycles` 3
+                  expectPC (0x4000 + fromIntegral e)
+              else do
+                clearCondition cc
+                notAlteringFlags allFlags $ jrcc cc e `shouldHaveCycles` 2
+ where
+  formatJRcc cc e shouldJump =
+    "JR " <> format cc <> ", " <> formatHex e <> "; when condition is " <> show shouldJump
+
+callAndReturn :: Spec
+callAndReturn = do
+  describe "CALL nn"
+    $ it "Works for CALL 4232"
+    $ withNewCPU
+    $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+    $ withPC 0x4001
+    $ do
+        call 0x4232 `shouldHaveCycles` 6
+        expectPC 0x4232
+        RegSP `registerSSShouldBe` 0xFFEE
+        0xFFEE `atAddressShouldBe` 0x01
+        0xFFEF `atAddressShouldBe` 0x40
+
+  describe "CALL cc, nn"
+    $ for_ [ (cc, shouldCall) | cc <- allConditions, shouldCall <- [True, False] ]
+    $ \(cc, shouldCall) ->
+        it ("Works for CALL " <> format cc <> ", 4232 ; with condition " <> show shouldCall)
+          $ withNewCPU
+          $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+          $ alteringFlags allFlags
+          $ if shouldCall
+              then withPC 0x4001 $ do
+                setCondition cc
+                notAlteringFlags allFlags $ do
+                  callcc cc 0x4232 `shouldHaveCycles` 6
+                  expectPC 0x4232
+                  RegSP `registerSSShouldBe` 0xFFEE
+                  0xFFEE `atAddressShouldBe` 0x01
+                  0xFFEF `atAddressShouldBe` 0x40
+              else do
+                clearCondition cc
+                notAlteringFlags allFlags $ do
+                  callcc cc 0x4232 `shouldHaveCycles` 3
+                  RegSP `registerSSShouldBe` 0xFFF0
+
+  describe "RET"
+    $ it "Works for RET ; (SP) = 4232"
+    $ withNewCPU
+    $ withValue16At RegSP 0xFFEE 0x4232
+    $ withPC 0x4001
+    $ do
+        ret `shouldHaveCycles` 4
+        expectPC 0x4232
+        RegSP `registerSSShouldBe` 0xFFF0
+
+  describe "RETI" $ for_ [True, False] $ \ime ->
+    it ("Works for RETI ; (SP) = 4232, IME = " <> show ime)
+      $ withNewCPU
+      $ withValue16At RegSP 0xFFEE 0x4232
+      $ withPC 0x4001
+      $ withIME ime
+      $ do
+          reti `shouldHaveCycles` 4
+          expectPC 0x4232
+          expectIME True
+          RegSP `registerSSShouldBe` 0xFFF0
+
+  describe "RET cc"
+    $ for_ [ (cc, shouldRet) | cc <- allConditions, shouldRet <- [True, False] ]
+    $ \(cc, shouldRet) ->
+        it ("Works for RET " <> format cc <> "; (SP) = 4232, condition is " <> show shouldRet)
+          $ withNewCPU
+          $ withValue16At RegSP 0xFFEE 0x4232
+          $ alteringFlags allFlags
+          $ if shouldRet
+              then withPC 0x4001 $ do
+                setCondition cc
+                notAlteringFlags allFlags $ do
+                  retcc cc `shouldHaveCycles` 5
+                  expectPC 0x4232
+                  RegSP `registerSSShouldBe` 0xFFF0
+              else do
+                clearCondition cc
+                notAlteringFlags allFlags $ do
+                  retcc cc `shouldHaveCycles` 2
+                  RegSP `registerSSShouldBe` 0xFFEE
+
+  describe "RST t" $ for_ [0 .. 7] $ \t ->
+    it ("Works for RST " <> show t)
+      $ withNewCPU
+      $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+      $ withPC 0x4001
+      $ do
+          rst t `shouldHaveCycles` 4
+          expectPC (fromIntegral t * 8)
+          RegSP `registerSSShouldBe` 0xFFEE
+          0xFFEE `atAddressShouldBe` 0x01
+          0xFFEF `atAddressShouldBe` 0x40
+
+--  stop    :: m (ExecuteResult m)
+
+miscellaneous :: Spec
+miscellaneous = do
+  describe "CPL" $ for_ [minBound .. maxBound] $ \v ->
+    it ("Works for CPL ; A = " <> formatHex v)
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, v)]
+      $ alteringFlags (flagH .|. flagN)
+      $ do
+          cpl `shouldHaveCycles` 1
+          RegA `registerShouldBe` complement v
+          expectFlags (flagH .|. flagN) (flagH .|. flagN)
+
+  describe "NOP" $ it "Does nothing" $ withNewCPU $ nop `shouldHaveCycles` 1
+
+  describe "CCF" $ for_ [True, False] $ \cf0 ->
+    it ("Works for CCF ; CY = " <> show cf0)
+      $ withNewCPU
+      $ alteringFlags (flagCY .|. flagH .|. flagN)
+      $ do
+          CPUM $ setFlagsMask flagCY (if cf0 then flagCY else 0)
+          ccf `shouldHaveCycles` 1
+          expectFlags (flagCY .|. flagH .|. flagN) (buildFlags (not cf0) False False False)
+
+  describe "SCF" $ it "Works for SCF" $ withNewCPU $ alteringFlags (flagCY .|. flagH .|. flagN) $ do
+    scf `shouldHaveCycles` 1
+    expectFlags (flagCY .|. flagH .|. flagN) (buildFlags True False False False)
+
+  describe "DI" $ for_ [True, False] $ \ime0 ->
+    it ("Works for DI ; IME = " <> show ime0) $ withNewCPU $ withIME ime0 $ do
+      di `shouldHaveCycles` 1
+      expectIME False
+
+  describe "EI" $ for_ [True, False] $ \ime0 ->
+    it ("Works for EI ; IME = " <> show ime0) $ withNewCPU $ withIME ime0 $ do
+      ei `shouldHaveCycles` 1
+      expectIME True
+
+  describe "HALT" $ it "Enters salt mode" $ withNewCPU $ alteringMode $ do
+    halt `shouldHaveCycles` 1
+    expectMode ModeHalt
+
+  describe "STOP" $ do
+    it "Enters stop mode" $ withNewCPU $ alteringMode $ do
+      stop `shouldHaveCycles` 1
+      expectMode ModeStop
+    it "Switches speed mode" $ withNewCPU $ alteringCPUCycleClocks $ do
+      KEY1 `atAddressShouldBe` 0
+      CPUM $ writeByte KEY1 1
+      KEY1 `atAddressShouldBe` 1
+      stop `shouldHaveCycles` 1
+      KEY1 `atAddressShouldBe` 0x80
+      expectCPUCycleClocks 2
+      CPUM $ writeByte KEY1 1
+      KEY1 `atAddressShouldBe` 0x81
+      stop `shouldHaveCycles` 1
+      KEY1 `atAddressShouldBe` 0x00
+      expectCPUCycleClocks 4
+
+bcd :: Spec
+bcd = do
+  describe "DAA after addition" $ traverse_ testAddition allBCDCombos
+  describe "DAA after subtraction" $ traverse_ testSubtraction allBCDCombos
  where
   allBCDCombos = [ (a, b) | a <- [0 .. 99], b <- [0 .. 99] ]
 
@@ -1169,35 +1543,135 @@ testDAA = do
   testSubtraction (a, b) =
     it ("works for " ++ show a ++ " - " ++ show b)
       $ withNewCPU
-      $ withAllFlagCombos
-      $ withFlagsUpdateZ (flagN .|. flagCY) (dup $ flagN .|. if a < b then flagCY else 0)
-      $ preservingR8 RegA
+      $ alteringFlags allFlags
+      $ withValuesInRegisters [(RegA, toBCD8 a)]
       $ do
-          writeR8 RegA (toBCD8 a)
-          void (executeInstruction (SUB (I8 (toBCD8 b))))
-          ev    <- executeInstruction DAA
-          r     <- readR8 RegA
-          carry <- testFlag flagCY
-          let result = if carry then fromIntegral r + 0x0100 else fromIntegral r
-          liftIO $ do
-            ev `shouldBe` noWrite
-            result `shouldBe` (if a < b then toBCD (a - b + 100) + 0x0100 else toBCD (a - b))
-          pure r
+          subn (toBCD8 b) `shouldHaveCycles` 2
+          daa `shouldHaveCycles` 1
+          cy <- CPUM $ testFlag flagCY
+          a' <- CPUM $ readR8 RegA
+          let result   = fromIntegral a' + if cy then 0x0100 else 0
+          let expected = if a < b then toBCD (a - b + 100) + 0x0100 else toBCD (a - b)
+          liftIO (result `shouldBe` expected)
 
   testAddition (a, b) =
     it ("works for " ++ show a ++ " + " ++ show b)
       $ withNewCPU
-      $ withAllFlagCombos
-      $ withFlagsUpdateZ flagCY (dup $ if a + b > 99 then flagCY else 0)
-      $ preservingR8 RegA
+      $ alteringFlags allFlags
+      $ withValuesInRegisters [(RegA, toBCD8 a)]
       $ do
-          writeR8 RegA (toBCD8 a)
-          void (executeInstruction (ADD (I8 (toBCD8 b))))
-          ev    <- executeInstruction DAA
-          r     <- readR8 RegA
-          carry <- testFlag flagCY
-          let result = if carry then fromIntegral r + 0x0100 else fromIntegral r
-          liftIO $ do
-            ev `shouldBe` noWrite
-            (a, b, result) `shouldBe` (a, b, toBCD (a + b))
-          pure r
+          addn (toBCD8 b) `shouldHaveCycles` 2
+          daa `shouldHaveCycles` 1
+          cy <- CPUM $ testFlag flagCY
+          a' <- CPUM $ readR8 RegA
+          let result = fromIntegral a' + if cy then 0x0100 else 0
+          liftIO (result `shouldBe` toBCD (a + b))
+
+data InterruptBehavior = Trigger | Ignore | Wakeup deriving (Eq, Show)
+
+interrupts :: Spec
+interrupts = do
+  describe "Interrupt triggering"
+    $ for_
+        [ (vector, pending, enabled, ime, mode)
+        | vector  <- [0 .. 4]
+        , pending <- [True, False]
+        , enabled <- [True, False]
+        , ime     <- [True, False]
+        , mode    <- [minBound .. maxBound]
+        ]
+    $ \(vector, pending, enabled, ime, mode) ->
+        it (triggerMessage vector pending enabled ime mode)
+          $ withNewCPU
+          $ withIME ime
+          $ withMode mode
+          $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+          $ withPC 0x4001
+          $ do
+              let behavior | pending && enabled && ime = Trigger
+                           | mode /= ModeNormal && pending && enabled = Wakeup
+                           | otherwise                 = Ignore
+
+              CPUM $ writeByte IF (if pending then bit vector else 0)
+              CPUM $ writeByte IE (if enabled then bit vector else 0)
+              cycles <- CPUM cpuStep
+              liftIO $ cycles `shouldBe` case behavior of
+                Trigger -> 7
+                Wakeup  -> 1
+                Ignore  -> if mode == ModeNormal then 1 else 8
+
+              case behavior of
+                Trigger -> do
+                  RegSP `registerSSShouldBe` 0xFFEE
+                  0xFFEE `atAddressShouldBe` 0x01
+                  0xFFEF `atAddressShouldBe` 0x40
+                  IF `atAddressShouldBe` 0
+                  IE `atAddressShouldBe` (bit vector)
+                  expectPC (fromIntegral vector * 8 + 0x40)
+                  expectMode ModeNormal
+                  expectIME False
+                Wakeup -> do
+                  RegSP `registerSSShouldBe` 0xFFF0
+                  IF `atAddressShouldBe` (if pending then bit vector else 0)
+                  IE `atAddressShouldBe` (if enabled then bit vector else 0)
+                  expectPC 0x4002
+                  expectMode ModeNormal
+                  expectIME ime
+                Ignore -> do
+                  RegSP `registerSSShouldBe` 0xFFF0
+                  IF `atAddressShouldBe` (if pending then bit vector else 0)
+                  IE `atAddressShouldBe` (if enabled then bit vector else 0)
+                  expectPC (if mode == ModeNormal then 0x4002 else 0x4001)
+                  expectMode mode
+                  expectIME ime
+
+  describe "Invalid interrupts" $ for_ [5, 6, 7] $ \vector ->
+    it ("Does not trigger on invalid interrupt " <> show vector)
+      $ withNewCPU
+      $ withMode ModeNormal
+      $ withIME True
+      $ withPC 0x4001
+      $ do
+          CPUM $ do
+            writeByte IF (bit vector)
+            writeByte IE (bit vector)
+            cycles <- cpuStep
+            liftIO (cycles `shouldBe` 1)
+          expectMode ModeNormal
+          expectIME True
+          expectPC 0x4002
+
+  describe "Interrupt priority" $ for_ [ (l, r) | l <- [0 .. 4], r <- [l + 1 .. 4] ] $ \(l, r) ->
+    it ("Triggers " <> show l <> " when " <> show l <> " and " <> show r <> " are both pending")
+      $ withNewCPU
+      $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
+      $ withMode ModeNormal
+      $ withIME True
+      $ withPC 0x4001
+      $ do
+          CPUM $ do
+            writeByte IF (bit l .|. bit r)
+            writeByte IE (bit l .|. bit r)
+            cycles <- cpuStep
+            liftIO (cycles `shouldBe` 7)
+          RegSP `registerSSShouldBe` 0xFFEE
+          0xFFEE `atAddressShouldBe` 0x01
+          0xFFEF `atAddressShouldBe` 0x40
+          IF `atAddressShouldBe` (bit r)
+          IE `atAddressShouldBe` (bit l .|. bit r)
+          expectPC (fromIntegral l * 8 + 0x40)
+          expectMode ModeNormal
+          expectIME False
+
+ where
+  triggerMessage vector True True True mode =
+    "Triggers " <> show vector <> " when enabled, pending, IME is set, and in mode " <> show mode
+  triggerMessage vector pending enabled ime mode =
+    "Does not trigger "
+      <> show vector
+      <> " when "
+      <> (if enabled then "enabled" else "not enabled")
+      <> (if pending then ", pending" else ", not pending")
+      <> (if ime then ", IME is set" else ", IME is not set")
+      <> ", and in mode "
+      <> show mode

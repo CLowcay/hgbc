@@ -1,28 +1,29 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE BinaryLiterals #-}
 
 module GBC.CPU
   ( RegisterFile(..)
   , CPUMode(..)
   , CPUState(..)
   , HasCPU(..)
+  , CPUM(..)
   , initCPU
   , cpuPorts
   , getMode
+  , setMode
   , getCPUCycleClocks
+  , setCPUCycleClocks
   , reset
   , getRegisterFile
   , readR8
   , writeR8
   , readR16
+  , readR16qq
   , writeR16
+  , writeR16qq
   , readPC
   , writePC
   , readF
@@ -228,12 +229,13 @@ offsetR16 RegSP = offsetSP
 -- | Read a 16-bit register.
 {-# INLINABLE readR16qq #-}
 readR16qq :: HasCPU env => RegisterQQ -> ReaderT env IO Word16
-readR16qq = readRegister . offsetR16qq
+readR16qq register = readRegister (offsetR16qq register)
 
 -- | Write a 16-bit register.
 {-# INLINABLE writeR16qq #-}
 writeR16qq :: HasCPU env => RegisterQQ -> Word16 -> ReaderT env IO ()
-writeR16qq register = writeRegister $ offsetR16qq register
+writeR16qq PushPopAF v = writeRegister offsetF (v .&. 0xFFF0)
+writeR16qq register v = writeRegister (offsetR16qq register) v
 
 -- | Get the offset in the register file of a register pair.
 offsetR16qq :: RegisterQQ -> Int
@@ -473,6 +475,12 @@ getCPUCycleClocks = do
   CPUState {..} <- asks forCPUState
   liftIO (readUnboxedRef cpuCycleClocks)
 
+{-# INLINE setCPUCycleClocks #-}
+setCPUCycleClocks :: HasCPU env => Int -> ReaderT env IO ()
+setCPUCycleClocks clocks = do
+  CPUState {..} <- asks forCPUState
+  liftIO (writeUnboxedRef cpuCycleClocks clocks)
+
 {-# SPECIALIZE table0 :: HasCPU env => V.Vector (CPUM env Int) #-}
 {-# SPECIALIZE table1 :: HasCPU env => V.Vector (CPUM env Int) #-}
 {-# SPECIALIZE fetchAndExecute :: HasCPU env => CPUM env Int #-}
@@ -578,10 +586,6 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
   push qq = CPUM $ do
     push16 =<< readR16qq qq
     pure 4
-  pop PushPopAF = CPUM $ do
-    v <- pop16
-    writeR16qq PushPopAF (v .&. 0xFFF0)
-    pure 3
   pop qq = CPUM $ do
     writeR16qq qq =<< pop16
     pure 3
