@@ -29,16 +29,16 @@ import qualified Data.ByteString               as B
 
 spec :: Spec
 spec = do
-  loads
-  arithmetic8
-  arithmetic16
-  rotateAndShift
-  bitOperations
-  jumps
-  callAndReturn
-  miscellaneous
-  bcd
-  interrupts
+  describe "Loads" loads
+  describe "Arithmetic8" arithmetic8
+  describe "Arithmetic16" arithmetic16
+  describe "rotateAndShift" rotateAndShift
+  describe "bitOperations" bitOperations
+  describe "jumps" jumps
+  describe "callAndReturn" callAndReturn
+  describe "Miscellaneous" miscellaneous
+  describe "BCD" bcd
+  describe "Interrupts" interrupts
 
 blankROM :: ROM
 blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)

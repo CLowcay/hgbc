@@ -235,7 +235,7 @@ readR16qq register = readRegister (offsetR16qq register)
 {-# INLINABLE writeR16qq #-}
 writeR16qq :: HasCPU env => RegisterQQ -> Word16 -> ReaderT env IO ()
 writeR16qq PushPopAF v = writeRegister offsetF (v .&. 0xFFF0)
-writeR16qq register v = writeRegister (offsetR16qq register) v
+writeR16qq register  v = writeRegister (offsetR16qq register) v
 
 -- | Get the offset in the register file of a register pair.
 offsetR16qq :: RegisterQQ -> Int
@@ -260,6 +260,12 @@ flagZ = 0x80
 flagN = 0x40
 flagH = 0x20
 flagCY = 0x10
+
+allExceptCY :: Word8
+allExceptCY = flagZ .|. flagN .|. flagH
+
+allExceptZ :: Word8
+allExceptZ = flagH .|. flagN .|. flagCY
 
 -- Master interrupt enable flag
 {-# INLINABLE flagIME #-}
@@ -294,7 +300,7 @@ writeF = writeRegister offsetF
 -- | Set all the flags.
 {-# INLINE setFlags #-}
 setFlags :: HasCPU env => Word8 -> ReaderT env IO ()
-setFlags = setFlagsMask 0xF0
+setFlags = writeF
 
 -- | Set some flags.
 {-# INLINE setFlagsMask #-}
@@ -384,39 +390,39 @@ reset = do
   writeByte IE   0x00
   writeByte IF   0x00
 
--- | An arithmetic operation.
-data ArithmeticOp = OpAdd | OpSub deriving (Eq, Ord, Show, Bounded, Enum)
-
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}
-adder8 :: ArithmeticOp -> Word8 -> Word8 -> Bool -> (Word8, Word8)
-adder8 op a1 a2 carry =
-  let (wa1, wa2) = (fromIntegral a1 :: Word16, fromIntegral a2)
-      wr         = case op of
-        OpAdd -> wa1 + wa2 + (if carry then 1 else 0)
-        OpSub -> wa1 - wa2 - (if carry then 1 else 0)
-      r       = fromIntegral wr
-      carryH  = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
-      carryCY =  (wr .&. 0x0100) /= 0
-      flags =
-          (if r == 0 then flagZ else 0)
-            .|. (if op == OpSub then flagN else 0)
-            .|. (if carryH then flagH else 0)
-            .|. (if carryCY then flagCY else 0)
-  in  (r, flags)
+adder8 :: Word8 -> Word8 -> Word16 -> Word16 -> (Word8, Word8)
+adder8 a1 a2 wa2' carry =
+  let
+    wa1     = fromIntegral a1
+    wa2     = fromIntegral a2
+    wr      = wa1 + wa2' + carry
+    r       = fromIntegral wr
+    carryH  = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
+    carryCY = (wr .&. 0x0100) /= 0
+    flags =
+      (if r == 0 then flagZ else 0)
+        .|. (if carryH then flagH else 0)
+        .|. (if carryCY then flagCY else 0)
+  in
+    (r, flags)
+
+getCarry :: HasCPU env => ReaderT env IO Word16
+getCarry = do
+  f <- readF
+  pure ((fromIntegral f .>>. 4) .&. 1)
+
+negative1 :: Word8
+negative1 = negate 1
 
 -- | Perform an increment operation and adjust the flags.
 {-# INLINE inc8 #-}
-inc8 :: ArithmeticOp -> Word8 -> (Word8, Word8)
-inc8 op value =
-  let r = case op of
-        OpAdd -> value + 1
-        OpSub -> value - 1
+inc8 :: Word8 -> Word8 -> (Word8, Word8)
+inc8 value x =
+  let r      = value + x
       carryH = (value .&. 0x10) /= (r .&. 0x010)
-      flags =
-          (if r == 0 then flagZ else 0)
-            .|. (if op == OpSub then flagN else 0)
-            .|. (if carryH then flagH else 0)
+      flags  = (if r == 0 then flagZ else 0) .|. (if carryH then flagH else 0)
   in  (r, flags)
 
 flagDoubleSpeed :: Word8
@@ -603,53 +609,53 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     pure 5
   addr r = CPUM $ do
     v <- readR8 r
-    arithOp8 OpAdd v False
+    add8 v 0
     pure 1
   addn n = CPUM $ do
-    arithOp8 OpAdd n False
+    add8 n 0
     pure 2
   addhl = CPUM $ do
     v <- readByte =<< readR16 RegHL
-    arithOp8 OpAdd v False
+    add8 v 0
     pure 2
   adcr r = CPUM $ do
     v  <- readR8 r
-    cf <- testFlag flagCY
-    arithOp8 OpAdd v cf
+    carry <- getCarry
+    add8 v carry
     pure 1
   adcn n = CPUM $ do
-    cf <- testFlag flagCY
-    arithOp8 OpAdd n cf
+    carry <- getCarry
+    add8 n carry
     pure 2
   adchl = CPUM $ do
     v  <- readByte =<< readR16 RegHL
-    cf <- testFlag flagCY
-    arithOp8 OpAdd v cf
+    carry <- getCarry
+    add8 v carry
     pure 2
   subr r = CPUM $ do
     v <- readR8 r
-    arithOp8 OpSub v False
+    sub8 v 0
     pure 1
   subn n = CPUM $ do
-    arithOp8 OpSub n False
+    sub8 n 0
     pure 2
   subhl = CPUM $ do
     v <- readByte =<< readR16 RegHL
-    arithOp8 OpSub v False
+    sub8 v 0
     pure 2
   sbcr r = CPUM $ do
     v  <- readR8 r
-    cf <- testFlag flagCY
-    arithOp8 OpSub v cf
+    carry <- getCarry
+    sub8 v (negate carry)
     pure 1
   sbcn n = CPUM $ do
-    cf <- testFlag flagCY
-    arithOp8 OpSub n cf
+    carry <- getCarry
+    sub8 n (negate carry)
     pure 2
   sbchl = CPUM $ do
     v  <- readByte =<< readR16 RegHL
-    cf <- testFlag flagCY
-    arithOp8 OpSub v cf
+    carry <- getCarry
+    sub8 v (negate carry)
     pure 2
   andr r = CPUM $ do
     andOp8 =<< readR8 r
@@ -681,44 +687,44 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
   cpr r = CPUM $ do
     a <- readR8 RegA
     v <- readR8 r
-    let (_, flags) = adder8 OpSub a v False
-    setFlags flags
+    let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
+    setFlags (flagN .|. flags)
     pure 1
   cpn n = CPUM $ do
     a <- readR8 RegA
-    let (_, flags) = adder8 OpSub a n False
-    setFlags flags
+    let (_, flags) = adder8 a n (negate (fromIntegral n)) 0
+    setFlags (flagN .|. flags)
     pure 2
   cphl = CPUM $ do
     a <- readR8 RegA
     v <- readByte =<< readR16 RegHL
-    let (_, flags) = adder8 OpSub a v False
-    setFlags flags
+    let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
+    setFlags (flagN .|. flags)
     pure 2
   incr r = CPUM $ do
     v <- readR8 r
-    let (v', flags) = inc8 OpAdd v
+    let (v', flags) = inc8 v 1
     writeR8 r v'
-    setFlagsMask (flagN .|. flagH .|. flagZ) flags
+    setFlagsMask allExceptCY flags
     pure 1
   inchl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
-    let (v', flags) = inc8 OpAdd v
-    setFlagsMask (flagN .|. flagH .|. flagZ) flags
+    let (v', flags) = inc8 v 1
+    setFlagsMask allExceptCY flags
     writeByte hl v'
     pure 3
   decr r = CPUM $ do
     v <- readR8 r
-    let (v', flags) = inc8 OpSub v
+    let (v', flags) = inc8 v negative1
     writeR8 r v'
-    setFlagsMask (flagN .|. flagH .|. flagZ) flags
+    setFlagsMask allExceptCY (flags .|. flagN)
     pure 1
   dechl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
-    let (v', flags) = inc8 OpSub v
-    setFlagsMask (flagN .|. flagH .|. flagZ) flags
+    let (v', flags) = inc8 v negative1
+    setFlagsMask allExceptCY (flags .|. flagN)
     writeByte hl v'
     pure 3
   addhlss ss = CPUM $ do
@@ -730,7 +736,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let carryH = (hl' .&. 0x00001000) `xor` (v' .&. 0x00001000) /= (wr .&. 0x00001000)
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
-    setFlagsMask (flagCY .|. flagH .|. flagN)
+    setFlagsMask allExceptZ
                  ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
     pure 2
   addSP e = CPUM $ do
@@ -833,13 +839,11 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     pure 4
   bitr r b = CPUM $ do
     v <- readR8 r
-    setFlagsMask (flagH .|. flagN .|. flagZ)
-                 (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
     pure 2
   bithl b = CPUM $ do
     v <- readByte =<< readR16 RegHL
-    setFlagsMask (flagH .|. flagN .|. flagZ)
-                 (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
     pure 3
   setr r b = CPUM $ do
     v <- readR8 r
@@ -933,21 +937,21 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let r = fromIntegral (rWide .&. 0xFF)
     writeR8 RegA r
     setFlagsMask
-      (flagCY .|. flagZ .|. flagH)
+      allExceptZ
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     pure 1
   cpl = CPUM $ do
     a <- readR8 RegA
     writeR8 RegA (complement a)
-    setFlagsMask (flagH .|. flagN) (flagH .|. flagN)
+    let flagHN = flagH .|. flagN in setFlagsMask flagHN flagHN
     pure 1
   nop = pure 1
   ccf = CPUM $ do
     cf <- testFlag flagCY
-    setFlagsMask (flagCY .|. flagH .|. flagN) (if cf then 0 else flagCY)
+    setFlagsMask allExceptZ (if cf then 0 else flagCY)
     pure 1
   scf = CPUM $ do
-    setFlagsMask (flagCY .|. flagH .|. flagN) flagCY
+    setFlagsMask allExceptZ flagCY
     pure 1
   di = CPUM $ do
     clearIME
@@ -990,13 +994,21 @@ pop16 = do
   writeR16 RegSP (sp + 2)
   pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
 
-{-# INLINE arithOp8 #-}
-arithOp8 :: HasCPU env => ArithmeticOp -> Word8 -> Bool -> ReaderT env IO ()
-arithOp8 op x carry = do
+{-# INLINE add8 #-}
+add8 :: HasCPU env => Word8 -> Word16 -> ReaderT env IO ()
+add8 x carry = do
   a <- readR8 RegA
-  let (a', flags) = adder8 op a x carry
+  let (a', flags) = adder8 a x (fromIntegral x) carry
   writeR8 RegA a'
   setFlags flags
+
+{-# INLINE sub8 #-}
+sub8 :: HasCPU env => Word8 -> Word16 -> ReaderT env IO ()
+sub8 x carry = do
+  a <- readR8 RegA
+  let (a', flags) = adder8 a x (negate (fromIntegral x)) carry
+  writeR8 RegA a'
+  setFlags (flags .|. flagN)
 
 {-# INLINE andOp8 #-}
 andOp8 :: HasCPU env => Word8 -> ReaderT env IO ()
