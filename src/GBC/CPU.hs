@@ -58,8 +58,8 @@ import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.CPU.Decode
 import           GBC.CPU.ISA
+import           GBC.CPU.Interrupts
 import           GBC.Errors
-import           GBC.Interrupts
 import           GBC.Memory
 import           GBC.Mode
 import           GBC.Primitive

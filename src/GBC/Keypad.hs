@@ -14,7 +14,7 @@ import           Data.Bits
 import           Data.Function
 import           Data.IORef
 import           Data.Word
-import           GBC.Interrupts
+import           GBC.CPU.Interrupts
 import           GBC.Primitive
 import           GBC.Registers
 import           SDL.Event

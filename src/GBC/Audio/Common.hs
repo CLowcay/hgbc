@@ -40,6 +40,7 @@ class Channel channel where
   masterClock         :: channel -> Int -> IO ()
   getPorts            :: channel -> [(Int, Port Word8)]
 
+{-# INLINE getFrequency #-}
 getFrequency :: Word8 -> Word8 -> Int
 getFrequency register3 register4 =
   let lsb = register3

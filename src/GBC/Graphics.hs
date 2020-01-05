@@ -22,13 +22,13 @@ import           Control.Concurrent.MVar
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Functor
-import           Data.Word
 import           Data.Int
-import           Foreign.Ptr
+import           Data.Word
 import           Foreign.ForeignPtr
+import           Foreign.Ptr
 import           Foreign.Storable
+import           GBC.CPU.Interrupts
 import           GBC.Graphics.VRAM
-import           GBC.Interrupts
 import           GBC.Mode
 import           GBC.Primitive
 import           GBC.Registers
@@ -528,4 +528,3 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
       color <- readRGBPalette vram isForeground colorIndex
       pokeElemOff (castPtr outputBase) offset color
       if offset >= 159 then pure () else go (offset + 1)
-

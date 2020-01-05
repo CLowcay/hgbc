@@ -12,7 +12,7 @@ import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Word
-import           GBC.Interrupts
+import           GBC.CPU.Interrupts
 import           GBC.Primitive
 import           GBC.Primitive.UnboxedRef
 import           GBC.Registers

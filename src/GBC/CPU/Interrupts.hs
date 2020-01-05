@@ -1,4 +1,4 @@
-module GBC.Interrupts
+module GBC.CPU.Interrupts
   ( Interrupt(..)
   , flagInterrupt
   , raiseInterrupt
