@@ -131,7 +131,7 @@ data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded
 -- | The internal CPU state.
 data CPUState = CPUState {
     cpuType        :: !EmulatorMode
-  , busCatchup     :: Int -> Int -> IO ()
+  , busCatchup     :: BusCatchupFunction
   , registers      :: !(ForeignPtr RegisterFile)
   , portIF         :: !(Port Word8)
   , portIE         :: !(Port Word8)

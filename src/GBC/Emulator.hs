@@ -149,16 +149,17 @@ getEmulatorClock = do
 step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
+
+  cycles             <- cpuStep
   now                <- liftIO $ readUnboxedRef currentTime
   pollEvents now
 
-  cycles      <- cpuStep
   cycleClocks <- getCPUCycleClocks
   let cpuClocks = cycles * cycleClocks
 
   graphicsEvent   <- updateHardware cycles cpuClocks
-
   dmaClockAdvance <- doPendingDMA dmaState
+
   liftIO $ writeUnboxedRef currentTime (now + cpuClocks + dmaClockAdvance)
 
   if dmaClockAdvance > 0

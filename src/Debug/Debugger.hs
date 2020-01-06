@@ -204,8 +204,8 @@ withAddress (LabelAddress label maybeAddress) action = do
 
 reportingClockStats :: MonadDebugger () -> MonadDebugger ()
 reportingClockStats action = do
-  t0      <- SDL.ticks
   clocks0 <- lift $ withReaderT emulator getEmulatorClock
+  t0      <- SDL.ticks
   action
   t1      <- SDL.ticks
   clocks1 <- lift $ withReaderT emulator getEmulatorClock
