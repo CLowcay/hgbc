@@ -270,6 +270,9 @@ allExceptCY = flagZ .|. flagN .|. flagH
 allExceptZ :: Word8
 allExceptZ = flagH .|. flagN .|. flagCY
 
+allExceptN :: Word8
+allExceptN = flagH .|. flagCY .|. flagZ
+
 -- Master interrupt enable flag
 {-# INLINABLE flagIME #-}
 flagIME :: Word16
@@ -982,7 +985,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let r = fromIntegral (rWide .&. 0xFF)
     writeR8 RegA r
     setFlagsMask
-      allExceptZ
+      allExceptN
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
     pure 1
   cpl = CPUM $ do

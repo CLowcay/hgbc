@@ -1536,8 +1536,6 @@ callAndReturn = do
           0xFFEE `atAddressShouldBe` 0x01
           0xFFEF `atAddressShouldBe` 0x40
 
---  stop    :: m (ExecuteResult m)
-
 miscellaneous :: Spec
 miscellaneous = do
   describe "CPL" $ for_ [minBound .. maxBound] $ \v ->
@@ -1603,12 +1601,12 @@ bcd = do
  where
   allBCDCombos = [ (a, b) | a <- [0 .. 99], b <- [0 .. 99] ]
 
-  toBCD :: Word8 -> Word16
+  toBCD :: Word16 -> Word16
   toBCD x =
     let (r0, d0) = x `divMod` 10
         (d2, d1) = r0 `divMod` 10
-    in  (fromIntegral d2 `shiftL` 8) .|. (fromIntegral d1 `shiftL` 4) .|. fromIntegral d0
-  toBCD8 = fromIntegral . toBCD
+    in  (d2 .<<. 8) .|. (d1 .<<. 4) .|. d0
+  toBCD8 = fromIntegral . toBCD . fromIntegral
 
   testSubtraction (a, b) =
     it ("works for " ++ show a ++ " - " ++ show b)
@@ -1618,6 +1616,12 @@ bcd = do
       $ do
           subn (toBCD8 b) `shouldHaveCycles` 2
           daa `shouldHaveCycles` 1
+          expectFlags
+            allFlags
+            (   flagN
+            .|. (if (a - b + 100) `mod` 100 == 0 then flagZ else 0)
+            .|. (if a < b then flagCY else 0)
+            )
           cy <- CPUM $ testFlag flagCY
           a' <- CPUM $ readR8 RegA
           let result   = fromIntegral a' + if cy then 0x0100 else 0
@@ -1632,6 +1636,9 @@ bcd = do
       $ do
           addn (toBCD8 b) `shouldHaveCycles` 2
           daa `shouldHaveCycles` 1
+          expectFlags
+            allFlags
+            ((if (a + b) `mod` 100 == 0 then flagZ else 0) .|. (if a + b >= 100 then flagCY else 0))
           cy <- CPUM $ testFlag flagCY
           a' <- CPUM $ readR8 RegA
           let result = fromIntegral a' + if cy then 0x0100 else 0
