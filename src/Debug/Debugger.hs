@@ -128,7 +128,7 @@ type BreakPreCondition = MonadDebug Bool
 
 -- | A condition to check after executing the next instruction. Break if the
 -- condition is True.
-type BreakPostCondition = Int -> MonadDebug Bool
+type BreakPostCondition = MonadDebug Bool
 
 -- | Break after a certain number of instructions have been executed.
 breakOnCountOf :: Int -> MonadDebug BreakPreCondition
@@ -146,7 +146,7 @@ breakOnCountOf n0 = do
 breakOnBreakpoints :: MonadDebug BreakPostCondition
 breakOnBreakpoints = do
   DebugState {..} <- ask
-  pure $ \event -> do
+  pure $ do
     breakOnExecute <- shouldBreakOnExecute breakpoints
     --breakOnWrite   <- shouldBreakOnWrite watchpoints event
     --pure (breakOnExecute || breakOnWrite)
@@ -154,7 +154,7 @@ breakOnBreakpoints = do
 
 -- | Break when the PC equals a certain value.
 breakOnPC :: Word16 -> BreakPostCondition
-breakOnPC pc = const ((pc ==) <$> readPC)
+breakOnPC pc = (pc ==) <$> readPC
 
 -- | Break when a RET instruction is executed with the current stack pointer.
 -- TODO: fix this
@@ -171,21 +171,18 @@ breakOnPC pc = const ((pc ==) <$> readPC)
 --    _    -> pure False
 
 -- | Run the interpreter until one of the break conditions is met.
-doRun :: [BreakPreCondition] -> [BreakPostCondition] -> MonadDebug Int
-doRun preConditions postConditions = withReaderT emulator clearBreakFlag >> go 0
+doRun :: [BreakPreCondition] -> [BreakPostCondition] -> MonadDebug ()
+doRun preConditions postConditions = withReaderT emulator clearBreakFlag >> go
  where
-  go !ticks = do
+  go = do
     doPreBreak <- orM preConditions
     if doPreBreak
-      then pure ticks
+      then pure ()
       else do
-        clockAdvance <- withReaderT emulator step
-        let ticks' = ticks + clockAdvance
+        withReaderT emulator step
         breakFlag   <- withReaderT emulator isBreakFlagSet
-        doPostBreak <- orM (fmap ($ clockAdvance) postConditions)
-        if doPostBreak || breakFlag
-          then pure ticks'
-          else go ticks'
+        doPostBreak <- orM postConditions
+        if doPostBreak || breakFlag then pure () else go
 
 -- | Disassemble the next 4 instructions at the current PC.
 disassembleAtPC :: MonadDebugger ()
@@ -205,19 +202,23 @@ withAddress (LabelAddress label maybeAddress) action = do
       Just address -> action address
       Nothing      -> liftIO (putStrLn ("Unknown symbol " ++ label))
 
-reportingClockStats :: MonadIO m => InputT m Int -> InputT m ()
+reportingClockStats :: MonadDebugger () -> MonadDebugger ()
 reportingClockStats action = do
-  t0     <- SDL.ticks
-  cycles <- action
-  t1     <- SDL.ticks
+  t0      <- SDL.ticks
+  clocks0 <- lift $ withReaderT emulator getEmulatorClock
+  action
+  t1      <- SDL.ticks
+  clocks1 <- lift $ withReaderT emulator getEmulatorClock
 
   let duration       = t1 - t0
+  let clocks         = clocks1 - clocks0
+
   let expectedCycles = (4194304.0 * fromIntegral duration) / 1000.0 :: Double
-  let percentSpeed = (fromIntegral cycles / expectedCycles) * 100.0
+  let percentSpeed = (fromIntegral clocks / expectedCycles) * 100.0
 
   when (duration > 0) $ do
-    outputStrLn (show cycles ++ " cycles in " ++ show duration ++ "ms")
-    outputStrLn ("Clock rate = " ++ show ((cycles * 1000) `div` fromIntegral duration) ++ "Hz")
+    outputStrLn (show clocks ++ " cycles in " ++ show duration ++ "ms")
+    outputStrLn ("Clock rate = " ++ show ((clocks * 1000) `div` fromIntegral duration) ++ "Hz")
     outputStrLn ("Relative to expected clock " ++ showFFloat (Just 2) percentSpeed "" ++ "% speed")
 
 -- | Execute a debugger command.

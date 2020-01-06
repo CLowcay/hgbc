@@ -11,6 +11,7 @@ import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Foldable
 import           Data.Function
+import           Data.IORef
 import           Data.Int
 import           Data.Maybe
 import           Data.Traversable
@@ -29,16 +30,16 @@ import qualified Data.ByteString               as B
 
 spec :: Spec
 spec = do
-  describe "Loads" loads
-  describe "Arithmetic8" arithmetic8
-  describe "Arithmetic16" arithmetic16
+  describe "Loads"          loads
+  describe "Arithmetic8"    arithmetic8
+  describe "Arithmetic16"   arithmetic16
   describe "rotateAndShift" rotateAndShift
-  describe "bitOperations" bitOperations
-  describe "jumps" jumps
-  describe "callAndReturn" callAndReturn
-  describe "Miscellaneous" miscellaneous
-  describe "BCD" bcd
-  describe "Interrupts" interrupts
+  describe "bitOperations"  bitOperations
+  describe "jumps"          jumps
+  describe "callAndReturn"  callAndReturn
+  describe "Miscellaneous"  miscellaneous
+  describe "BCD"            bcd
+  describe "Interrupts"     interrupts
 
 blankROM :: ROM
 blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)
@@ -62,6 +63,7 @@ blankHeader romSize = Header { startAddress          = 0
 data CPUTestState = CPUTestState {
     testCPU :: !CPUState
   , testMemory :: !Memory
+  , extraCycles :: !(IORef Int)
 }
 
 instance HasCPU CPUTestState where
@@ -72,12 +74,13 @@ instance HasMemory CPUTestState where
 
 withNewCPU :: CPUM CPUTestState () -> IO ()
 withNewCPU computation = mdo
-  vram   <- initVRAM DMG
-  portIF <- newPort 0x00 0x1F alwaysUpdate
-  portIE <- newPort 0x00 0xFF alwaysUpdate
-  mem    <- initMemory blankROM vram ((IF, portIF) : cpuPorts cpu) portIE DMG
-  cpu    <- initCPU portIF portIE DMG
-  void $ runReaderT checkingFlags $ CPUTestState cpu mem
+  vram        <- initVRAM DMG
+  portIF      <- newPort 0x00 0x1F alwaysUpdate
+  portIE      <- newPort 0x00 0xFF alwaysUpdate
+  mem         <- initMemory blankROM vram ((IF, portIF) : cpuPorts cpu) portIE DMG
+  extraCycles <- newIORef 0
+  cpu <- initCPU portIF portIE DMG (\cycles clocksPerCycle -> modifyIORef' extraCycles (+ cycles))
+  void $ runReaderT checkingFlags $ CPUTestState cpu mem extraCycles
  where
   checkingFlags = for_ [0 .. 15] $ \flags -> do
     reset
@@ -230,6 +233,12 @@ withMode mode computation = do
   computation
   CPUM $ setMode mode0
 
+withExtraCycles :: CPUM CPUTestState () -> CPUM CPUTestState ()
+withExtraCycles computation = do
+  CPUTestState _ _ cycles <- CPUM ask
+  liftIO $ writeIORef cycles 0
+  computation
+
 withValueAt :: RegisterSS -> Word16 -> Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
 withValueAt ss address value computation = alteringSSRegisters [ss] $ do
   CPUM $ do
@@ -328,6 +337,13 @@ expectIME expected = do
   ime <- CPUM testIME
   liftIO (ime `shouldBe` expected)
 
+expectExtraCycles :: Int -> CPUM CPUTestState ()
+expectExtraCycles expected = CPUM $ do
+  CPUTestState _ _ cyclesRef <- ask
+  liftIO $ do
+    cycles <- readIORef cyclesRef
+    cycles `shouldBe` expected
+
 buildFlags :: Bool -> Bool -> Bool -> Bool -> Word8
 buildFlags cy h n z =
   (if cy then flagCY else 0)
@@ -405,11 +421,17 @@ loads = do
           RegL `registerShouldBe` 0xD0
           0xC0D0 `atAddressShouldBe` expected
 
-  describe "LD (HL), n" $ it "Works for LD (HL), 42" $ withNewCPU $ withValueAt RegHL 0xC000 32 $ do
-    ldHLn 42 `shouldHaveCycles` 3
-    0xC000 `atAddressShouldBe` 42
-    RegH `registerShouldBe` 0xC0
-    RegL `registerShouldBe` 0
+  describe "LD (HL), n"
+    $ it "Works for LD (HL), 42"
+    $ withNewCPU
+    $ withValueAt RegHL 0xC000 32
+    $ withExtraCycles
+    $ do
+        ldHLn 42 `shouldHaveCycles` 2
+        expectExtraCycles 1
+        0xC000 `atAddressShouldBe` 42
+        RegH `registerShouldBe` 0xC0
+        RegL `registerShouldBe` 0
 
   describe "LD A, (BC)"
     $ it "Works for LD A, (BC)"
@@ -457,35 +479,51 @@ loads = do
         RegC `registerShouldBe` 0x80
         0xFF80 `atAddressShouldBe` 42
 
-  describe "LD A, (n)" $ it "Works for LD A, (80)" $ withNewCPU $ alteringRegisters [RegA] $ do
-    CPUM $ writeByte 0xFF80 42
-    ldan 0x80 `shouldHaveCycles` 3
-    RegA `registerShouldBe` 42
-    0xFF80 `atAddressShouldBe` 42
+  describe "LD A, (n)"
+    $ it "Works for LD A, (80)"
+    $ withNewCPU
+    $ alteringRegisters [RegA]
+    $ withExtraCycles
+    $ do
+        CPUM $ writeByte 0xFF80 42
+        ldan 0x80 `shouldHaveCycles` 2
+        expectExtraCycles 1
+        RegA `registerShouldBe` 42
+        0xFF80 `atAddressShouldBe` 42
 
   describe "LD (n), A"
     $ it "Works for LD (80), A"
     $ withNewCPU
     $ withValuesInRegisters [(RegA, 42)]
+    $ withExtraCycles
     $ do
         CPUM $ writeByte 0xFF80 32
-        ldna 0x80 `shouldHaveCycles` 3
+        ldna 0x80 `shouldHaveCycles` 2
+        expectExtraCycles 1
         RegA `registerShouldBe` 42
         0xFF80 `atAddressShouldBe` 42
 
-  describe "LD A, (nn)" $ it "Works for LD A, (C000)" $ withNewCPU $ alteringRegisters [RegA] $ do
-    CPUM $ writeByte 0xC000 42
-    ldann 0xC000 `shouldHaveCycles` 4
-    RegA `registerShouldBe` 42
-    0xC000 `atAddressShouldBe` 42
+  describe "LD A, (nn)"
+    $ it "Works for LD A, (C000)"
+    $ withNewCPU
+    $ alteringRegisters [RegA]
+    $ withExtraCycles
+    $ do
+        CPUM $ writeByte 0xC000 42
+        ldann 0xC000 `shouldHaveCycles` 2
+        expectExtraCycles 2
+        RegA `registerShouldBe` 42
+        0xC000 `atAddressShouldBe` 42
 
   describe "LD (nn), A"
     $ it "Works for LD (C000), A"
     $ withNewCPU
     $ withValuesInRegisters [(RegA, 42)]
+    $ withExtraCycles
     $ do
         CPUM $ writeByte 0xC000 32
-        ldnna 0xC000 `shouldHaveCycles` 4
+        ldnna 0xC000 `shouldHaveCycles` 2
+        expectExtraCycles 2
         RegA `registerShouldBe` 42
         0xC000 `atAddressShouldBe` 42
 
@@ -922,8 +960,10 @@ arithmetic8 = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ withExtraCycles
       $ do
-          inchl `shouldHaveCycles` 3
+          inchl `shouldHaveCycles` 2
+          expectExtraCycles 1
           let expected = v + 1
           RegHL `registerSSShouldBe` 0xC000
           0xC000 `atAddressShouldBe` expected
@@ -947,8 +987,10 @@ arithmetic8 = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ withExtraCycles
       $ do
-          dechl `shouldHaveCycles` 3
+          dechl `shouldHaveCycles` 2
+          expectExtraCycles 1
           let expected = v - 1
           RegHL `registerSSShouldBe` 0xC000
           0xC000 `atAddressShouldBe` expected
@@ -1118,8 +1160,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          rlchl `shouldHaveCycles` 4
+          rlchl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .<<. 1) .|. (v .>>. 7)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1130,9 +1174,11 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
           cy <- CPUM $ testFlag flagCY
-          rlhl `shouldHaveCycles` 4
+          rlhl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .<<. 1) .|. (if cy then 1 else 0)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1143,8 +1189,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          rrchl `shouldHaveCycles` 4
+          rrchl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .>>. 1) .|. (v .<<. 7)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1155,9 +1203,11 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
           cy <- CPUM $ testFlag flagCY
-          rrhl `shouldHaveCycles` 4
+          rrhl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1179,8 +1229,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          slahl `shouldHaveCycles` 4
+          slahl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = v .<<. 1
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1202,8 +1254,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          srahl `shouldHaveCycles` 4
+          srahl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .>>. 1) .|. (v .&. 0x80)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1225,8 +1279,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          srlhl `shouldHaveCycles` 4
+          srlhl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = v .>>. 1
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1248,8 +1304,10 @@ rotateAndShift = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
+      $ withExtraCycles
       $ do
-          swaphl `shouldHaveCycles` 4
+          swaphl `shouldHaveCycles` 2
+          expectExtraCycles 2
           let expected = (v .>>. 4) .|. (v .<<. 4)
           0xC000 `atAddressShouldBe` expected
           RegHL `registerSSShouldBe` 0xC000
@@ -1275,8 +1333,10 @@ bitOperations = do
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ withExtraCycles
       $ do
-          bithl (fromIntegral b) `shouldHaveCycles` 3
+          bithl (fromIntegral b) `shouldHaveCycles` 2
+          expectExtraCycles 1
           0xC000 `atAddressShouldBe` v
           RegHL `registerSSShouldBe` 0xC000
           expectFlags (flagH .|. flagN .|. flagZ)
@@ -1290,10 +1350,15 @@ bitOperations = do
           r `registerShouldBe` (v `setBit` b)
 
   describe "SET b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
-    it ("Works for " <> formatSetHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
-      sethl (fromIntegral b) `shouldHaveCycles` 4
-      0xC000 `atAddressShouldBe` (v `setBit` b)
-      RegHL `registerSSShouldBe` 0xC000
+    it ("Works for " <> formatSetHL b v)
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ withExtraCycles
+      $ do
+          sethl (fromIntegral b) `shouldHaveCycles` 2
+          expectExtraCycles 2
+          0xC000 `atAddressShouldBe` (v `setBit` b)
+          RegHL `registerSSShouldBe` 0xC000
 
   describe "RES b, r"
     $ for_ [ (r, b, 1 .<<. v) | r <- allRegisters, b <- [0 .. 7], v <- [0 .. 7] ]
@@ -1303,10 +1368,15 @@ bitOperations = do
           r `registerShouldBe` (v `clearBit` b)
 
   describe "RES b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
-    it ("Works for " <> formatResHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
-      reshl (fromIntegral b) `shouldHaveCycles` 4
-      0xC000 `atAddressShouldBe` (v `clearBit` b)
-      RegHL `registerSSShouldBe` 0xC000
+    it ("Works for " <> formatResHL b v)
+      $ withNewCPU
+      $ withValueAt RegHL 0xC000 v
+      $ withExtraCycles
+      $ do
+          reshl (fromIntegral b) `shouldHaveCycles` 2
+          expectExtraCycles 2
+          0xC000 `atAddressShouldBe` (v `clearBit` b)
+          RegHL `registerSSShouldBe` 0xC000
 
  where
   formatBitR r b v =
@@ -1596,7 +1666,7 @@ interrupts = do
               CPUM $ writeByte IE (if enabled then bit vector else 0)
               cycles <- CPUM cpuStep
               liftIO $ cycles `shouldBe` case behavior of
-                Trigger -> 7
+                Trigger -> 4
                 Wakeup  -> 1
                 Ignore  -> if mode == ModeNormal then 1 else 8
 
@@ -1653,7 +1723,7 @@ interrupts = do
             writeByte IF (bit l .|. bit r)
             writeByte IE (bit l .|. bit r)
             cycles <- cpuStep
-            liftIO (cycles `shouldBe` 7)
+            liftIO (cycles `shouldBe` 4)
           RegSP `registerSSShouldBe` 0xFFEE
           0xFFEE `atAddressShouldBe` 0x01
           0xFFEF `atAddressShouldBe` 0x40

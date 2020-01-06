@@ -1,11 +1,13 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecursiveDo #-}
 
 module GBC.Emulator
   ( EmulatorState(..)
   , initEmulatorState
   , isBreakFlagSet
   , clearBreakFlag
+  , getEmulatorClock
   , step
   , handleEvents
   )
@@ -26,6 +28,7 @@ import           GBC.Keypad
 import           GBC.Memory
 import           GBC.Mode
 import           GBC.Primitive
+import           GBC.Primitive.UnboxedRef
 import           GBC.ROM
 import           GBC.Registers
 import           GBC.Timer
@@ -33,9 +36,7 @@ import           SDL.Orphans                    ( )
 import qualified SDL
 
 data EmulatorState = EmulatorState {
-    lastEventPollAt :: !(IORef Word32)
-  , breakFlag       :: !(IORef Bool)
-  , mode            :: !EmulatorMode
+    mode            :: !EmulatorMode
   , memory          :: !Memory
   , vram            :: !VRAM
   , cpu             :: !CPUState
@@ -45,6 +46,10 @@ data EmulatorState = EmulatorState {
   , keypadState     :: !KeypadState
   , timerState      :: !TimerState
   , audioState      :: !AudioState
+  , breakFlag       :: !(IORef Bool)
+  , hblankPending   :: !(IORef Bool) -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
+  , currentTime     :: !(UnboxedRef Int) -- Time in clocks
+  , lastEventPoll   :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
 }
 
 instance HasMemory EmulatorState where
@@ -55,30 +60,29 @@ instance HasCPU EmulatorState where
   {-# INLINE forCPUState #-}
   forCPUState = cpu
 
--- | Number of milliseconds to wait between polling for events.
-pollDelay :: Word32
-pollDelay = 10
+-- | Number of clocks to wait between polling for events.
+pollDelay :: Int
+pollDelay = 40000
 
 -- | Create an initial bus state.
 initEmulatorState :: ROM -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
-initEmulatorState rom graphicsSync frameBufferBytes = do
+initEmulatorState rom graphicsSync frameBufferBytes = mdo
   let mode = case cgbSupport (romHeader rom) of
         CGBCompatible   -> CGB
         CGBExclusive    -> CGB
         CGBIncompatible -> DMG
-  lastEventPollAt <- newIORef 0
-  breakFlag       <- newIORef False
-  vram            <- initVRAM mode
+  breakFlag     <- newIORef False
+  vram          <- initVRAM mode
 
-  portIF          <- newPort 0x00 0x1F alwaysUpdate
-  portIE          <- newPort 0x00 0xFF alwaysUpdate
+  portIF        <- newPort 0x00 0x1F alwaysUpdate
+  portIE        <- newPort 0x00 0xFF alwaysUpdate
 
-  cpu             <- initCPU portIF portIE mode
-  dmaState        <- initDMA
-  graphicsState   <- initGraphics vram mode frameBufferBytes portIF
-  keypadState     <- initKeypadState portIF
-  timerState      <- initTimerState portIF
-  audioState      <- initAudioState
+  cpu           <- initCPU portIF portIE mode (makeCatchupFunction emulatorState)
+  dmaState      <- initDMA
+  graphicsState <- initGraphics vram mode frameBufferBytes portIF
+  keypadState   <- initKeypadState portIF
+  timerState    <- initTimerState portIF
+  audioState    <- initAudioState
 
   let allPorts =
         (IF, portIF)
@@ -89,9 +93,14 @@ initEmulatorState rom graphicsSync frameBufferBytes = do
           ++ timerPorts timerState
           ++ audioPorts audioState
 
-  memory <- initMemory rom vram allPorts portIE mode
+  memory        <- initMemory rom vram allPorts portIE mode
 
-  pure EmulatorState { .. }
+  hblankPending <- newIORef False
+  currentTime   <- newUnboxedRef 0
+  lastEventPoll <- newUnboxedRef 0
+
+  let emulatorState = EmulatorState { .. }
+  pure emulatorState
 
 -- | Check if the debug break flag is set.
 isBreakFlagSet :: ReaderT EmulatorState IO Bool
@@ -122,45 +131,64 @@ handleEvents = do
       liftIO . flip writeIORef True . breakFlag =<< ask
     _ -> pure ()
 
-pollEvents :: ReaderT EmulatorState IO ()
-pollEvents = do
+pollEvents :: Int -> ReaderT EmulatorState IO ()
+pollEvents now = do
   EmulatorState {..} <- ask
-  now                <- SDL.ticks
-  lastPoll           <- liftIO $ readIORef lastEventPollAt
+  lastPoll           <- liftIO $ readUnboxedRef lastEventPoll
   when (now - lastPoll > pollDelay) $ do
     handleEvents
-    liftIO $ writeIORef lastEventPollAt =<< SDL.ticks
+    liftIO $ writeUnboxedRef lastEventPoll now
+
+-- | Get the number of clocks since the emulator started.
+getEmulatorClock :: ReaderT EmulatorState IO Int
+getEmulatorClock = do
+  EmulatorState {..} <- ask
+  liftIO $ readUnboxedRef currentTime
 
 -- | Execute a single step of the emulation.
-step :: ReaderT EmulatorState IO Int
+step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
-  cycles             <- cpuStep
-  pollEvents
+  now                <- liftIO $ readUnboxedRef currentTime
+  pollEvents now
 
+  cycles      <- cpuStep
   cycleClocks <- getCPUCycleClocks
   let cpuClocks = cycles * cycleClocks
 
-  graphicsEvent   <- updateHardware cycles cycleClocks
+  graphicsEvent   <- updateHardware cycles cpuClocks
 
   dmaClockAdvance <- doPendingDMA dmaState
+  liftIO $ writeUnboxedRef currentTime (now + cpuClocks + dmaClockAdvance)
+
   if dmaClockAdvance > 0
-    then do
-      void $ updateHardware (dmaClockAdvance `div` cycleClocks) cycleClocks
-      pure (cpuClocks + dmaClockAdvance)
-    else case graphicsEvent of
-      NoGraphicsEvent -> pure cpuClocks
-      HBlankEvent     -> do
-        hdmaClockAdvance <- doHBlankHDMA dmaState
-        when (hdmaClockAdvance > 0) $ void $ updateHardware (hdmaClockAdvance `div` cycleClocks)
-                                                            cycleClocks
-        pure (cpuClocks + hdmaClockAdvance)
+    then void $ updateHardware (dmaClockAdvance `div` cycleClocks) dmaClockAdvance
+    else
+      let doPendingHBlankDMA = do
+            liftIO $ writeIORef hblankPending False
+            hdmaClockAdvance <- doHBlankHDMA dmaState
+            when (hdmaClockAdvance > 0) $ do
+              void $ updateHardware (hdmaClockAdvance `div` cycleClocks) hdmaClockAdvance
+              liftIO $ writeUnboxedRef currentTime (now + cpuClocks + hdmaClockAdvance)
+      in  case graphicsEvent of
+            NoGraphicsEvent -> do
+              pending <- liftIO $ readIORef hblankPending
+              when pending doPendingHBlankDMA
+            HBlankEvent -> doPendingHBlankDMA
+
+makeCatchupFunction :: EmulatorState -> Int -> Int -> IO ()
+makeCatchupFunction emulatorState@EmulatorState {..} = \cycles clocksPerCycle ->
+  let cpuClocks = cycles * clocksPerCycle
+  in  do
+        graphicsEvent <- runReaderT (updateHardware cycles cpuClocks) emulatorState
+        when (graphicsEvent == HBlankEvent) $ writeIORef hblankPending True
+        now <- readUnboxedRef currentTime
+        writeUnboxedRef currentTime (now + cpuClocks)
 
 updateHardware :: Int -> Int -> ReaderT EmulatorState IO GraphicsBusEvent
-updateHardware cycles clocksPerCycle = do
+updateHardware cycles cpuClocks = do
   EmulatorState {..} <- ask
   liftIO $ do
     updateTimer timerState (cycles * 4)
-    audioStep audioState clocks
-    graphicsStep graphicsState graphicsSync clocks
-  where clocks = cycles * clocksPerCycle
+    audioStep audioState cpuClocks
+    graphicsStep graphicsState graphicsSync cpuClocks

@@ -131,6 +131,7 @@ data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded
 -- | The internal CPU state.
 data CPUState = CPUState {
     cpuType        :: !EmulatorMode
+  , busCatchup     :: Int -> Int -> IO ()
   , registers      :: !(ForeignPtr RegisterFile)
   , portIF         :: !(Port Word8)
   , portIE         :: !(Port Word8)
@@ -142,9 +143,11 @@ data CPUState = CPUState {
 class HasMemory env => HasCPU env where
   forCPUState :: env -> CPUState
 
+type BusCatchupFunction = Int -> Int -> IO ()
+
 -- | Initialize a new CPU.
-initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> IO CPUState
-initCPU portIF portIE cpuType = do
+initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> BusCatchupFunction -> IO CPUState
+initCPU portIF portIE cpuType busCatchup = do
   registers      <- mallocForeignPtr
   portKEY1       <- newPort 0x00 0x01 alwaysUpdate
   cpuMode        <- newIORef ModeNormal
@@ -334,6 +337,13 @@ testIME = do
   ime <- readRegister offsetHidden
   pure (ime .&. flagIME /= 0)
 
+{-# INLINE runBusCatchup #-}
+runBusCatchup :: HasCPU env => Int -> ReaderT env IO ()
+runBusCatchup cycles = do
+  CPUState {..} <- asks forCPUState
+  clocks        <- getCPUCycleClocks
+  liftIO (busCatchup cycles clocks)
+
 -- | Reset the CPU.
 {-# INLINABLE reset #-}
 reset :: HasCPU env => ReaderT env IO ()
@@ -473,7 +483,7 @@ cpuStep = do
     clearIME
     CPUState {..} <- asks forCPUState
     liftIO $ clearInterrupt portIF nextInterrupt
-    pure 7  -- TODO: Number of clocks here is just a guess
+    pure 4  -- TODO: Number of clocks here is just a guess
 
 {-# INLINE getCPUCycleClocks #-}
 getCPUCycleClocks :: HasCPU env => ReaderT env IO Int
@@ -524,9 +534,10 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     writeByte hl =<< readR8 r
     pure 2
   ldHLn n = CPUM $ do
+    runBusCatchup 1
     hl <- readR16 RegHL
     writeByte hl n
-    pure 3
+    pure 2
   ldaBC = CPUM $ do
     bc <- readR16 RegBC
     writeR8 RegA =<< readByte bc
@@ -544,17 +555,21 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     writeByte (0xFF00 + fromIntegral c) =<< readR8 RegA
     pure 2
   ldan n = CPUM $ do
+    runBusCatchup 1
     writeR8 RegA =<< readByte (0xFF00 + fromIntegral n)
-    pure 3
+    pure 2
   ldna n = CPUM $ do
+    runBusCatchup 1
     writeByte (0xFF00 + fromIntegral n) =<< readR8 RegA
-    pure 3
+    pure 2
   ldann nn = CPUM $ do
+    runBusCatchup 2
     writeR8 RegA =<< readByte nn
-    pure 4
+    pure 2
   ldnna nn = CPUM $ do
+    runBusCatchup 2
     writeByte nn =<< readR8 RegA
-    pure 4
+    pure 2
   ldaHLI = CPUM $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
@@ -619,7 +634,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     add8 v 0
     pure 2
   adcr r = CPUM $ do
-    v  <- readR8 r
+    v     <- readR8 r
     carry <- getCarry
     add8 v carry
     pure 1
@@ -628,7 +643,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     add8 n carry
     pure 2
   adchl = CPUM $ do
-    v  <- readByte =<< readR16 RegHL
+    v     <- readByte =<< readR16 RegHL
     carry <- getCarry
     add8 v carry
     pure 2
@@ -644,7 +659,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     sub8 v 0
     pure 2
   sbcr r = CPUM $ do
-    v  <- readR8 r
+    v     <- readR8 r
     carry <- getCarry
     sub8 v (negate carry)
     pure 1
@@ -653,7 +668,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     sub8 n (negate carry)
     pure 2
   sbchl = CPUM $ do
-    v  <- readByte =<< readR16 RegHL
+    v     <- readByte =<< readR16 RegHL
     carry <- getCarry
     sub8 v (negate carry)
     pure 2
@@ -710,10 +725,11 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
   inchl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
+    runBusCatchup 1
     let (v', flags) = inc8 v 1
     setFlagsMask allExceptCY flags
     writeByte hl v'
-    pure 3
+    pure 2
   decr r = CPUM $ do
     v <- readR8 r
     let (v', flags) = inc8 v negative1
@@ -723,10 +739,11 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
   dechl = CPUM $ do
     hl <- readR16 RegHL
     v  <- readByte hl
+    runBusCatchup 1
     let (v', flags) = inc8 v negative1
     setFlagsMask allExceptCY (flags .|. flagN)
     writeByte hl v'
-    pure 3
+    pure 2
   addhlss ss = CPUM $ do
     hl <- readR16 RegHL
     v  <- readR16 ss
@@ -736,8 +753,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     let carryH = (hl' .&. 0x00001000) `xor` (v' .&. 0x00001000) /= (wr .&. 0x00001000)
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
-    setFlagsMask allExceptZ
-                 ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
+    setFlagsMask allExceptZ ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
     pure 2
   addSP e = CPUM $ do
     sp <- readR16 RegSP
@@ -786,83 +802,112 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     pure 2
   rlchl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< rlc =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< rlc v
+    pure 2
   rlr r = CPUM $ do
     writeR8 r =<< rl =<< readR8 r
     pure 2
   rlhl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< rl =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< rl v
+    pure 2
   rrcr r = CPUM $ do
     writeR8 r =<< rrc =<< readR8 r
     pure 2
   rrchl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< rrc =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< rrc v
+    pure 2
   rrr r = CPUM $ do
     writeR8 r =<< rr =<< readR8 r
     pure 2
   rrhl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< rr =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< rr v
+    pure 2
   slar r = CPUM $ do
     writeR8 r =<< sla =<< readR8 r
     pure 2
   slahl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< sla =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< sla v
+    pure 2
   srar r = CPUM $ do
     writeR8 r =<< sra =<< readR8 r
     pure 2
   srahl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< sra =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< sra v
+    pure 2
   srlr r = CPUM $ do
     writeR8 r =<< srl =<< readR8 r
     pure 2
   srlhl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< srl =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< srl v
+    pure 2
   swapr r = CPUM $ do
     writeR8 r =<< swap =<< readR8 r
     pure 2
   swaphl = CPUM $ do
     hl <- readR16 RegHL
-    writeByte hl =<< swap =<< readByte hl
-    pure 4
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
+    writeByte hl =<< swap v
+    pure 2
   bitr r b = CPUM $ do
     v <- readR8 r
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
     pure 2
   bithl b = CPUM $ do
+    runBusCatchup 1
     v <- readByte =<< readR16 RegHL
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
-    pure 3
+    pure 2
   setr r b = CPUM $ do
     v <- readR8 r
     writeR8 r (v `setBit` fromIntegral b)
     pure 2
   sethl b = CPUM $ do
     hl <- readR16 RegHL
-    v  <- readByte hl
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
     writeByte hl (v `setBit` fromIntegral b)
-    pure 4
+    pure 2
   resr r b = CPUM $ do
     v <- readR8 r
     writeR8 r (v `clearBit` fromIntegral b)
     pure 2
   reshl b = CPUM $ do
     hl <- readR16 RegHL
-    v  <- readByte hl
+    runBusCatchup 1
+    v <- readByte hl
+    runBusCatchup 1
     writeByte hl (v `clearBit` fromIntegral b)
-    pure 4
+    pure 2
   jpnn nn = CPUM $ do
     writePC nn
     pure 4
