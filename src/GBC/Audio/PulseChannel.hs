@@ -47,31 +47,31 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
 
   let port0ReadMask  = if hasSweepUnit then 0x80 else 0xFF
   let port0WriteMask = if hasSweepUnit then 0x7F else 0x00
-  port0 <- newPortWithReadMask 0xFF port0ReadMask port0WriteMask $ \_ register0 -> do
+  port0 <- newAudioPortWithReadMask port52 0xFF port0ReadMask port0WriteMask $ \_ register0 -> do
     when hasSweepUnit $ do
       hasNegated <- hasPerformedSweepCalculationInNegateMode sweepUnit
       when (hasNegated && not (isFlagSet flagNegate register0))
         $ disableIO port52 channelEnabledFlag output enable
     pure register0
 
-  port1 <- newPortWithReadMask 0xFF 0x3F 0xFF $ \_ register1 -> do
+  port1 <- newAudioPortWithReadMask port52 0xFF 0x3F 0xFF $ \_ register1 -> do
     register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register1
 
-  port2 <- newPort 0xFF 0xFF $ \_ register2 -> do
+  port2 <- newAudioPort port52 0xFF 0xFF $ \_ register2 -> do
     let isDacEnabled = register2 .&. 0xF8 /= 0
     unless isDacEnabled $ disableIO port52 channelEnabledFlag output enable
     writeIORef dacEnable isDacEnabled
     pure register2
 
-  port3 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register3 -> do
+  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF $ \_ register3 -> do
     register4 <- directReadPort port4
     let frequency = getFrequency register3 register4
     reloadCounter frequencyCounter (getTimerPeriod frequency)
     pure register3
 
-  port4 <- newPortWithReadMask 0xFF 0xBF 0xC7 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
       register2 <- directReadPort port2

@@ -44,23 +44,23 @@ newWaveChannel port52 = mdo
   output <- newUnboxedRef 0
   enable <- newIORef False
 
-  port0  <- newPortWithReadMask 0x00 0x7F 0x80 $ \_ register0 -> do
+  port0  <- newAudioPortWithReadMask port52 0x00 0x7F 0x80 $ \_ register0 -> do
     unless (isFlagSet flagMasterEnable register0) $ disableIO port52 output enable
     pure register0
 
-  port1 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register1 -> do
+  port1 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF $ \_ register1 -> do
     register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register1
 
-  port2 <- newPortWithReadMask 0xFF 0x9F 0x60 alwaysUpdate
+  port2 <- newAudioPortWithReadMask port52 0xFF 0x9F 0x60 alwaysUpdate
 
-  port3 <- newPortWithReadMask 0xFF 0xFF 0xFF $ \_ register3 -> do
+  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF $ \_ register3 -> do
     register4 <- directReadPort port4
     reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
     pure register3
 
-  port4 <- newPortWithReadMask 0xFF 0xBF 0xC7 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
       register3 <- directReadPort port3

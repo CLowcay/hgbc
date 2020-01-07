@@ -35,22 +35,22 @@ newNoiseChannel port52 = mdo
   dacEnable <- newIORef True
   output    <- newUnboxedRef 0
 
-  port1     <- newPortWithReadMask 0xFF 0xFF 0x3F $ \_ register1 -> do
+  port1     <- newAudioPortWithReadMask port52 0xFF 0xFF 0x3F $ \_ register1 -> do
     register4 <- directReadPort port4
     when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
     pure register4
 
-  port2 <- newPortWithReadMask 0xFF 0x00 0xFF $ \_ register2 -> do
+  port2 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF $ \_ register2 -> do
     let isDacEnabled = register2 .&. 0xF8 /= 0
     unless isDacEnabled $ disableIO port52 output enable
     writeIORef dacEnable isDacEnabled
     pure register2
 
-  port3 <- newPortWithReadMask 0xFF 0x00 0xFF $ \_ register3 -> do
+  port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF $ \_ register3 -> do
     reloadCounter frequencyCounter (timerPeriod register3)
     pure register3
 
-  port4 <- newPortWithReadMask 0xFF 0xBF 0xC0 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \_ register4 -> do
     when (isFlagSet flagTrigger register4) $ do
       register2    <- directReadPort port2
       register3    <- directReadPort port3

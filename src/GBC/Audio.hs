@@ -77,24 +77,22 @@ initAudioState = mdo
   channel3       <- newWaveChannel port52
   channel4       <- newNoiseChannel port52
 
-  port50         <- newPort 0xFF 0xFF alwaysUpdate
-  port51         <- newPort 0xFF 0xFF alwaysUpdate
+  port50         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
+  port51         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
   port52         <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
     let masterPower  = isFlagSet flagMasterPower register52
     let masterPower' = isFlagSet flagMasterPower register52'
-    when (not masterPower' && masterPower) $ do
-      disable channel1
-      disable channel2
-      disable channel3
-      disable channel4
-      let write0 = flip directWritePort 0
-      traverse_ write0 $ snd <$> getPorts channel1
-      traverse_ write0 $ snd <$> getPorts channel2
-      traverse_ write0 $ snd <$> filter ((<= 4) . fst) (getPorts channel3)
-      traverse_ write0 $ snd <$> getPorts channel4
-      directWritePort port50 0
-      directWritePort port51 0
-    pure register52'
+    if not masterPower' && masterPower
+      then do
+        let write0 port = writePort port 0
+        traverse_ write0 $ snd <$> getPorts channel1
+        traverse_ write0 $ snd <$> getPorts channel2
+        traverse_ write0 $ snd <$> filter ((<= 4) . fst) (getPorts channel3)
+        traverse_ write0 $ snd <$> getPorts channel4
+        directWritePort port50 0
+        directWritePort port51 0
+        pure (register52' .&. 0xF0)
+      else pure register52'
 
   pure AudioState { .. }
 
@@ -129,9 +127,6 @@ audioCallback buffer _ stream len = do
             pokeElemOff stream i       left
             pokeElemOff stream (i + 1) right
             pure (i + 2)
-
-flagMasterPower :: Word8
-flagMasterPower = 0x80
 
 samplePeriod :: Int
 samplePeriod = 94
