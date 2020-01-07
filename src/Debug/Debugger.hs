@@ -54,8 +54,8 @@ data Command = ShowHeader
              | Poke16 MemAddress Word16
              | Peek8 MemAddress
              | Peek16 MemAddress
-             | PokeR8 RegisterR Word8
-             | PokeR16 RegisterSS Word16
+             | PokeR8 Register8 Word8
+             | PokeR16 Register16 Word16
              | ShowGraphics (Maybe String)
              | ShowTimer (Maybe String)
              | ShowInternal (Maybe String)

@@ -21,9 +21,9 @@ module GBC.CPU
   , readR8
   , writeR8
   , readR16
-  , readR16qq
+  , readR16pp
   , writeR16
-  , writeR16qq
+  , writeR16pp
   , readPC
   , writePC
   , readF
@@ -194,16 +194,16 @@ writeRegister offset value = do
 
 -- | Read a single register.
 {-# INLINABLE readR8 #-}
-readR8 :: HasCPU env => RegisterR -> ReaderT env IO Word8
+readR8 :: HasCPU env => Register8 -> ReaderT env IO Word8
 readR8 = readRegister . offsetR8
 
 -- | Write a single register.
 {-# INLINABLE writeR8 #-}
-writeR8 :: HasCPU env => RegisterR -> Word8 -> ReaderT env IO ()
+writeR8 :: HasCPU env => Register8 -> Word8 -> ReaderT env IO ()
 writeR8 register = writeRegister $ offsetR8 register
 
 -- | Get the offset in the register file of a single register.
-offsetR8 :: RegisterR -> Int
+offsetR8 :: Register8 -> Int
 offsetR8 RegA = offsetA
 offsetR8 RegB = offsetB
 offsetR8 RegC = offsetC
@@ -214,38 +214,38 @@ offsetR8 RegL = offsetL
 
 -- | Read a 16-bit register.
 {-# INLINABLE readR16 #-}
-readR16 :: HasCPU env => RegisterSS -> ReaderT env IO Word16
+readR16 :: HasCPU env => Register16 -> ReaderT env IO Word16
 readR16 = readRegister . offsetR16
 
 -- | Write a 16-bit register.
 {-# INLINABLE writeR16 #-}
-writeR16 :: HasCPU env => RegisterSS -> Word16 -> ReaderT env IO ()
+writeR16 :: HasCPU env => Register16 -> Word16 -> ReaderT env IO ()
 writeR16 register = writeRegister $ offsetR16 register
 
 -- | Get the offset in the register file of a register pair.
-offsetR16 :: RegisterSS -> Int
+offsetR16 :: Register16 -> Int
 offsetR16 RegBC = offsetC
 offsetR16 RegDE = offsetE
 offsetR16 RegHL = offsetL
 offsetR16 RegSP = offsetSP
 
 -- | Read a 16-bit register.
-{-# INLINABLE readR16qq #-}
-readR16qq :: HasCPU env => RegisterQQ -> ReaderT env IO Word16
-readR16qq register = readRegister (offsetR16qq register)
+{-# INLINABLE readR16pp #-}
+readR16pp :: HasCPU env => RegisterPushPop -> ReaderT env IO Word16
+readR16pp register = readRegister (offsetR16pp register)
 
 -- | Write a 16-bit register.
-{-# INLINABLE writeR16qq #-}
-writeR16qq :: HasCPU env => RegisterQQ -> Word16 -> ReaderT env IO ()
-writeR16qq PushPopAF v = writeRegister offsetF (v .&. 0xFFF0)
-writeR16qq register  v = writeRegister (offsetR16qq register) v
+{-# INLINABLE writeR16pp #-}
+writeR16pp :: HasCPU env => RegisterPushPop -> Word16 -> ReaderT env IO ()
+writeR16pp PushPopAF v = writeRegister offsetF (v .&. 0xFFF0)
+writeR16pp register  v = writeRegister (offsetR16pp register) v
 
 -- | Get the offset in the register file of a register pair.
-offsetR16qq :: RegisterQQ -> Int
-offsetR16qq PushPopBC = offsetC
-offsetR16qq PushPopDE = offsetE
-offsetR16qq PushPopHL = offsetL
-offsetR16qq PushPopAF = offsetF
+offsetR16pp :: RegisterPushPop -> Int
+offsetR16pp PushPopBC = offsetC
+offsetR16pp PushPopDE = offsetE
+offsetR16pp PushPopHL = offsetL
+offsetR16pp PushPopAF = offsetF
 
 -- | Read the PC register.
 {-# INLINABLE readPC #-}
@@ -608,10 +608,10 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     writeR16 RegSP =<< readR16 RegHL
     pure 2
   push qq = CPUM $ do
-    push16 =<< readR16qq qq
+    push16 =<< readR16pp qq
     pure 4
   pop qq = CPUM $ do
-    writeR16qq qq =<< pop16
+    writeR16pp qq =<< pop16
     pure 3
   ldhl i = CPUM $ do
     sp <- fromIntegral <$> readR16 RegSP

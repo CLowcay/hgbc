@@ -169,7 +169,7 @@ decodeByte1 (a, b, c) = invalid ((a .<<. 6) .|. (b .<<. 3) .|. c)
 splitByte :: Word8 -> (Word8, Word8, Word8)
 splitByte x = ((x .>>. 6) .&. 0x03, (x .>>. 3) .&. 0x07, x .&. 0x07)
 
-register :: Word8 -> RegisterR
+register :: Word8 -> Register8
 register 0o0 = RegB
 register 0o1 = RegC
 register 0o2 = RegD
@@ -179,14 +179,14 @@ register 0o5 = RegL
 register 0o7 = RegA
 register r   = error ("invalid register code " <> show r)
 
-registerQQ :: Word8 -> RegisterQQ
+registerQQ :: Word8 -> RegisterPushPop
 registerQQ 0 = PushPopBC
 registerQQ 2 = PushPopDE
 registerQQ 4 = PushPopHL
 registerQQ 6 = PushPopAF
 registerQQ x = error ("invalid register pair code " <> show x)
 
-registerSS :: Word8 -> RegisterSS
+registerSS :: Word8 -> Register16
 registerSS 0 = RegBC
 registerSS 2 = RegDE
 registerSS 4 = RegHL

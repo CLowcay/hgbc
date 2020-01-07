@@ -2,10 +2,9 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module GBC.CPU.ISA
-  ( RegisterR(..)
-  , RegisterDD
-  , RegisterSS(..)
-  , RegisterQQ(..)
+  ( Register8(..)
+  , Register16(..)
+  , RegisterPushPop(..)
   , ConditionCode(..)
   , MonadGMBZ80(..)
   , DisassembleT(..)
@@ -19,24 +18,23 @@ import           Data.Int
 import           Data.Word
 
 -- | An 8-bit register
-data RegisterR = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Show, Bounded, Enum)
+data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | A 16-bit register.
-type RegisterDD = RegisterSS
-data RegisterSS = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Show, Bounded, Enum)
+data Register16 = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | A 16-bit register (for push and pop instructions).
-data RegisterQQ = PushPopAF | PushPopBC | PushPopDE | PushPopHL deriving (Eq, Ord, Show, Bounded, Enum)
+data RegisterPushPop = PushPopAF | PushPopBC | PushPopDE | PushPopHL deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | A condition.
 data ConditionCode = CondNZ | CondZ | CondNC | CondC deriving (Eq, Ord, Show, Bounded, Enum)
 
 class MonadGMBZ80 m where
   type ExecuteResult m
-  ldrr    :: RegisterR -> RegisterR -> m (ExecuteResult m)
-  ldrn    :: RegisterR -> Word8 -> m (ExecuteResult m)
-  ldrHL   :: RegisterR -> m (ExecuteResult m)
-  ldHLr   :: RegisterR -> m (ExecuteResult m)
+  ldrr    :: Register8 -> Register8 -> m (ExecuteResult m)
+  ldrn    :: Register8 -> Word8 -> m (ExecuteResult m)
+  ldrHL   :: Register8 -> m (ExecuteResult m)
+  ldHLr   :: Register8 -> m (ExecuteResult m)
   ldHLn   :: Word8 -> m (ExecuteResult m)
   ldaBC   :: m (ExecuteResult m)
   ldaDE   :: m (ExecuteResult m)
@@ -52,69 +50,69 @@ class MonadGMBZ80 m where
   ldDEa   :: m (ExecuteResult m)
   ldHLIa  :: m (ExecuteResult m)
   ldHLDa  :: m (ExecuteResult m)
-  ldddnn  :: RegisterDD -> Word16 -> m (ExecuteResult m)
+  ldddnn  :: Register16 -> Word16 -> m (ExecuteResult m)
   ldSPHL  :: m (ExecuteResult m)
-  push    :: RegisterQQ -> m (ExecuteResult m)
-  pop     :: RegisterQQ -> m (ExecuteResult m)
+  push    :: RegisterPushPop -> m (ExecuteResult m)
+  pop     :: RegisterPushPop -> m (ExecuteResult m)
   ldhl    :: Int8 -> m (ExecuteResult m)
   ldnnSP  :: Word16 -> m (ExecuteResult m)
-  addr    :: RegisterR -> m (ExecuteResult m)
+  addr    :: Register8 -> m (ExecuteResult m)
   addn    :: Word8 -> m (ExecuteResult m)
   addhl   :: m (ExecuteResult m)
-  adcr    :: RegisterR -> m (ExecuteResult m)
+  adcr    :: Register8 -> m (ExecuteResult m)
   adcn    :: Word8 -> m (ExecuteResult m)
   adchl   :: m (ExecuteResult m)
-  subr    :: RegisterR -> m (ExecuteResult m)
+  subr    :: Register8 -> m (ExecuteResult m)
   subn    :: Word8 -> m (ExecuteResult m)
   subhl   :: m (ExecuteResult m)
-  sbcr    :: RegisterR -> m (ExecuteResult m)
+  sbcr    :: Register8 -> m (ExecuteResult m)
   sbcn    :: Word8 -> m (ExecuteResult m)
   sbchl   :: m (ExecuteResult m)
-  andr    :: RegisterR -> m (ExecuteResult m)
+  andr    :: Register8 -> m (ExecuteResult m)
   andn    :: Word8 -> m (ExecuteResult m)
   andhl   :: m (ExecuteResult m)
-  orr     :: RegisterR -> m (ExecuteResult m)
+  orr     :: Register8 -> m (ExecuteResult m)
   orn     :: Word8 -> m (ExecuteResult m)
   orhl    :: m (ExecuteResult m)
-  xorr    :: RegisterR -> m (ExecuteResult m)
+  xorr    :: Register8 -> m (ExecuteResult m)
   xorn    :: Word8 -> m (ExecuteResult m)
   xorhl   :: m (ExecuteResult m)
-  cpr     :: RegisterR -> m (ExecuteResult m)
+  cpr     :: Register8 -> m (ExecuteResult m)
   cpn     :: Word8 -> m (ExecuteResult m)
   cphl    :: m (ExecuteResult m)
-  incr    :: RegisterR -> m (ExecuteResult m)
+  incr    :: Register8 -> m (ExecuteResult m)
   inchl   :: m (ExecuteResult m)
-  decr    :: RegisterR -> m (ExecuteResult m)
+  decr    :: Register8 -> m (ExecuteResult m)
   dechl   :: m (ExecuteResult m)
-  addhlss :: RegisterSS -> m (ExecuteResult m)
+  addhlss :: Register16 -> m (ExecuteResult m)
   addSP   :: Int8 -> m (ExecuteResult m)
-  incss   :: RegisterSS -> m (ExecuteResult m)
-  decss   :: RegisterSS -> m (ExecuteResult m)
+  incss   :: Register16 -> m (ExecuteResult m)
+  decss   :: Register16 -> m (ExecuteResult m)
   rlca    :: m (ExecuteResult m)
   rla     :: m (ExecuteResult m)
   rrca    :: m (ExecuteResult m)
   rra     :: m (ExecuteResult m)
-  rlcr    :: RegisterR -> m (ExecuteResult m)
+  rlcr    :: Register8 -> m (ExecuteResult m)
   rlchl   :: m (ExecuteResult m)
-  rlr     :: RegisterR -> m (ExecuteResult m)
+  rlr     :: Register8 -> m (ExecuteResult m)
   rlhl    :: m (ExecuteResult m)
-  rrcr    :: RegisterR -> m (ExecuteResult m)
+  rrcr    :: Register8 -> m (ExecuteResult m)
   rrchl   :: m (ExecuteResult m)
-  rrr     :: RegisterR -> m (ExecuteResult m)
+  rrr     :: Register8 -> m (ExecuteResult m)
   rrhl    :: m (ExecuteResult m)
-  slar    :: RegisterR -> m (ExecuteResult m)
+  slar    :: Register8 -> m (ExecuteResult m)
   slahl   :: m (ExecuteResult m)
-  srar    :: RegisterR -> m (ExecuteResult m)
+  srar    :: Register8 -> m (ExecuteResult m)
   srahl   :: m (ExecuteResult m)
-  srlr    :: RegisterR -> m (ExecuteResult m)
+  srlr    :: Register8 -> m (ExecuteResult m)
   srlhl   :: m (ExecuteResult m)
-  swapr   :: RegisterR -> m (ExecuteResult m)
+  swapr   :: Register8 -> m (ExecuteResult m)
   swaphl  :: m (ExecuteResult m)
-  bitr    :: RegisterR -> Word8 -> m (ExecuteResult m)
+  bitr    :: Register8 -> Word8 -> m (ExecuteResult m)
   bithl   :: Word8 -> m (ExecuteResult m)
-  setr    :: RegisterR -> Word8 -> m (ExecuteResult m)
+  setr    :: Register8 -> Word8 -> m (ExecuteResult m)
   sethl   :: Word8 -> m (ExecuteResult m)
-  resr    :: RegisterR -> Word8 -> m (ExecuteResult m)
+  resr    :: Register8 -> Word8 -> m (ExecuteResult m)
   reshl   :: Word8 -> m (ExecuteResult m)
   jpnn    :: Word16 -> m (ExecuteResult m)
   jphl    :: m (ExecuteResult m)
@@ -138,7 +136,7 @@ class MonadGMBZ80 m where
   stop    :: m (ExecuteResult m)
   invalid :: Word8 -> m (ExecuteResult m)
 
-instance Format RegisterR where
+instance Format Register8 where
   format RegA = "A"
   format RegB = "B"
   format RegC = "C"
@@ -147,13 +145,13 @@ instance Format RegisterR where
   format RegH = "H"
   format RegL = "L"
 
-instance Format RegisterSS where
+instance Format Register16 where
   format RegSP = "SP"
   format RegBC = "BC"
   format RegDE = "DE"
   format RegHL = "HL"
 
-instance Format RegisterQQ where
+instance Format RegisterPushPop where
   format PushPopAF = "AF"
   format PushPopBC = "BC"
   format PushPopDE = "DE"
