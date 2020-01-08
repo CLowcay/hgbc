@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE MultiWayIf #-}
 module GBC.Audio.PulseChannel
   ( PulseChannel
   , newPulseChannel
@@ -55,8 +56,7 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
     pure register0
 
   port1 <- newAudioPortWithReadMask port52 0xFF 0x3F 0xFF $ \_ register1 -> do
-    register4 <- directReadPort port4
-    when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
+    reloadLength lengthCounter register1
     pure register1
 
   port2 <- newAudioPort port52 0xFF 0xFF $ \_ register2 -> do
@@ -71,7 +71,10 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
     reloadCounter frequencyCounter (getTimerPeriod frequency)
     pure register3
 
-  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
+    when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
+         (extraClocks lengthCounter (disableIO port52 channelEnabledFlag output enable))
+
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
       register2 <- directReadPort port2
@@ -85,9 +88,10 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
                                     frequency
                                     register0
                                     (disableIO port52 channelEnabledFlag output enable)
-      initLength lengthCounter
+      initLength lengthCounter (isFlagSet flagLength register4)
       initEnvelope envelope register2
       reloadCounter frequencyCounter (getTimerPeriod frequency)
+
     pure register4
 
   sweepUnit        <- newSweep port3 port4
@@ -111,8 +115,7 @@ instance Channel PulseChannel where
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
-    when (lengthClock && isFlagSet flagLength register4)
-      $ clockLength lengthCounter (disable channel)
+    clockLength lengthCounter lengthClock (isFlagSet flagLength register4) (disable channel)
     when envelopeClock $ clockEnvelope envelope
     when (sweepClock && hasSweepUnit) $ do
       register0 <- directReadPort port0

@@ -49,8 +49,7 @@ newWaveChannel port52 = mdo
     pure register0
 
   port1 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF $ \_ register1 -> do
-    register4 <- directReadPort port4
-    when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
+    reloadLength lengthCounter register1
     pure register1
 
   port2 <- newAudioPortWithReadMask port52 0xFF 0x9F 0x60 alwaysUpdate
@@ -60,11 +59,14 @@ newWaveChannel port52 = mdo
     reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
     pure register3
 
-  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
+    when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
+         (extraClocks lengthCounter (disableIO port52 output enable))
+
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
       register3 <- directReadPort port3
-      initLength lengthCounter
+      initLength lengthCounter (isFlagSet flagLength register4)
       reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
       resetStateCycle sample waveSamplerStates
       let enabled = isFlagSet flagMasterEnable register0
@@ -95,8 +97,10 @@ instance Channel WaveChannel where
 
   frameSequencerClock WaveChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
-    when (lengthClock && isFlagSet flagLength register4)
-      $ clockLength lengthCounter (disableIO port52 output enable)
+    clockLength lengthCounter
+                lengthClock
+                (isFlagSet flagLength register4)
+                (disableIO port52 output enable)
 
   masterClock WaveChannel {..} clockAdvance = do
     isEnabled <- readIORef enable

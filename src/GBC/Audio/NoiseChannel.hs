@@ -36,9 +36,8 @@ newNoiseChannel port52 = mdo
   output    <- newUnboxedRef 0
 
   port1     <- newAudioPortWithReadMask port52 0xFF 0xFF 0x3F $ \_ register1 -> do
-    register4 <- directReadPort port4
-    when (isFlagSet flagLength register4) $ reloadLength lengthCounter register1
-    pure register4
+    reloadLength lengthCounter register1
+    pure register1
 
   port2 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF $ \_ register2 -> do
     let isDacEnabled = register2 .&. 0xF8 /= 0
@@ -50,14 +49,17 @@ newNoiseChannel port52 = mdo
     reloadCounter frequencyCounter (timerPeriod register3)
     pure register3
 
-  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \_ register4 -> do
+  port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \previous register4 -> do
+    when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
+         (extraClocks lengthCounter (disableIO port52 output enable))
+
     when (isFlagSet flagTrigger register4) $ do
       register2    <- directReadPort port2
       register3    <- directReadPort port3
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       updateStatus port52 flagChannel4Enable isDacEnabled
-      initLength lengthCounter
+      initLength lengthCounter (isFlagSet flagLength register4)
       initEnvelope envelope register2
       initLinearFeedbackShiftRegister 0xFFFF lfsr
       reloadCounter frequencyCounter (timerPeriod register3)
@@ -83,8 +85,10 @@ instance Channel NoiseChannel where
 
   frameSequencerClock NoiseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
-    when (lengthClock && isFlagSet flagLength register4)
-      $ clockLength lengthCounter (disableIO port52 output enable)
+    clockLength lengthCounter
+                lengthClock
+                (isFlagSet flagLength register4)
+                (disableIO port52 output enable)
     when envelopeClock $ clockEnvelope envelope
 
   masterClock NoiseChannel {..} clockAdvance = do
