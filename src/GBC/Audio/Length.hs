@@ -3,6 +3,7 @@ module GBC.Audio.Length
   ( Length
   , newLength
   , initLength
+  , powerOffLength
   , reloadLength
   , extraClocks
   , clockLength
@@ -35,6 +36,12 @@ initLength Length {..} enabled = do
   v               <- getCounter counter
   needExtraClocks <- readIORef clockedOnLastFrame
   when (enabled && needExtraClocks && v == fromIntegral bitMask) $ updateCounter counter 1 (pure 0)
+
+powerOffLength :: Length -> IO ()
+powerOffLength Length {..} = do
+  writeIORef clockedOnLastFrame False
+  writeIORef frozen             True
+  reloadCounter counter (fromIntegral bitMask)
 
 reloadLength :: Length -> Word8 -> IO ()
 reloadLength Length {..} register =

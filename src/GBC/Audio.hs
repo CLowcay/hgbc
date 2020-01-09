@@ -16,7 +16,6 @@ import           Common
 import           Control.Monad.Reader
 import           Data.Bifunctor
 import           Data.Bits
-import           Data.Foldable
 import           Data.Functor
 import           Data.Word
 import           Foreign.C.Types
@@ -84,11 +83,10 @@ initAudioState = mdo
     let masterPower' = isFlagSet flagMasterPower register52'
     if not masterPower' && masterPower
       then do
-        let write0 port = writePort port 0
-        traverse_ write0 $ snd <$> getPorts channel1
-        traverse_ write0 $ snd <$> getPorts channel2
-        traverse_ write0 $ snd <$> filter ((<= 4) . fst) (getPorts channel3)
-        traverse_ write0 $ snd <$> getPorts channel4
+        powerOff channel1
+        powerOff channel2
+        powerOff channel3
+        powerOff channel4
         directWritePort port50 0
         directWritePort port51 0
         resetStateCycle frameSequencer (drop 3 frameSequencerStates ++ take 3 frameSequencerStates)

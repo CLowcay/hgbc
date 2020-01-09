@@ -95,6 +95,14 @@ instance Channel WaveChannel where
     [(0, port0), (1, port1), (2, port2), (3, port3), (4, port4)]
       ++ ([22 ..] `zip` toList portWaveTable)
 
+  powerOff WaveChannel {..} = do
+    directWritePort port0 0
+    directWritePort port1 0
+    directWritePort port2 0
+    directWritePort port3 0
+    directWritePort port4 0
+    powerOffLength lengthCounter
+
   frameSequencerClock WaveChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
     clockLength lengthCounter

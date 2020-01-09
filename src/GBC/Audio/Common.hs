@@ -39,6 +39,7 @@ noFrameSequencerOutput = FrameSequencerOutput False False False
 class Channel channel where
   getOutput           :: channel -> IO Int
   disable             :: channel -> IO ()
+  powerOff            :: channel -> IO ()
   getStatus           :: channel -> IO Bool
   frameSequencerClock :: channel -> FrameSequencerOutput -> IO ()
   masterClock         :: channel -> Int -> IO ()

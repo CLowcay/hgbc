@@ -113,6 +113,14 @@ instance Channel PulseChannel where
   getStatus PulseChannel {..} = readIORef enable
   getPorts PulseChannel {..} = [(0, port0), (1, port1), (2, port2), (3, port3), (4, port4)]
 
+  powerOff PulseChannel {..} = do
+    directWritePort port0 0
+    directWritePort port1 0
+    writePort port2 0
+    directWritePort port3 0
+    directWritePort port4 0
+    powerOffLength lengthCounter
+
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
     clockLength lengthCounter lengthClock (isFlagSet flagLength register4) (disable channel)

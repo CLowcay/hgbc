@@ -83,6 +83,13 @@ instance Channel NoiseChannel where
   getStatus NoiseChannel {..} = readIORef enable
   getPorts NoiseChannel {..} = [(1, port1), (2, port2), (3, port3), (4, port4)]
 
+  powerOff NoiseChannel {..} = do
+    directWritePort port1 0
+    writePort port2 0
+    directWritePort port3 0
+    directWritePort port4 0
+    powerOffLength lengthCounter
+
   frameSequencerClock NoiseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
     clockLength lengthCounter
