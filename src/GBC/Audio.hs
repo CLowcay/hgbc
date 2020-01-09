@@ -91,6 +91,7 @@ initAudioState = mdo
         traverse_ write0 $ snd <$> getPorts channel4
         directWritePort port50 0
         directWritePort port51 0
+        resetStateCycle frameSequencer (drop 3 frameSequencerStates ++ take 3 frameSequencerStates)
         pure (register52' .&. 0xF0)
       else pure register52'
 
