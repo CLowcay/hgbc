@@ -65,11 +65,7 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
     writeIORef dacEnable isDacEnabled
     pure register2
 
-  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF $ \_ register3 -> do
-    register4 <- directReadPort port4
-    let frequency = getFrequency register3 register4
-    reloadCounter frequencyCounter (getTimerPeriod frequency)
-    pure register3
+  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
     when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
@@ -120,6 +116,7 @@ instance Channel PulseChannel where
     directWritePort port3 0
     directWritePort port4 0
     powerOffLength lengthCounter
+    resetStateCycle dutyCycle dutyCycleStates
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4

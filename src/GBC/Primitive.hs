@@ -27,6 +27,7 @@ module GBC.Primitive
   , nextBit
   , Port
   , newPort
+  , newPortWithReadAction
   , newPortWithReadMask
   , alwaysUpdate
   , neverUpdate
@@ -197,26 +198,38 @@ nextBit (LinearFeedbackShiftRegister ref) mask = do
 -- | A port is like an IORef but with a custom handler for writes.
 data Port a = Port {
     portValue     :: !(UnboxedRef a)
-  , portReadMask  :: !a
   , portWriteMask :: !a
+  , portRead      :: !(a -> IO a)
   , portNotify    :: !(a -> a -> IO a)
 }
 
 -- | Create a new port.
 newPort
-  :: (Prim a, Num a)
+  :: Prim a
   => a                  -- ^ Initial value.
   -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
   -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
   -> IO (Port a)
 newPort value0 portWriteMask portNotify = do
   portValue <- newUnboxedRef value0
-  let portReadMask = 0x00
+  let portRead = pure
+  pure Port { .. }
+
+-- | Create a new port with a custom action to run when reading.
+newPortWithReadAction
+  :: Prim a
+  => a                 -- ^ Initial value.
+  -> a                 -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (a -> IO a)       -- ^ Action to perform on reads.
+  -> (a -> a -> IO a)  -- ^ Action to perform on writes.
+  -> IO (Port a)
+newPortWithReadAction value0 portWriteMask portRead portNotify = do
+  portValue <- newUnboxedRef value0
   pure Port { .. }
 
 -- | Create a new port.
 newPortWithReadMask
-  :: Prim a
+  :: (Prim a, Bits a)
   => a                  -- ^ Initial value.
   -> a                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
   -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
@@ -224,6 +237,7 @@ newPortWithReadMask
   -> IO (Port a)
 newPortWithReadMask value0 portReadMask portWriteMask portNotify = do
   portValue <- newUnboxedRef value0
+  let portRead x = pure (x .|. portReadMask)
   pure Port { .. }
 
 {-# INLINABLE alwaysUpdate #-}
@@ -236,11 +250,8 @@ neverUpdate = const . pure
 
 -- | Read from the port
 {-# INLINE readPort #-}
-{-# SPECIALIZE readPort :: Port Word8 -> IO Word8 #-}
-readPort :: (Prim a, Bits a) => Port a -> IO a
-readPort Port {..} = do
-  value <- readUnboxedRef portValue
-  pure (value .|. portReadMask)
+readPort :: Prim a => Port a -> IO a
+readPort Port {..} = portRead =<< readUnboxedRef portValue
 
 -- | Read from the port directly skipping the read mask.
 {-# INLINE directReadPort #-}

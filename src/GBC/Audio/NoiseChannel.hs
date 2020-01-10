@@ -45,9 +45,7 @@ newNoiseChannel port52 = mdo
     writeIORef dacEnable isDacEnabled
     pure register2
 
-  port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF $ \_ register3 -> do
-    reloadCounter frequencyCounter (timerPeriod register3)
-    pure register3
+  port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \previous register4 -> do
     when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))

@@ -57,7 +57,7 @@ data AudioState = AudioState {
 }
 
 frameSequencerStates :: [(Int, Int)]
-frameSequencerStates = [0 .. 7] <&> (, 8192)
+frameSequencerStates = 7 : [0 .. 6] <&> (, 8192)
 
 initAudioState :: IO AudioState
 initAudioState = mdo
@@ -89,7 +89,7 @@ initAudioState = mdo
         powerOff channel4
         directWritePort port50 0
         directWritePort port51 0
-        resetStateCycle frameSequencer (drop 3 frameSequencerStates ++ take 3 frameSequencerStates)
+        resetStateCycle frameSequencer frameSequencerStates
         pure (register52' .&. 0xF0)
       else pure register52'
 

@@ -60,7 +60,8 @@ updateFrequency port3 port4 frequency = do
   directWritePort port3 lsb
   directWritePort port4 ((register4 .&. 0xF8) .|. msb)
 
-flagMasterPower, flagChannel1Enable, flagChannel2Enable, flagChannel3Enable, flagChannel4Enable :: Word8
+flagMasterPower, flagChannel1Enable, flagChannel2Enable, flagChannel3Enable, flagChannel4Enable
+  :: Word8
 flagChannel1Enable = 0x01
 flagChannel2Enable = 0x02
 flagChannel3Enable = 0x04
@@ -74,20 +75,19 @@ updateStatus port52 flag enabled = do
 
 -- | Create a new port.
 newAudioPort
-  :: (Prim a, Num a)
+  :: Prim a
   => Port Word8
   -> a                  -- ^ Initial value.
   -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
   -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
   -> IO (Port a)
-newAudioPort port52 value0 portWriteMask portNotify =
-  newPort value0 portWriteMask $ \old new -> do
-    nr52 <- directReadPort port52
-    if isFlagSet flagMasterPower nr52 then portNotify old new else pure old
+newAudioPort port52 value0 portWriteMask portNotify = newPort value0 portWriteMask $ \old new -> do
+  nr52 <- directReadPort port52
+  if isFlagSet flagMasterPower nr52 then portNotify old new else pure old
 
 -- | Create a new port.
 newAudioPortWithReadMask
-  :: Prim a
+  :: (Bits a, Prim a)
   => Port Word8
   -> a                  -- ^ Initial value.
   -> a                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
