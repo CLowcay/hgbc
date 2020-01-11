@@ -8,6 +8,7 @@ module GBC.Primitive
   , getCounter
   , reloadCounter
   , updateCounter
+  , updateReloadingCounter
   , UpdateResult(..)
   , StateCycle
   , newStateCycle
@@ -67,14 +68,22 @@ getCounter (Counter ref) = liftIO $ readUnboxedRef ref
 
 {-# INLINE updateCounter #-}
 updateCounter :: MonadIO m => Counter -> Int -> m Int -> m ()
-updateCounter (Counter ref) update k = do
+updateCounter counter update k = void $ updateReloadingCounter counter update k
+
+{-# INLINE updateReloadingCounter #-}
+updateReloadingCounter :: MonadIO m => Counter -> Int -> m Int -> m Int
+updateReloadingCounter (Counter ref) update getReloadValue = do
   count <- liftIO $ readUnboxedRef ref
   let count' = count - update
   if count' >= 0
-    then liftIO $ writeUnboxedRef ref count'
+    then do
+      liftIO $ writeUnboxedRef ref count'
+      pure 0
     else do
-      reload <- k
-      liftIO $ writeUnboxedRef ref (count' + reload + 1)
+      reload <- getReloadValue
+      let (reloads, count'') = count' `divMod` (reload + 1)
+      liftIO $ writeUnboxedRef ref count''
+      pure (negate reloads)
 
 data StateCycle a = StateCycle !(UnboxedRef Int) !(IORef [(a, Int)])
 

@@ -12,7 +12,6 @@ import           Common
 import           Control.Monad.Reader
 import           Data.Bits
 import           Data.Foldable
-import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           GBC.Audio.Common
@@ -32,13 +31,10 @@ data WaveChannel = WaveChannel {
   , port52           :: !(Port Word8)
   , portWaveTable    :: !(V.Vector (Port Word8))
   , frequencyCounter :: !Counter
-  , sample           :: !(StateCycle Int)
+  , sample           :: !(UnboxedRef Int)
   , sampleBuffer     :: !(UnboxedRef Word8)
   , lengthCounter    :: !Length
 }
-
-waveSamplerStates :: [(Int, Int)]
-waveSamplerStates = [0 .. 31] <&> (, 1)
 
 newWaveChannel :: Port Word8 -> IO WaveChannel
 newWaveChannel port52 = mdo
@@ -65,8 +61,8 @@ newWaveChannel port52 = mdo
       register0 <- directReadPort port0
       register3 <- directReadPort port3
       initLength lengthCounter (isFlagSet flagLength register4)
-      reloadCounter frequencyCounter (getTimerPeriod (getFrequency register3 register4))
-      resetStateCycle sample waveSamplerStates
+      reloadCounter frequencyCounter (5 + getTimerPeriod (getFrequency register3 register4))
+      writeUnboxedRef sample 0
       let enabled = isFlagSet flagMasterEnable register0
       writeIORef enable enabled
       updateStatus port52 flagChannel3Enable enabled
@@ -79,7 +75,7 @@ newWaveChannel port52 = mdo
         if not isEnabled
           then pure v
           else do
-            i <- getStateCycle sample
+            i <- readUnboxedRef sample
             directReadPort (portWaveTable V.! (i .>>. 1))
 
   let writeWaveMemory old v = do
@@ -87,14 +83,14 @@ newWaveChannel port52 = mdo
         if not isEnabled
           then pure v
           else do
-            i <- getStateCycle sample
+            i <- readUnboxedRef sample
             directWritePort (portWaveTable V.! (i .>>. 1)) v
             pure old
 
   portWaveTable <- V.replicateM 16 (newPortWithReadAction 0x00 0xFF readWaveMemory writeWaveMemory)
 
   frequencyCounter <- newCounter
-  sample           <- newStateCycle waveSamplerStates
+  sample           <- newUnboxedRef 0
   sampleBuffer     <- newUnboxedRef 0
   lengthCounter    <- newLength 0xFF
   let channel = WaveChannel { .. }
@@ -132,14 +128,19 @@ instance Channel WaveChannel where
 
   masterClock channel@WaveChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
-    when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      void $ updateStateCycle sample 1 $ \i -> do
+    when isEnabled $ do
+      reloads <- updateReloadingCounter frequencyCounter clockAdvance $ do
+        register3 <- directReadPort port3
+        register4 <- directReadPort port4
+        pure (getTimerPeriod (getFrequency register3 register4))
+
+      when (reloads > 0) $ do
+        i0 <- readUnboxedRef sample
+        let i = (i0 + reloads) .&. 0x1F
+        writeUnboxedRef sample i
         sampleByte <- directReadPort (portWaveTable V.! (i .>>. 1))
         writeUnboxedRef sampleBuffer sampleByte
         generateOutput channel sampleByte i
-      register3 <- directReadPort port3
-      register4 <- directReadPort port4
-      pure (getTimerPeriod (getFrequency register3 register4))
 
 generateOutput :: WaveChannel -> Word8 -> Int -> IO ()
 generateOutput WaveChannel {..} sampleByte i = do
