@@ -61,7 +61,7 @@ newWaveChannel port52 = mdo
       register0 <- directReadPort port0
       register3 <- directReadPort port3
       initLength lengthCounter (isFlagSet flagLength register4)
-      reloadCounter frequencyCounter (5 + getTimerPeriod (getFrequency register3 register4))
+      reloadCounter frequencyCounter (6 + getTimerPeriod (getFrequency register3 register4))
       writeUnboxedRef sample 0
       let enabled = isFlagSet flagMasterEnable register0
       writeIORef enable enabled
@@ -89,7 +89,7 @@ newWaveChannel port52 = mdo
 
   portWaveTable <- V.replicateM 16 (newPortWithReadAction 0x00 0xFF readWaveMemory writeWaveMemory)
 
-  frequencyCounter <- newCounter
+  frequencyCounter <- newCounter 0x7FF
   sample           <- newUnboxedRef 0
   sampleBuffer     <- newUnboxedRef 0
   lengthCounter    <- newLength 0xFF
@@ -157,4 +157,4 @@ getVolume :: Word8 -> Word8
 getVolume register2 = 3 .&. (register2 .>>. 5)
 
 getTimerPeriod :: Int -> Int
-getTimerPeriod f = (2 * (2048 - f)) - 1
+getTimerPeriod f = 2 * (2048 - f)

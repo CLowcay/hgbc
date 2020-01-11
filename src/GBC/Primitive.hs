@@ -53,18 +53,26 @@ import           Foreign.Storable
 import           GBC.Primitive.UnboxedRef
 
 -- | A reloading down counter.  Number of states is reload value + 1.
-newtype Counter = Counter (UnboxedRef Int)
+data Counter = Counter {
+    counterValue :: !(UnboxedRef Int)
+  , counterMask  :: !Int
+}
 
-newCounter :: MonadIO m => m Counter
-newCounter = liftIO $ Counter <$> newUnboxedRef 0
+newCounter :: MonadIO m => Int -> m Counter
+newCounter counterMask = do
+  counterValue <- liftIO $ newUnboxedRef 0
+  pure Counter { .. }
 
 {-# INLINE reloadCounter #-}
 reloadCounter :: MonadIO m => Counter -> Int -> m ()
-reloadCounter (Counter ref) reload = liftIO $ writeUnboxedRef ref reload
+reloadCounter Counter {..} reload =
+  liftIO $ writeUnboxedRef counterValue (if reload == 0 then counterMask + 1 else reload)
 
 {-# INLINE getCounter #-}
 getCounter :: MonadIO m => Counter -> m Int
-getCounter (Counter ref) = liftIO $ readUnboxedRef ref
+getCounter Counter {..} = do
+  v <- liftIO $ readUnboxedRef counterValue
+  pure (v .&. counterMask)
 
 {-# INLINE updateCounter #-}
 updateCounter :: MonadIO m => Counter -> Int -> m Int -> m ()
@@ -72,18 +80,19 @@ updateCounter counter update k = void $ updateReloadingCounter counter update k
 
 {-# INLINE updateReloadingCounter #-}
 updateReloadingCounter :: MonadIO m => Counter -> Int -> m Int -> m Int
-updateReloadingCounter (Counter ref) update getReloadValue = do
-  count <- liftIO $ readUnboxedRef ref
-  let count' = count - update
-  if count' >= 0
+updateReloadingCounter Counter {..} update getReloadValue = do
+  count <- liftIO $ readUnboxedRef counterValue
+  if update < count
     then do
-      liftIO $ writeUnboxedRef ref count'
+      liftIO $ writeUnboxedRef counterValue (count - update)
       pure 0
     else do
       reload <- getReloadValue
-      let (reloads, count'') = count' `divMod` (reload + 1)
-      liftIO $ writeUnboxedRef ref count''
-      pure (negate reloads)
+      let period = if reload == 0 then counterMask + 1 else reload
+      let update'             = update - count
+      let (reloads, update'') = update' `divMod` period
+      liftIO $ writeUnboxedRef counterValue (period - update'')
+      pure (reloads + 1)
 
 data StateCycle a = StateCycle !(UnboxedRef Int) !(IORef [(a, Int)])
 

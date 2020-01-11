@@ -60,12 +60,12 @@ newNoiseChannel port52 = mdo
       initLength lengthCounter (isFlagSet flagLength register4)
       initEnvelope envelope register2
       initLinearFeedbackShiftRegister 0xFFFF lfsr
-      reloadCounter frequencyCounter (timerPeriod register3)
+      reloadCounter frequencyCounter (6 + timerPeriod register3)
     pure register4
 
   lengthCounter    <- newLength 0x3F
   envelope         <- newEnvelope
-  frequencyCounter <- newCounter
+  frequencyCounter <- newCounter 0x7FF
   lfsr             <- newLinearFeedbackShiftRegister
   pure NoiseChannel { .. }
 

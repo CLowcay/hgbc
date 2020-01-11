@@ -68,7 +68,7 @@ initAudioState = mdo
     poke desired (desiredAudioSpec pAudioCallback)
     SDL.Raw.openAudioDevice nullPtr 0 desired actual 0
 
-  sampler        <- newCounter
+  sampler        <- newCounter 0xFF
   frameSequencer <- newStateCycle frameSequencerStates
 
   channel1       <- newPulseChannel True port52 flagChannel1Enable

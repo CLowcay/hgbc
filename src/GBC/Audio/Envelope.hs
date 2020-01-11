@@ -27,13 +27,13 @@ newEnvelope = do
   volumeRef         <- newUnboxedRef 0
   volumeDeltaRef    <- newUnboxedRef 1
   envelopePeriodRef <- newUnboxedRef 0
-  envelopeCounter   <- newCounter
+  envelopeCounter   <- newCounter 7
   pure Envelope { .. }
 
 initEnvelope :: Envelope -> Word8 -> IO ()
 initEnvelope Envelope {..} register = do
   let envelopePeriod = getEnvelopePeriod register
-  reloadCounter envelopeCounter ((envelopePeriod - 1) .&. 7)
+  reloadCounter envelopeCounter envelopePeriod
   writeUnboxedRef envelopePeriodRef envelopePeriod
   writeUnboxedRef volumeDeltaRef    (getVolumeDelta register)
   writeUnboxedRef volumeRef         (getVolume register)
@@ -41,11 +41,11 @@ initEnvelope Envelope {..} register = do
 clockEnvelope :: Envelope -> IO ()
 clockEnvelope Envelope {..} = do
   envelopePeriod <- readUnboxedRef envelopePeriodRef
-  when (envelopePeriod /= 0) $ updateCounter envelopeCounter 1 $ do
+  unless (envelopePeriod == 0) $ updateCounter envelopeCounter 1 $ do
     volume      <- readUnboxedRef volumeRef
     volumeDelta <- readUnboxedRef volumeDeltaRef
-    writeUnboxedRef volumeRef $! ((volume + volumeDelta) `min` 15) `max` 0
-    pure ((envelopePeriod - 1) .&. 7)
+    writeUnboxedRef volumeRef $ ((volume + volumeDelta) `min` 15) `max` 0
+    pure envelopePeriod
 
 envelopeVolume :: Envelope -> IO Int
 envelopeVolume Envelope {..} = readUnboxedRef volumeRef

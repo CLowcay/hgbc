@@ -86,12 +86,12 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
                                     (disableIO port52 channelEnabledFlag output enable)
       initLength lengthCounter (isFlagSet flagLength register4)
       initEnvelope envelope register2
-      reloadCounter frequencyCounter (getTimerPeriod frequency)
+      reloadCounter frequencyCounter (6 + getTimerPeriod frequency)
 
     pure register4
 
   sweepUnit        <- newSweep port3 port4
-  frequencyCounter <- newCounter
+  frequencyCounter <- newCounter 0x7FF
   dutyCycle        <- newStateCycle dutyCycleStates
   envelope         <- newEnvelope
   lengthCounter    <- newLength 0x3F
@@ -151,4 +151,4 @@ dutyCycleOutput 3 i = i > 1
 dutyCycleOutput x _ = error ("Invalid duty cycle " <> show x)
 
 getTimerPeriod :: Int -> Int
-getTimerPeriod f = (4 * (2048 - f)) - 1
+getTimerPeriod f = 4 * (2048 - f)

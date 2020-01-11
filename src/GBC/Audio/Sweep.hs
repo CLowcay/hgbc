@@ -32,14 +32,14 @@ newSweep port3 port4 = do
   enable       <- newIORef False
   hasNegated   <- newIORef False
   frequencyRef <- newUnboxedRef 0
-  counter      <- newCounter
+  counter      <- newCounter 7
   pure Sweep { .. }
 
 initSweep :: Sweep -> Int -> Word8 -> IO () -> IO ()
 initSweep sweep@Sweep {..} frequency0 register disableIO = do
   writeIORef hasNegated False
   writeUnboxedRef frequencyRef frequency0
-  reloadCounter counter ((getPeriod register - 1) .&. 7)
+  reloadCounter counter (getPeriod register)
   writeIORef enable (getPeriod register /= 0 || getShift register /= 0)
   when (getShift register /= 0) $ void $ overflowCheck sweep register disableIO
 
@@ -64,7 +64,7 @@ clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
       writeUnboxedRef frequencyRef frequency'
       updateFrequency port3 port4 frequency'
       void $ overflowCheck sweep register disableIO
-  pure ((getPeriod register - 1) .&. 7)
+  pure (getPeriod register)
 
 hasPerformedSweepCalculationInNegateMode :: Sweep -> IO Bool
 hasPerformedSweepCalculationInNegateMode Sweep {..} = readIORef hasNegated
