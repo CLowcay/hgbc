@@ -302,7 +302,7 @@ setPortBits Port {..} newValue = do
   newValue' <- portNotify oldValue (oldValue .|. (newValue .&. portWriteMask))
   writeUnboxedRef portValue newValue'
 
--- | Set writable bits and notify all listeners.
+-- | Clear writable bits and notify all listeners.
 {-# INLINE clearPortBits #-}
 {-# SPECIALIZE clearPortBits :: Port Word8 -> Word8 ->IO () #-}
 clearPortBits :: (Prim a, Bits a) => Port a -> a -> IO ()

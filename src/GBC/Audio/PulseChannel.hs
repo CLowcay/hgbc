@@ -11,7 +11,6 @@ where
 import           Common
 import           Control.Monad.Reader
 import           Data.Bits
-import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           GBC.Audio.Common
@@ -35,7 +34,7 @@ data PulseChannel = PulseChannel {
   , channelEnabledFlag :: !Word8
   , sweepUnit          :: !Sweep
   , frequencyCounter   :: !Counter
-  , dutyCycle          :: !(StateCycle Int)
+  , dutyCycle          :: !(UnboxedRef Int)
   , envelope           :: !Envelope
   , lengthCounter      :: !Length
 }
@@ -92,7 +91,7 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
 
   sweepUnit        <- newSweep port3 port4
   frequencyCounter <- newCounter 0x7FF
-  dutyCycle        <- newStateCycle dutyCycleStates
+  dutyCycle        <- newUnboxedRef 0
   envelope         <- newEnvelope
   lengthCounter    <- newLength 0x3F
   pure PulseChannel { .. }
@@ -116,7 +115,7 @@ instance Channel PulseChannel where
     directWritePort port3 0
     directWritePort port4 0
     powerOffLength lengthCounter
-    resetStateCycle dutyCycle dutyCycleStates
+    writeUnboxedRef dutyCycle 0
 
   frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
     register4 <- directReadPort port4
@@ -128,20 +127,22 @@ instance Channel PulseChannel where
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
-    when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      void $ updateStateCycle dutyCycle 1 $ \i -> do
-        dutyCycleNumber <- getDutyCycle <$> directReadPort port1
-        sample          <- envelopeVolume envelope
-        writeUnboxedRef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
-      register3 <- directReadPort port3
-      register4 <- directReadPort port4
-      pure (getTimerPeriod (getFrequency register3 register4))
+    when isEnabled $ do
+      reloads <- updateReloadingCounter frequencyCounter clockAdvance $ do
+        register3 <- directReadPort port3
+        register4 <- directReadPort port4
+        pure (getTimerPeriod (getFrequency register3 register4))
+
+      i0 <- readUnboxedRef dutyCycle
+      let i = (i0 + reloads) .&. 7
+      writeUnboxedRef dutyCycle i
+
+      dutyCycleNumber <- getDutyCycle <$> directReadPort port1
+      sample          <- envelopeVolume envelope
+      writeUnboxedRef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
 
 getDutyCycle :: Word8 -> Word8
 getDutyCycle register = register .>>. 6
-
-dutyCycleStates :: [(Int, Int)]
-dutyCycleStates = [1, 2, 3, 4, 5, 6, 7, 0] <&> (, 1)
 
 dutyCycleOutput :: Word8 -> Int -> Bool
 dutyCycleOutput 0 i = i == 0
