@@ -12,6 +12,7 @@ import           Common
 import           Control.Monad
 import           Data.Bits
 import           Data.Word
+import           GBC.Audio.Common
 import           GBC.Primitive
 import           GBC.Primitive.UnboxedRef
 
@@ -30,10 +31,13 @@ newEnvelope = do
   envelopeCounter   <- newCounter 7
   pure Envelope { .. }
 
-initEnvelope :: Envelope -> Word8 -> IO ()
-initEnvelope Envelope {..} register = do
+initEnvelope :: Envelope -> Word8 -> FrameSequencerOutput -> IO ()
+initEnvelope Envelope {..} register step = do
   let envelopePeriod = getEnvelopePeriod register
-  reloadCounter envelopeCounter envelopePeriod
+  -- Quirk: If the next frame sequencer step will clock the envelope, then init
+  -- it to one greater than what it should be.
+  reloadCounter envelopeCounter
+                (if nextStepWillClockEnvelope step then envelopePeriod + 1 else envelopePeriod)
   writeUnboxedRef envelopePeriodRef envelopePeriod
   writeUnboxedRef volumeDeltaRef    (getVolumeDelta register)
   writeUnboxedRef volumeRef         (getVolume register)

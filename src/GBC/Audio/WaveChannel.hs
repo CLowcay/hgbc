@@ -1,6 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TupleSections #-}
 
 module GBC.Audio.WaveChannel
   ( WaveChannel
@@ -36,8 +35,8 @@ data WaveChannel = WaveChannel {
   , lengthCounter    :: !Length
 }
 
-newWaveChannel :: Port Word8 -> IO WaveChannel
-newWaveChannel port52 = mdo
+newWaveChannel :: Port Word8 -> StateCycle FrameSequencerOutput -> IO WaveChannel
+newWaveChannel port52 frameSequencer = mdo
   output <- newUnboxedRef 0
   enable <- newIORef False
 
@@ -54,13 +53,14 @@ newWaveChannel port52 = mdo
   port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
+    frame <- getStateCycle frameSequencer
     when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
-         (extraClocks lengthCounter (disableIO port52 output enable))
+         (extraClocks lengthCounter frame (disableIO port52 output enable))
 
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
       register3 <- directReadPort port3
-      initLength lengthCounter (isFlagSet flagLength register4)
+      initLength lengthCounter frame (isFlagSet flagLength register4)
       reloadCounter frequencyCounter (6 + getTimerPeriod (getFrequency register3 register4))
       writeUnboxedRef sample 0
       let enabled = isFlagSet flagMasterEnable register0
@@ -119,12 +119,10 @@ instance Channel WaveChannel where
     powerOffLength lengthCounter
     writeUnboxedRef sampleBuffer 0
 
-  frameSequencerClock WaveChannel {..} FrameSequencerOutput {..} = do
+  frameSequencerClock WaveChannel {..} step = do
     register4 <- directReadPort port4
-    clockLength lengthCounter
-                lengthClock
-                (isFlagSet flagLength register4)
-                (disableIO port52 output enable)
+    when (isLengthClockingStep step && isFlagSet flagLength register4)
+      $ clockLength lengthCounter (disableIO port52 output enable)
 
   masterClock channel@WaveChannel {..} clockAdvance = do
     isEnabled <- readIORef enable

@@ -29,8 +29,8 @@ data NoiseChannel = NoiseChannel {
   , lfsr             :: !(LinearFeedbackShiftRegister Word16)
 }
 
-newNoiseChannel :: Port Word8 -> IO NoiseChannel
-newNoiseChannel port52 = mdo
+newNoiseChannel :: Port Word8 -> StateCycle FrameSequencerOutput -> IO NoiseChannel
+newNoiseChannel port52 frameSequencer = mdo
   enable    <- newIORef False
   dacEnable <- newIORef True
   output    <- newUnboxedRef 0
@@ -48,8 +48,9 @@ newNoiseChannel port52 = mdo
   port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \previous register4 -> do
+    frame <- getStateCycle frameSequencer
     when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
-         (extraClocks lengthCounter (disableIO port52 output enable))
+         (extraClocks lengthCounter frame (disableIO port52 output enable))
 
     when (isFlagSet flagTrigger register4) $ do
       register2    <- directReadPort port2
@@ -57,8 +58,8 @@ newNoiseChannel port52 = mdo
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       updateStatus port52 flagChannel4Enable isDacEnabled
-      initLength lengthCounter (isFlagSet flagLength register4)
-      initEnvelope envelope register2
+      initLength lengthCounter frame (isFlagSet flagLength register4)
+      initEnvelope envelope register2 frame
       initLinearFeedbackShiftRegister 0xFFFF lfsr
       reloadCounter frequencyCounter (6 + timerPeriod register3)
     pure register4
@@ -88,13 +89,11 @@ instance Channel NoiseChannel where
     directWritePort port4 0
     powerOffLength lengthCounter
 
-  frameSequencerClock NoiseChannel {..} FrameSequencerOutput {..} = do
+  frameSequencerClock NoiseChannel {..} step = do
     register4 <- directReadPort port4
-    clockLength lengthCounter
-                lengthClock
-                (isFlagSet flagLength register4)
-                (disableIO port52 output enable)
-    when envelopeClock $ clockEnvelope envelope
+    when (isFlagSet flagLength register4 && isLengthClockingStep step)
+      $ clockLength lengthCounter (disableIO port52 output enable)
+    when (isEnvelopeClockingStep step) $ clockEnvelope envelope
 
   masterClock NoiseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable

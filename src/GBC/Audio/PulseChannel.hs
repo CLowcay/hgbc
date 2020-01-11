@@ -1,7 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE MultiWayIf #-}
 module GBC.Audio.PulseChannel
   ( PulseChannel
   , newPulseChannel
@@ -39,8 +37,8 @@ data PulseChannel = PulseChannel {
   , lengthCounter      :: !Length
 }
 
-newPulseChannel :: Bool -> Port Word8 -> Word8 -> IO PulseChannel
-newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
+newPulseChannel :: Bool -> Port Word8 -> StateCycle FrameSequencerOutput -> Word8 -> IO PulseChannel
+newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
   output    <- newUnboxedRef 0
   enable    <- newIORef False
   dacEnable <- newIORef True
@@ -67,8 +65,9 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
   port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
+    frame <- getStateCycle frameSequencer
     when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
-         (extraClocks lengthCounter (disableIO port52 channelEnabledFlag output enable))
+         (extraClocks lengthCounter frame (disableIO port52 channelEnabledFlag output enable))
 
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
@@ -83,9 +82,14 @@ newPulseChannel hasSweepUnit port52 channelEnabledFlag = mdo
                                     frequency
                                     register0
                                     (disableIO port52 channelEnabledFlag output enable)
-      initLength lengthCounter (isFlagSet flagLength register4)
-      initEnvelope envelope register2
-      reloadCounter frequencyCounter (6 + getTimerPeriod frequency)
+      initLength lengthCounter frame (isFlagSet flagLength register4)
+      initEnvelope envelope register2 frame
+
+      -- Quirk: When triggering a pulse channel, the low two bits of the
+      -- frequency counter are not modified.
+      count0 <- getCounter frequencyCounter
+      let count1 = 6 + getTimerPeriod frequency
+      reloadCounter frequencyCounter ((count0 .&. 3) .|. (count1 .&. complement 3))
 
     pure register4
 
@@ -117,11 +121,13 @@ instance Channel PulseChannel where
     powerOffLength lengthCounter
     writeUnboxedRef dutyCycle 0
 
-  frameSequencerClock channel@PulseChannel {..} FrameSequencerOutput {..} = do
+  frameSequencerClock channel@PulseChannel {..} step = do
     register4 <- directReadPort port4
-    clockLength lengthCounter lengthClock (isFlagSet flagLength register4) (disable channel)
-    when envelopeClock $ clockEnvelope envelope
-    when (sweepClock && hasSweepUnit) $ do
+    when (isLengthClockingStep step && isFlagSet flagLength register4)
+      $ clockLength lengthCounter
+      $ disable channel
+    when (isEnvelopeClockingStep step) $ clockEnvelope envelope
+    when (hasSweepUnit && isSweepClockingStep step) $ do
       register0 <- directReadPort port0
       clockSweep sweepUnit register0 (disable channel)
 

@@ -1,7 +1,11 @@
 module GBC.Audio.Common
   ( Channel(..)
   , FrameSequencerOutput(..)
-  , noFrameSequencerOutput
+  , lastStepClockedLength
+  , nextStepWillClockEnvelope
+  , isLengthClockingStep
+  , isEnvelopeClockingStep
+  , isSweepClockingStep
   , flagMasterPower
   , flagTrigger
   , flagLength
@@ -27,14 +31,27 @@ flagTrigger, flagLength :: Word8
 flagTrigger = 0x80
 flagLength = 0x40
 
-data FrameSequencerOutput = FrameSequencerOutput {
-    lengthClock   :: !Bool
-  , envelopeClock :: !Bool
-  , sweepClock    :: !Bool
-}
+newtype FrameSequencerOutput = FrameSequencerOutput Int deriving (Eq, Ord, Show)
 
-noFrameSequencerOutput :: FrameSequencerOutput
-noFrameSequencerOutput = FrameSequencerOutput False False False
+{-# INLINE lastStepClockedLength #-}
+lastStepClockedLength :: FrameSequencerOutput -> Bool
+lastStepClockedLength (FrameSequencerOutput i) = i .&. 1 == 0
+
+{-# INLINE nextStepWillClockEnvelope #-}
+nextStepWillClockEnvelope :: FrameSequencerOutput -> Bool
+nextStepWillClockEnvelope (FrameSequencerOutput i) = i == 6
+
+{-# INLINE isLengthClockingStep #-}
+isLengthClockingStep :: FrameSequencerOutput -> Bool
+isLengthClockingStep (FrameSequencerOutput i) = i .&. 1 == 0
+
+{-# INLINE isEnvelopeClockingStep #-}
+isEnvelopeClockingStep :: FrameSequencerOutput -> Bool
+isEnvelopeClockingStep (FrameSequencerOutput i) = i == 7
+
+{-# INLINE isSweepClockingStep #-}
+isSweepClockingStep :: FrameSequencerOutput -> Bool
+isSweepClockingStep (FrameSequencerOutput i) = i .&. 3 == 2
 
 class Channel channel where
   getOutput           :: channel -> IO Int

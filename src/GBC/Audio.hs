@@ -46,7 +46,7 @@ data AudioState = AudioState {
     audioDevice    :: !SDL.Raw.AudioDeviceID
   , audioOut       :: !(RingBuffer Word16)
   , sampler        :: !Counter
-  , frameSequencer :: !(StateCycle Int)
+  , frameSequencer :: !(StateCycle FrameSequencerOutput)
   , port50         :: !(Port Word8)
   , port51         :: !(Port Word8)
   , port52         :: !(Port Word8)
@@ -56,8 +56,8 @@ data AudioState = AudioState {
   , channel4       :: !NoiseChannel
 }
 
-frameSequencerStates :: [(Int, Int)]
-frameSequencerStates = 7 : [0 .. 6] <&> (, 8192)
+frameSequencerStates :: [(FrameSequencerOutput, Int)]
+frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 8192)
 
 initAudioState :: IO AudioState
 initAudioState = mdo
@@ -71,10 +71,10 @@ initAudioState = mdo
   sampler        <- newCounter 0xFF
   frameSequencer <- newStateCycle frameSequencerStates
 
-  channel1       <- newPulseChannel True port52 flagChannel1Enable
-  channel2       <- newPulseChannel False port52 flagChannel2Enable
-  channel3       <- newWaveChannel port52
-  channel4       <- newNoiseChannel port52
+  channel1       <- newPulseChannel True port52 frameSequencer flagChannel1Enable
+  channel2       <- newPulseChannel False port52 frameSequencer flagChannel2Enable
+  channel3       <- newWaveChannel port52 frameSequencer
+  channel4       <- newNoiseChannel port52 frameSequencer
 
   port50         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
   port51         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
@@ -142,22 +142,11 @@ audioStep :: AudioState -> Int -> IO ()
 audioStep audioState@AudioState {..} clockAdvance = do
   register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52) $ do
-    void $ updateStateCycle frameSequencer clockAdvance $ \state ->
-      let frameSequencerOutput = case state of
-            0 -> FrameSequencerOutput True False False
-            1 -> FrameSequencerOutput False False False
-            2 -> FrameSequencerOutput True False True
-            3 -> FrameSequencerOutput False False False
-            4 -> FrameSequencerOutput True False False
-            5 -> FrameSequencerOutput False False False
-            6 -> FrameSequencerOutput True False True
-            7 -> FrameSequencerOutput False True False
-            x -> error ("Invalid frame sequencer state " <> show x)
-      in  do
-            frameSequencerClock channel1 frameSequencerOutput
-            frameSequencerClock channel2 frameSequencerOutput
-            frameSequencerClock channel3 frameSequencerOutput
-            frameSequencerClock channel4 frameSequencerOutput
+    void $ updateStateCycle frameSequencer clockAdvance $ \state -> do
+      frameSequencerClock channel1 state
+      frameSequencerClock channel2 state
+      frameSequencerClock channel3 state
+      frameSequencerClock channel4 state
     masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance
