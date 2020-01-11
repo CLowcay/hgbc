@@ -26,6 +26,7 @@ module GBC.Primitive
   , newLinearFeedbackShiftRegister
   , initLinearFeedbackShiftRegister
   , nextBit
+  , currentBit
   , Port
   , newPort
   , newPortWithReadAction
@@ -212,6 +213,10 @@ nextBit (LinearFeedbackShiftRegister ref) mask = do
         (shifted .&. complement mask) .|. (mask .&. negate (1 .&. (register `xor` shifted)))
   writeUnboxedRef ref register'
   pure register'
+
+{-# INLINE currentBit #-}
+currentBit :: (Prim a) => LinearFeedbackShiftRegister a -> IO a
+currentBit (LinearFeedbackShiftRegister ref) = readUnboxedRef ref
 
 -- | A port is like an IORef but with a custom handler for writes.
 data Port a = Port {

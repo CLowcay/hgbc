@@ -99,16 +99,22 @@ instance Channel NoiseChannel where
     isEnabled <- readIORef enable
     when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       register3   <- directReadPort port3
-      registerOut <- nextBit lfsr (widthMask register3)
-      sample      <- envelopeVolume envelope
+      -- Quirk: If the shift clock is 14 or 15, then do not clock the LFSR.
+      registerOut <- if shiftClock register3 >= 14
+        then currentBit lfsr
+        else nextBit lfsr (widthMask register3)
+      sample <- envelopeVolume envelope
       writeUnboxedRef output ((if registerOut .&. 1 == 0 then sample else 0) - 8)
       pure (timerPeriod register3)
 
 widthMask :: Word8 -> Word16
 widthMask register3 = if register3 `testBit` 3 then 0x0040 else 0x4000
 
+shiftClock :: Word8 -> Int
+shiftClock register3 = fromIntegral register3 .>>. 4
+
+ratio :: Word8 -> Int
+ratio register3 = fromIntegral register3 .&. 0x07
+
 timerPeriod :: Word8 -> Int
-timerPeriod register3 =
-  let shiftClock = fromIntegral register3 .>>. 4
-      ratio      = fromIntegral register3 .&. 0x07
-  in  32 `max` (4 * (ratio + 1) * (1 .<<. (shiftClock + 1)))
+timerPeriod register3 = 32 `max` (4 * (ratio register3 + 1) * (1 .<<. (shiftClock register3 + 1)))
