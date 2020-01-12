@@ -28,14 +28,13 @@ import           Data.IORef
 import           Data.Word
 import           GBC.Mode
 import           GBC.Primitive.UnboxedRef
-import qualified Data.Vector.Unboxed.Mutable   as VUM
 import qualified Data.Vector.Storable.Mutable  as VSM
 
 data VRAM = VRAM {
-    vram           :: !(VUM.IOVector Word8)
-  , oam            :: !(VUM.IOVector Word8)
+    vram           :: !(VSM.IOVector Word8)
+  , oam            :: !(VSM.IOVector Word8)
   , rawPalettes    :: !(VSM.IOVector Word16)
-  , rgbPalettes    :: !(VUM.IOVector Word32)
+  , rgbPalettes    :: !(VSM.IOVector Word32)
   , mode           :: !EmulatorMode
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(UnboxedRef Int)
@@ -49,12 +48,12 @@ initVRAM mode = do
   let size = case mode of
         DMG -> 0x2000
         CGB -> 0x4000
-  vram           <- VUM.new size
-  oam            <- VUM.new 160
+  vram           <- VSM.new size
+  oam            <- VSM.new 160
   vramAccessible <- newIORef True
   vramBank       <- newUnboxedRef 0
   rawPalettes    <- VSM.replicate totalPaletteEntries 0x7FFF
-  rgbPalettes    <- VUM.replicate totalPaletteEntries 0xFFFFFFFF
+  rgbPalettes    <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
   pure VRAM { .. }
 
 {-# INLINE setVRAMAccessible #-}
@@ -80,7 +79,7 @@ writePalette VRAM {..} fg cps cpd = do
   VSM.unsafeWrite (VSM.unsafeCast rawPalettes) (paletteByte fg cps) cpd
   let i = paletteIndex fg (cps .>>. 1)
   raw <- VSM.unsafeRead rawPalettes i
-  VUM.unsafeWrite rgbPalettes i (encodeColor raw)
+  VSM.unsafeWrite rgbPalettes i (encodeColor raw)
 
 -- | Read a palette given the value of the cps register.
 {-# INLINE readPalette #-}
@@ -90,7 +89,7 @@ readPalette VRAM {..} fg cps = VSM.unsafeRead (VSM.unsafeCast rawPalettes) (pale
 -- | Read a decoded RGB palette with the given 5-bit address
 {-# INLINE readRGBPalette #-}
 readRGBPalette :: VRAM -> Bool -> Word8 -> IO Word32
-readRGBPalette VRAM {..} fg addr = VUM.unsafeRead rgbPalettes (paletteIndex fg addr)
+readRGBPalette VRAM {..} fg addr = VSM.unsafeRead rgbPalettes (paletteIndex fg addr)
 
 encodeColor :: Word16 -> Word32
 encodeColor color =
@@ -112,47 +111,47 @@ cgbColors (r, g, b) =
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)
 readSpritePosition VRAM {..} i = do
-  y <- VUM.unsafeRead oam i
-  x <- VUM.unsafeRead oam (i + 1)
+  y <- VSM.unsafeRead oam i
+  x <- VSM.unsafeRead oam (i + 1)
   pure (y, x)
 
 {-# INLINE readSpriteAttributes #-}
 readSpriteAttributes :: VRAM -> Int -> IO (Word8, Word8)
 readSpriteAttributes VRAM {..} i = do
-  c <- VUM.unsafeRead oam (i + 2)
-  a <- VUM.unsafeRead oam (i + 3)
+  c <- VSM.unsafeRead oam (i + 2)
+  a <- VSM.unsafeRead oam (i + 3)
   pure (c, a)
 
 {-# INLINE readTile #-}
 readTile :: VRAM -> Int -> Int -> IO Word8
-readTile VRAM {..} area tile = VUM.unsafeRead vram (area + tile)
+readTile VRAM {..} area tile = VSM.unsafeRead vram (area + tile)
 
 -- WARNING: DO NOT CALL unless running in DMG mode.
 {-# INLINE readTileAttrs #-}
 readTileAttrs :: VRAM -> Int -> Int -> IO Word8
-readTileAttrs VRAM {..} area tile = VUM.unsafeRead vram (area + tile + 0x2000)
+readTileAttrs VRAM {..} area tile = VSM.unsafeRead vram (area + tile + 0x2000)
 
 {-# INLINE readTileData #-}
 readTileData :: VRAM -> Int -> IO (Word8, Word8)
 readTileData VRAM {..} tile = do
-  b0 <- VUM.unsafeRead vram tile
-  b1 <- VUM.unsafeRead vram (tile + 1)
+  b0 <- VSM.unsafeRead vram tile
+  b1 <- VSM.unsafeRead vram (tile + 1)
   pure (b0, b1)
 
 {-# INLINE readBankedTileData #-}
 readBankedTileData :: VRAM -> Int -> IO (Word8, Word8)
 readBankedTileData VRAM {..} tile = do
-  b0 <- VUM.unsafeRead vram (tile + 0x2000)
-  b1 <- VUM.unsafeRead vram (tile + 1 + 0x2000)
+  b0 <- VSM.unsafeRead vram (tile + 0x2000)
+  b1 <- VSM.unsafeRead vram (tile + 1 + 0x2000)
   pure (b0, b1)
 
 {-# INLINE readOAM #-}
 readOAM :: VRAM -> Word16 -> IO Word8
-readOAM VRAM {..} addr = VUM.unsafeRead oam (fromIntegral (addr - 0xFE00))
+readOAM VRAM {..} addr = VSM.unsafeRead oam (fromIntegral (addr - 0xFE00))
 
 {-# INLINE writeOAM #-}
 writeOAM :: VRAM -> Word16 -> Word8 -> IO ()
-writeOAM VRAM {..} addr = VUM.unsafeWrite oam (fromIntegral (addr - 0xFE00))
+writeOAM VRAM {..} addr = VSM.unsafeWrite oam (fromIntegral (addr - 0xFE00))
 
 {-# INLINE readVRAM #-}
 readVRAM :: VRAM -> Word16 -> IO Word8
@@ -162,7 +161,7 @@ readVRAM VRAM {..} addr = do
     then pure 0xFF
     else do
       bankOffset <- readUnboxedRef vramBank
-      VUM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
+      VSM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
 
 {-# INLINE writeVRAM #-}
 writeVRAM :: VRAM -> Word16 -> Word8 -> IO ()
@@ -172,15 +171,15 @@ writeVRAM VRAM {..} addr value = do
     then pure ()
     else do
       bankOffset <- readUnboxedRef vramBank
-      VUM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
+      VSM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
 
 -- Copy a slice of memory into OAM.  The slice MUST have length 160.
 {-# INLINE copyToOAM #-}
-copyToOAM :: VRAM -> VUM.IOVector Word8 -> IO ()
-copyToOAM VRAM {..} = VUM.unsafeMove oam
+copyToOAM :: VRAM -> VSM.IOVector Word8 -> IO ()
+copyToOAM VRAM {..} = VSM.unsafeMove oam
 
 -- DMA from VRAM to OAM does not respect the VRAM bank according to the docs.
 {-# INLINE copyVRAMToOAM #-}
 copyVRAMToOAM :: VRAM -> Word16 -> IO ()
 copyVRAMToOAM VRAM {..} from =
-  VUM.unsafeMove oam (VUM.unsafeSlice (fromIntegral from - 0x8000) 160 vram)
+  VSM.unsafeMove oam (VSM.unsafeSlice (fromIntegral from - 0x8000) 160 vram)
