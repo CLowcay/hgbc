@@ -25,9 +25,6 @@ import           Data.Bifunctor
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
-import           Foreign.ForeignPtr
-import           Foreign.Ptr
-import           Foreign.Storable
 import           GBC.Errors
 import           GBC.Graphics.VRAM
 import           GBC.Mode
@@ -36,20 +33,22 @@ import           GBC.Primitive.UnboxedRef
 import           GBC.ROM
 import           GBC.Registers
 import qualified Data.ByteString               as B
-import qualified Data.ByteString.Unsafe        as B
 import qualified Data.Vector                   as V
+import qualified Data.Vector.Unboxed           as VU
+import qualified Data.Vector.Storable          as VS
+import qualified Data.Vector.Unboxed.Mutable   as VUM
 
 data Memory = Memory {
-    mbc            :: !MBC
-  , romHeader      :: !Header
-  , rom            :: !B.ByteString
-  , memRam         :: !(ForeignPtr Word8)
+    mode           :: !EmulatorMode
+  , mbc            :: !MBC
+  , header         :: !Header
+  , rom            :: !(VU.Vector Word8)
+  , vram           :: !VRAM
+  , memRam         :: !(VUM.IOVector Word8)
   , ramBankOffset  :: !(UnboxedRef Int)
   , ports          :: !(V.Vector (Port Word8))
   , portIE         :: !(Port Word8)
-  , memHigh        :: !(ForeignPtr Word8)
-  , mode           :: !EmulatorMode
-  , vram           :: !VRAM
+  , memHigh        :: !(VUM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
 
@@ -65,9 +64,11 @@ portOffset = subtract 0xFF00 . fromIntegral
 
 -- | The initial memory state.
 initMemory :: ROM -> VRAM -> [(Word16, Port Word8)] -> Port Word8 -> EmulatorMode -> IO Memory
-initMemory romInfo@(ROM _ romHeader rom) vram rawPorts portIE mode = do
-  memRam        <- mallocForeignPtrArray 0x10000
-  memHigh       <- mallocForeignPtrArray 0x80
+initMemory romInfo vram rawPorts portIE mode = do
+  let rom    = VU.fromList (B.unpack (romContent romInfo))
+  let header = romHeader romInfo
+  memRam        <- VUM.new 0x10000
+  memHigh       <- VUM.new 0x80
   emptyPort     <- newPort 0xFF 0x00 neverUpdate
 
   ramBankOffset <- newUnboxedRef 0
@@ -86,7 +87,7 @@ initMemory romInfo@(ROM _ romHeader rom) vram rawPorts portIE mode = do
 
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
-getROMHeader Memory {..} = romHeader
+getROMHeader Memory {..} = header
 
 -- | Check that RAM access operations are valid.
 shouldCheckRAMAccess :: HasMemory env => Bool -> ReaderT env IO ()
@@ -99,6 +100,9 @@ getMbcRegisters = do
   Memory {..} <- asks forMemory
   liftIO (mbcRegisters mbc)
 
+oamSize :: Int
+oamSize = 160
+
 -- | Copy data to OAM memory via DMA.
 -- TODO: Cannot use moveArray, have to expand the bytes to ints.
 {-# INLINE dmaToOAM #-}
@@ -106,24 +110,24 @@ dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
   liftIO $ case source .>>. 13 of
-    0 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
-    1 -> B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` fromIntegral source))
+    0 -> copyToOAM vram . VUM.slice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
+    1 -> copyToOAM vram . VUM.slice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
     2 -> do
       bank <- bankOffset mbc
-      B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` (bank + offset 0x4000)))
+      copyToOAM vram . VUM.slice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
     3 -> do
       bank <- bankOffset mbc
-      B.unsafeUseAsCString rom (copyToOAM vram . (`plusPtr` (bank + offset 0x4000)))
+      copyToOAM vram . VUM.slice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
     4 -> copyVRAMToOAM vram source
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
-      withRAMPointer mbc check (source - 0xA000) (copyToOAM vram)
+      slice <- VS.unsafeFreeze =<< sliceRAM mbc check (source - 0xA000) oamSize
+      copyToOAM vram =<< VU.unsafeThaw (VU.convert slice)
     6
-      | source < 0xD000 || mode == DMG -> withForeignPtr memRam
-      $  \ram -> copyToOAM vram (ram `plusPtr` offset 0xC000)
+      | source < 0xD000 || mode == DMG -> copyToOAM vram (VUM.slice (offset 0xC000) oamSize memRam)
       | otherwise -> do
-        bankOffset <- readUnboxedRef ramBankOffset
-        withForeignPtr memRam $ \ram -> copyToOAM vram (ram `plusPtr` (bankOffset + offset 0xC000))
+        bank <- readUnboxedRef ramBankOffset
+        copyToOAM vram (VUM.slice (bank + offset 0xC000) oamSize memRam)
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
 
@@ -133,25 +137,25 @@ readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
   liftIO $ case addr .>>. 13 of
-    0 -> pure $ rom `B.unsafeIndex` fromIntegral addr
-    1 -> pure $ rom `B.unsafeIndex` fromIntegral addr
+    0 -> pure (rom VU.! fromIntegral addr)
+    1 -> pure (rom VU.! fromIntegral addr)
     2 -> do
       bank <- bankOffset mbc
-      pure $ rom `B.unsafeIndex` (bank + offset 0x4000)
+      pure (rom VU.! (bank + offset 0x4000))
     3 -> do
       bank <- bankOffset mbc
-      pure $ rom `B.unsafeIndex` (bank + offset 0x4000)
+      pure (rom VU.! (bank + offset 0x4000))
     4 -> readVRAM vram addr
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       readRAM mbc check (addr - 0xA000)
     6
-      | addr < 0xD000 || mode == DMG -> withForeignPtr memRam (`peekElemOff` offset 0xC000)
+      | addr < 0xD000 || mode == DMG -> VUM.read memRam (offset 0xC000)
       | otherwise -> do
-        bankOffset <- readUnboxedRef ramBankOffset
-        withForeignPtr memRam (`peekElemOff` (bankOffset + offset 0xC000))
+        bank <- readUnboxedRef ramBankOffset
+        VUM.read memRam (bank + offset 0xC000)
     7
-      | addr < 0xFE00 -> withForeignPtr memRam (`peekElemOff` offset 0xE000)
+      | addr < 0xFE00 -> VUM.read memRam (offset 0xE000)
       | addr < 0xFEA0 -> do
         value <- readOAM vram addr
         pure (fromIntegral value)
@@ -160,7 +164,7 @@ readByte addr = do
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
       | addr == IE -> liftIO $ readPort portIE
-      | otherwise -> withForeignPtr memHigh (`peekElemOff` offset 0xFF80)
+      | otherwise -> VUM.read memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 
@@ -192,20 +196,19 @@ writeByte addr value = do
       check <- liftIO (readIORef checkRAMAccess)
       writeRAM mbc check (addr - 0xA000) value
     6
-      | addr < 0xD000 || mode == DMG -> withForeignPtr memRam
-      $  \ptr -> pokeElemOff ptr (offset 0xC000) value
+      | addr < 0xD000 || mode == DMG -> VUM.write memRam (offset 0xC000) value
       | otherwise -> do
-        bankOffset <- readUnboxedRef ramBankOffset
-        withForeignPtr memRam $ \ptr -> pokeElemOff ptr (bankOffset + offset 0xC000) value
+        bank <- readUnboxedRef ramBankOffset
+        VUM.write memRam (bank + offset 0xC000) value
     7
-      | addr < 0xFE00 -> withForeignPtr memRam $ \ptr -> pokeElemOff ptr (offset 0xE000) value
+      | addr < 0xFE00 -> VUM.write memRam (offset 0xE000) value
       | addr < 0xFEA0 -> writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
       | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
       | addr == IE -> liftIO $ writePort portIE value
-      | otherwise -> withForeignPtr memHigh $ \ptr -> pokeElemOff ptr (offset 0xFF80) value
+      | otherwise -> VUM.write memHigh (offset 0xFF80) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 

@@ -10,10 +10,9 @@ where
 
 import           Common
 import           Data.Word
-import           Foreign.ForeignPtr
-import           Foreign.Ptr
+import qualified Data.Vector.Storable.Mutable  as VSM
 
-type RAMAllocator = Int -> IO (ForeignPtr Word8, Int)
+type RAMAllocator = Int -> IO (VSM.IOVector Word8)
 
 -- | A memory bank controller.
 data MBC = MBC {
@@ -21,7 +20,7 @@ data MBC = MBC {
   , writeROM       :: Word16 -> Word8 -> IO ()
   , readRAM        :: Bool -> Word16 -> IO Word8
   , writeRAM       :: Bool -> Word16 -> Word8 -> IO ()
-  , withRAMPointer :: forall a. Bool -> Word16 -> (Ptr Word8 -> IO a) -> IO a
+  , sliceRAM       :: Bool -> Word16 -> Int -> IO (VSM.IOVector Word8)
   , mbcRegisters   :: IO [RegisterInfo]
 }
 

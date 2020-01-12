@@ -10,21 +10,19 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Bits
 import           Data.IORef
-import           Foreign.ForeignPtr
-import           Foreign.Ptr
-import           Foreign.Storable
 import           GBC.Errors
 import           GBC.MBC.Interface
+import qualified Data.Vector.Storable.Mutable  as VSM
 
 mbc5 :: Int -> Int -> RAMAllocator -> IO MBC
 mbc5 bankMask ramMask ramAllocator = do
-  ramG                <- newIORef False
-  romB0               <- newIORef 1
-  romB1               <- newIORef 0
-  ramB                <- newIORef 0
-  (ram, ramPtrOffset) <- ramAllocator 0x40000
+  ramG            <- newIORef False
+  romB0           <- newIORef 1
+  romB1           <- newIORef 0
+  ramB            <- newIORef 0
+  ram             <- ramAllocator 0x40000
 
-  cachedROMOffset     <- newIORef 0x4000
+  cachedROMOffset <- newIORef 0x4000
 
   let updateROMOffset = do
         low  <- readIORef romB0
@@ -52,22 +50,19 @@ mbc5 bankMask ramMask ramAllocator = do
           enabled <- readIORef ramG
           unless enabled (throwIO (InvalidRead (address + 0xA000)))
         offset <- getRAMOffset
-        withForeignPtr ram
-          $ \ptr -> peekElemOff (ptr `plusPtr` ramPtrOffset) (offset + fromIntegral address)
-  let
-    writeRAM check address value = do
-      when check $ liftIO $ do
-        enabled <- readIORef ramG
-        unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-      offset <- getRAMOffset
-      withForeignPtr ram
-        $ \ptr -> pokeElemOff (ptr `plusPtr` ramPtrOffset) (offset + fromIntegral address) value
-  let withRAMPointer check address action = do
+        VSM.read ram (offset + fromIntegral address)
+  let writeRAM check address value = do
         when check $ liftIO $ do
           enabled <- readIORef ramG
           unless enabled (throwIO (InvalidWrite (address + 0xA000)))
         offset <- getRAMOffset
-        withForeignPtr ram (action . (`plusPtr` (ramPtrOffset + offset + fromIntegral address)))
+        VSM.write ram (offset + fromIntegral address) value
+  let sliceRAM check address size = do
+        when check $ liftIO $ do
+          enabled <- readIORef ramG
+          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
+        offset <- getRAMOffset
+        pure (VSM.slice (offset + fromIntegral address) size ram)
   let mbcRegisters = do
         g    <- readIORef ramG
         b0   <- readIORef romB0

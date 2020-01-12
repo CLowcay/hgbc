@@ -136,9 +136,11 @@ initGraphics vram mode frameBufferBytes portIF = mdo
     writePalette vram True ocps ocpd
     when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
     pure ocpd
-  portVBK <- newPort 0x00 0x01 $ \_ vbk -> do
-    setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
-    pure vbk
+  portVBK <- case mode of
+    DMG -> newPort 0x00 0x00 neverUpdate
+    CGB -> newPort 0x00 0x01 $ \_ vbk -> do
+      setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
+      pure vbk
 
   lineAssemblySpace    <- mallocForeignPtrBytes 160
   spritePriorityBuffer <- mallocForeignPtrBytes 160

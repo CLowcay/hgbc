@@ -46,7 +46,7 @@ startOutput sync = do
   frameBufferPointerRef <- newEmptyMVar
   void $ forkOS $ do
     void (SDL.glCreateContext window)
-    SDL.swapInterval $= SDL.SynchronizedUpdates 
+    SDL.swapInterval $= SDL.ImmediateUpdates 
     glState <- setUpOpenGL
     putMVar frameBufferPointerRef (frameTextureBufferBytes glState)
 
