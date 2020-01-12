@@ -20,6 +20,7 @@ import           GBC.CPU
 import           GBC.CPU.Decode
 import           GBC.CPU.ISA
 import           GBC.Graphics.VRAM
+import           GBC.MBC
 import           GBC.Memory
 import           GBC.Mode
 import           GBC.Primitive
@@ -27,6 +28,7 @@ import           GBC.ROM
 import           GBC.Registers
 import           Test.Hspec
 import qualified Data.ByteString               as B
+import qualified Data.Vector.Unboxed           as VU
 
 spec :: Spec
 spec = do
@@ -41,24 +43,25 @@ spec = do
   describe "BCD"            bcd
   describe "Interrupts"     interrupts
 
-blankROM :: ROM
-blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)
+romSizeInBytes = 32 * 1024 * 1024
 
-blankHeader :: Int -> Header
-blankHeader romSize = Header { startAddress          = 0
-                             , nintendoCharacterData = ""
-                             , gameTitle             = ""
-                             , gameCode              = ""
-                             , cgbSupport            = CGBCompatible
-                             , makerCode             = ""
-                             , sgbSupport            = GBOnly
-                             , cartridgeType         = CartridgeType Nothing False False
-                             , romSize               = romSize
-                             , externalRAM           = 0
-                             , destination           = Overseas
-                             , oldLicenseCode        = 0
-                             , maskROMVersion        = 0
-                             }
+blankROM = VU.replicate romSizeInBytes 0
+
+blankHeader :: Header
+blankHeader = Header { startAddress          = 0
+                     , nintendoCharacterData = ""
+                     , gameTitle             = ""
+                     , gameCode              = ""
+                     , cgbSupport            = CGBCompatible
+                     , makerCode             = ""
+                     , sgbSupport            = GBOnly
+                     , cartridgeType         = CartridgeType Nothing False False
+                     , romSize               = romSizeInBytes
+                     , externalRAM           = 0
+                     , destination           = Overseas
+                     , oldLicenseCode        = 0
+                     , maskROMVersion        = 0
+                     }
 
 data CPUTestState = CPUTestState {
     testCPU :: !CPUState
@@ -77,7 +80,8 @@ withNewCPU computation = mdo
   vram        <- initVRAM DMG
   portIF      <- newPort 0x00 0x1F alwaysUpdate
   portIE      <- newPort 0x00 0xFF alwaysUpdate
-  mem         <- initMemory blankROM vram ((IF, portIF) : cpuPorts cpu) portIE DMG
+  mbc         <- nullMBC
+  mem         <- initMemory blankROM blankHeader mbc vram ((IF, portIF) : cpuPorts cpu) portIE DMG
   extraCycles <- newIORef 0
   cpu <- initCPU portIF portIE DMG (\cycles clocksPerCycle -> modifyIORef' extraCycles (+ cycles))
   void $ runReaderT checkingFlags $ CPUTestState cpu mem extraCycles
@@ -270,7 +274,8 @@ withValuesInSSRegisters rvs computation = alteringSSRegisters (fst <$> rvs) $ do
   for_ rvs $ \(r, v) -> CPUM $ writeR16 r v
   computation
 
-withValuesInQQRegisters :: [(RegisterPushPop, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInQQRegisters
+  :: [(RegisterPushPop, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
 withValuesInQQRegisters rvs computation = alteringQQRegisters (fst <$> rvs) $ do
   for_ rvs $ \(r, v) -> CPUM $ writeR16pp r v
   computation

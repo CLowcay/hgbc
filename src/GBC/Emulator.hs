@@ -93,7 +93,7 @@ initEmulatorState rom graphicsSync frameBufferBytes = mdo
           ++ timerPorts timerState
           ++ audioPorts audioState
 
-  memory        <- initMemory rom vram allPorts portIE mode
+  memory        <- initMemoryForROM rom vram allPorts portIE mode
 
   hblankPending <- newIORef False
   currentTime   <- newUnboxedRef 0

@@ -5,6 +5,7 @@ module GBC.Memory
   ( Memory
   , HasMemory(..)
   , initMemory
+  , initMemoryForROM
   , getROMHeader
   , shouldCheckRAMAccess
   , getMbcRegisters
@@ -63,10 +64,27 @@ portOffset :: Word16 -> Int
 portOffset = subtract 0xFF00 . fromIntegral
 
 -- | The initial memory state.
-initMemory :: ROM -> VRAM -> [(Word16, Port Word8)] -> Port Word8 -> EmulatorMode -> IO Memory
-initMemory romInfo vram rawPorts portIE mode = do
-  let rom    = VU.fromList (B.unpack (romContent romInfo))
-  let header = romHeader romInfo
+initMemoryForROM :: ROM -> VRAM -> [(Word16, Port Word8)] -> Port Word8 -> EmulatorMode -> IO Memory
+initMemoryForROM romInfo vram ports portIE mode = do
+  mbc <- getMBC romInfo
+  initMemory (VU.fromList (B.unpack (romContent romInfo)))
+             (romHeader romInfo)
+             mbc
+             vram
+             ports
+             portIE
+             mode
+
+initMemory
+  :: VU.Vector Word8
+  -> Header
+  -> MBC
+  -> VRAM
+  -> [(Word16, Port Word8)]
+  -> Port Word8
+  -> EmulatorMode
+  -> IO Memory
+initMemory rom header mbc vram rawPorts portIE mode = do
   memRam        <- VUM.new 0x10000
   memHigh       <- VUM.new 0x80
   emptyPort     <- newPort 0xFF 0x00 neverUpdate
@@ -81,7 +99,6 @@ initMemory romInfo vram rawPorts portIE mode = do
                       (V.replicate 128 emptyPort)
                       (first portOffset <$> ((SVBK, svbk) : rawPorts))
 
-  mbc            <- getMBC romInfo
   checkRAMAccess <- newIORef False
   pure Memory { .. }
 
