@@ -127,24 +127,26 @@ dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
   liftIO $ case source .>>. 13 of
-    0 -> copyToOAM vram . VUM.slice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
-    1 -> copyToOAM vram . VUM.slice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
+    0 -> copyToOAM vram . VUM.unsafeSlice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
+    1 -> copyToOAM vram . VUM.unsafeSlice (fromIntegral source) oamSize =<< VU.unsafeThaw rom
     2 -> do
       bank <- bankOffset mbc
-      copyToOAM vram . VUM.slice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
+      copyToOAM vram . VUM.unsafeSlice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
     3 -> do
       bank <- bankOffset mbc
-      copyToOAM vram . VUM.slice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
+      copyToOAM vram . VUM.unsafeSlice (bank + offset 0x4000) oamSize =<< VU.unsafeThaw rom
     4 -> copyVRAMToOAM vram source
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       slice <- VS.unsafeFreeze =<< sliceRAM mbc check (source - 0xA000) oamSize
       copyToOAM vram =<< VU.unsafeThaw (VU.convert slice)
     6
-      | source < 0xD000 || mode == DMG -> copyToOAM vram (VUM.slice (offset 0xC000) oamSize memRam)
+      | source < 0xD000 || mode == DMG -> copyToOAM
+        vram
+        (VUM.unsafeSlice (offset 0xC000) oamSize memRam)
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
-        copyToOAM vram (VUM.slice (bank + offset 0xC000) oamSize memRam)
+        copyToOAM vram (VUM.unsafeSlice (bank + offset 0xC000) oamSize memRam)
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
 
@@ -154,25 +156,25 @@ readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
   liftIO $ case addr .>>. 13 of
-    0 -> pure (rom VU.! fromIntegral addr)
-    1 -> pure (rom VU.! fromIntegral addr)
+    0 -> pure (rom `VU.unsafeIndex` fromIntegral addr)
+    1 -> pure (rom `VU.unsafeIndex` fromIntegral addr)
     2 -> do
       bank <- bankOffset mbc
-      pure (rom VU.! (bank + offset 0x4000))
+      pure (rom `VU.unsafeIndex` (bank + offset 0x4000))
     3 -> do
       bank <- bankOffset mbc
-      pure (rom VU.! (bank + offset 0x4000))
+      pure (rom `VU.unsafeIndex` (bank + offset 0x4000))
     4 -> readVRAM vram addr
     5 -> do
       check <- liftIO (readIORef checkRAMAccess)
       readRAM mbc check (addr - 0xA000)
     6
-      | addr < 0xD000 || mode == DMG -> VUM.read memRam (offset 0xC000)
+      | addr < 0xD000 || mode == DMG -> VUM.unsafeRead memRam (offset 0xC000)
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
-        VUM.read memRam (bank + offset 0xC000)
+        VUM.unsafeRead memRam (bank + offset 0xC000)
     7
-      | addr < 0xFE00 -> VUM.read memRam (offset 0xE000)
+      | addr < 0xFE00 -> VUM.unsafeRead memRam (offset 0xE000)
       | addr < 0xFEA0 -> do
         value <- readOAM vram addr
         pure (fromIntegral value)
@@ -181,7 +183,7 @@ readByte addr = do
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
       | addr == IE -> liftIO $ readPort portIE
-      | otherwise -> VUM.read memHigh (offset 0xFF80)
+      | otherwise -> VUM.unsafeRead memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 
@@ -213,19 +215,19 @@ writeByte addr value = do
       check <- liftIO (readIORef checkRAMAccess)
       writeRAM mbc check (addr - 0xA000) value
     6
-      | addr < 0xD000 || mode == DMG -> VUM.write memRam (offset 0xC000) value
+      | addr < 0xD000 || mode == DMG -> VUM.unsafeWrite memRam (offset 0xC000) value
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
-        VUM.write memRam (bank + offset 0xC000) value
+        VUM.unsafeWrite memRam (bank + offset 0xC000) value
     7
-      | addr < 0xFE00 -> VUM.write memRam (offset 0xE000) value
+      | addr < 0xFE00 -> VUM.unsafeWrite memRam (offset 0xE000) value
       | addr < 0xFEA0 -> writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
       | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
       | addr == IE -> liftIO $ writePort portIE value
-      | otherwise -> VUM.write memHigh (offset 0xFF80) value
+      | otherwise -> VUM.unsafeWrite memHigh (offset 0xFF80) value
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 

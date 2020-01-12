@@ -183,21 +183,21 @@ setMode mode = do
 getRegisterFile :: HasCPU env => ReaderT env IO RegisterFile
 getRegisterFile = do
   CPUState {..} <- asks forCPUState
-  liftIO $ VSM.read registers 0
+  liftIO $ VSM.unsafeRead registers 0
 
 -- | Read data from the register file.
 {-# INLINE readRegister #-}
 readRegister :: (HasCPU env, Storable a) => Int -> ReaderT env IO a
 readRegister offset = do
   CPUState {..} <- asks forCPUState
-  liftIO $ VSM.read (VSM.unsafeCast registers) offset
+  liftIO $ VSM.unsafeRead (VSM.unsafeCast registers) offset
 
 -- | Write data to the register file.
 {-# INLINE writeRegister #-}
 writeRegister :: (HasCPU env, Storable a) => Int -> a -> ReaderT env IO ()
 writeRegister offset value = do
   CPUState {..} <- asks forCPUState
-  liftIO $ VSM.write (VSM.unsafeCast registers) offset value
+  liftIO $ VSM.unsafeWrite (VSM.unsafeCast registers) offset value
 
 -- | Read a single register.
 {-# INLINABLE readR8 #-}

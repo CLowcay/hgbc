@@ -66,19 +66,19 @@ mbc1 bankMask ramMask ramAllocator = do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidRead (address + 0xA000)))
         offset <- readIORef cachedRAMOffset
-        VSM.read ram (offset + fromIntegral address)
+        VSM.unsafeRead ram (offset + fromIntegral address)
   let writeRAM check address value = do
         when check $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidWrite (address + 0xA000)))
         offset <- readIORef cachedRAMOffset
-        VSM.write ram (offset + fromIntegral address) value
+        VSM.unsafeWrite ram (offset + fromIntegral address) value
   let sliceRAM check address size = do
         when check $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidAccess (address + 0xA000)))
         offset <- readIORef cachedRAMOffset
-        pure (VSM.slice (offset + fromIntegral address) size ram)
+        pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   let mbcRegisters = do
         r1 <- readIORef romOffset
         r2 <- readIORef ramOffset

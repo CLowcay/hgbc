@@ -77,20 +77,20 @@ paletteIndex fg addr = (if fg then 8 * 4 else 0) + fromIntegral addr .&. 0x1F
 {-# INLINE writePalette #-}
 writePalette :: VRAM -> Bool -> Word8 -> Word8 -> IO ()
 writePalette VRAM {..} fg cps cpd = do
-  VSM.write (VSM.unsafeCast rawPalettes) (paletteByte fg cps) cpd
+  VSM.unsafeWrite (VSM.unsafeCast rawPalettes) (paletteByte fg cps) cpd
   let i = paletteIndex fg (cps .>>. 1)
-  raw <- VSM.read rawPalettes i
-  VUM.write rgbPalettes i (encodeColor raw)
+  raw <- VSM.unsafeRead rawPalettes i
+  VUM.unsafeWrite rgbPalettes i (encodeColor raw)
 
 -- | Read a palette given the value of the cps register.
 {-# INLINE readPalette #-}
 readPalette :: VRAM -> Bool -> Word8 -> IO Word8
-readPalette VRAM {..} fg cps = VSM.read (VSM.unsafeCast rawPalettes) (paletteByte fg cps)
+readPalette VRAM {..} fg cps = VSM.unsafeRead (VSM.unsafeCast rawPalettes) (paletteByte fg cps)
 
 -- | Read a decoded RGB palette with the given 5-bit address
 {-# INLINE readRGBPalette #-}
 readRGBPalette :: VRAM -> Bool -> Word8 -> IO Word32
-readRGBPalette VRAM {..} fg addr = VUM.read rgbPalettes (paletteIndex fg addr)
+readRGBPalette VRAM {..} fg addr = VUM.unsafeRead rgbPalettes (paletteIndex fg addr)
 
 encodeColor :: Word16 -> Word32
 encodeColor color =
@@ -112,47 +112,47 @@ cgbColors (r, g, b) =
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)
 readSpritePosition VRAM {..} i = do
-  y <- VUM.read oam i
-  x <- VUM.read oam (i + 1)
+  y <- VUM.unsafeRead oam i
+  x <- VUM.unsafeRead oam (i + 1)
   pure (y, x)
 
 {-# INLINE readSpriteAttributes #-}
 readSpriteAttributes :: VRAM -> Int -> IO (Word8, Word8)
 readSpriteAttributes VRAM {..} i = do
-  c <- VUM.read oam (i + 2)
-  a <- VUM.read oam (i + 3)
+  c <- VUM.unsafeRead oam (i + 2)
+  a <- VUM.unsafeRead oam (i + 3)
   pure (c, a)
 
 {-# INLINE readTile #-}
 readTile :: VRAM -> Int -> Int -> IO Word8
-readTile VRAM {..} area tile = VUM.read vram (area + tile)
+readTile VRAM {..} area tile = VUM.unsafeRead vram (area + tile)
 
 -- WARNING: DO NOT CALL unless running in DMG mode.
 {-# INLINE readTileAttrs #-}
 readTileAttrs :: VRAM -> Int -> Int -> IO Word8
-readTileAttrs VRAM {..} area tile = VUM.read vram (area + tile + 0x2000)
+readTileAttrs VRAM {..} area tile = VUM.unsafeRead vram (area + tile + 0x2000)
 
 {-# INLINE readTileData #-}
 readTileData :: VRAM -> Int -> IO (Word8, Word8)
 readTileData VRAM {..} tile = do
-  b0 <- VUM.read vram tile
-  b1 <- VUM.read vram (tile + 1)
+  b0 <- VUM.unsafeRead vram tile
+  b1 <- VUM.unsafeRead vram (tile + 1)
   pure (b0, b1)
 
 {-# INLINE readBankedTileData #-}
 readBankedTileData :: VRAM -> Int -> IO (Word8, Word8)
 readBankedTileData VRAM {..} tile = do
-  b0 <- VUM.read vram (tile + 0x2000)
-  b1 <- VUM.read vram (tile + 1 + 0x2000)
+  b0 <- VUM.unsafeRead vram (tile + 0x2000)
+  b1 <- VUM.unsafeRead vram (tile + 1 + 0x2000)
   pure (b0, b1)
 
 {-# INLINE readOAM #-}
 readOAM :: VRAM -> Word16 -> IO Word8
-readOAM VRAM {..} addr = VUM.read oam (fromIntegral (addr - 0xFE00))
+readOAM VRAM {..} addr = VUM.unsafeRead oam (fromIntegral (addr - 0xFE00))
 
 {-# INLINE writeOAM #-}
 writeOAM :: VRAM -> Word16 -> Word8 -> IO ()
-writeOAM VRAM {..} addr = VUM.write oam (fromIntegral (addr - 0xFE00))
+writeOAM VRAM {..} addr = VUM.unsafeWrite oam (fromIntegral (addr - 0xFE00))
 
 {-# INLINE readVRAM #-}
 readVRAM :: VRAM -> Word16 -> IO Word8
@@ -162,7 +162,7 @@ readVRAM VRAM {..} addr = do
     then pure 0xFF
     else do
       bankOffset <- readUnboxedRef vramBank
-      VUM.read vram (fromIntegral (addr - 0x8000) + bankOffset)
+      VUM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
 
 {-# INLINE writeVRAM #-}
 writeVRAM :: VRAM -> Word16 -> Word8 -> IO ()
@@ -172,14 +172,15 @@ writeVRAM VRAM {..} addr value = do
     then pure ()
     else do
       bankOffset <- readUnboxedRef vramBank
-      VUM.write vram (fromIntegral (addr - 0x8000) + bankOffset) value
+      VUM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
 
 -- Copy a slice of memory into OAM.  The slice MUST have length 160.
 {-# INLINE copyToOAM #-}
 copyToOAM :: VRAM -> VUM.IOVector Word8 -> IO ()
-copyToOAM VRAM {..} = VUM.move oam
+copyToOAM VRAM {..} = VUM.unsafeMove oam
 
 -- DMA from VRAM to OAM does not respect the VRAM bank according to the docs.
 {-# INLINE copyVRAMToOAM #-}
 copyVRAMToOAM :: VRAM -> Word16 -> IO ()
-copyVRAMToOAM VRAM {..} from = VUM.move oam (VUM.slice (fromIntegral from - 0x8000) 160 vram)
+copyVRAMToOAM VRAM {..} from =
+  VUM.unsafeMove oam (VUM.unsafeSlice (fromIntegral from - 0x8000) 160 vram)

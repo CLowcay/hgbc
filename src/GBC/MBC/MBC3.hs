@@ -46,7 +46,7 @@ mbc3 bankMask ramMask ramAllocator rtc = do
         r2 <- readIORef register2
         if r2 >= 8 && r2 <= 0xC
           then readRTC rtc r2
-          else VSM.read ram (getRAMOffset r2 + fromIntegral address)
+          else VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
   let writeRAM check address value = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
@@ -54,13 +54,13 @@ mbc3 bankMask ramMask ramAllocator rtc = do
         r2 <- readIORef register2
         if r2 >= 8 && r2 <= 0xC
           then writeRTC rtc r2 value
-          else VSM.write ram (getRAMOffset r2 + fromIntegral address) value
+          else VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
   let sliceRAM check address size = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidAccess (address + 0xA000)))
         offset <- getRAMOffset <$> readIORef register2
-        pure (VSM.slice (offset + fromIntegral address) size ram)
+        pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   let mbcRegisters = do
         r1 <- readIORef romOffset
         r2 <- readIORef register2

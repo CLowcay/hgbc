@@ -26,8 +26,8 @@ nullMBC = do
   ram <- VSM.new 0x2000
   pure MBC { bankOffset   = pure 0x4000
            , writeROM     = \_ _ -> pure ()
-           , readRAM      = \_ address -> VSM.read ram (fromIntegral address)
-           , writeRAM     = \_ address value -> VSM.write ram (fromIntegral address) value
+           , readRAM      = \_ address -> VSM.unsafeRead ram (fromIntegral address)
+           , writeRAM     = \_ address value -> VSM.unsafeWrite ram (fromIntegral address) value
            , sliceRAM     = \_ address size -> pure (VSM.slice (fromIntegral address) size ram)
            , mbcRegisters = pure []
            }
