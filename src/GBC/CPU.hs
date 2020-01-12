@@ -54,7 +54,6 @@ import           Data.IORef
 import           Data.Int
 import           Data.Maybe
 import           Data.Word
-import           Foreign.ForeignPtr
 import           Foreign.Storable
 import           GBC.CPU.Decode
 import           GBC.CPU.ISA
@@ -66,24 +65,25 @@ import           GBC.Primitive
 import           GBC.Primitive.UnboxedRef
 import           GBC.Registers
 import qualified Data.Vector                   as V
+import qualified Data.Vector.Storable.Mutable  as VSM
 
 -- | The register file.
 data RegisterFile = RegisterFile {
-    regA :: !Word8
-  , regB :: !Word8
+    regF :: !Word8
+  , regA :: !Word8
   , regC :: !Word8
-  , regD :: !Word8
+  , regB :: !Word8
   , regE :: !Word8
-  , regF :: !Word8
-  , regH :: !Word8
+  , regD :: !Word8
   , regL :: !Word8
+  , regH :: !Word8
   , regSP :: !Word16
   , regPC :: !Word16
   , regHidden :: !Word16
 } deriving (Eq, Ord, Show)
 
 offsetF, offsetA, offsetC, offsetB :: Int
-offsetE, offsetD, offsetL, offsetH, offsetPC, offsetSP, offsetHidden :: Int
+offsetE, offsetD, offsetL, offsetH :: Int
 offsetF = 0
 offsetA = 1
 offsetC = 2
@@ -92,9 +92,16 @@ offsetE = 4
 offsetD = 5
 offsetL = 6
 offsetH = 7
-offsetPC = 8
-offsetSP = 10
-offsetHidden = 12
+
+offsetAF, offsetBC, offsetDE, offsetHL :: Int
+offsetPC, offsetSP, offsetHidden :: Int
+offsetAF = 0
+offsetBC = 1
+offsetDE = 2
+offsetHL = 3
+offsetSP = 4
+offsetPC = 5
+offsetHidden = 6
 
 instance Storable RegisterFile where
   sizeOf _ = 14
@@ -132,7 +139,7 @@ data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded
 data CPUState = CPUState {
     cpuType        :: !EmulatorMode
   , busCatchup     :: BusCatchupFunction
-  , registers      :: !(ForeignPtr RegisterFile)
+  , registers      :: !(VSM.IOVector RegisterFile)
   , portIF         :: !(Port Word8)
   , portIE         :: !(Port Word8)
   , portKEY1       :: !(Port Word8)
@@ -148,7 +155,7 @@ type BusCatchupFunction = Int -> Int -> IO ()
 -- | Initialize a new CPU.
 initCPU :: Port Word8 -> Port Word8 -> EmulatorMode -> BusCatchupFunction -> IO CPUState
 initCPU portIF portIE cpuType busCatchup = do
-  registers      <- mallocForeignPtr
+  registers      <- VSM.new 1
   portKEY1       <- newPort 0x00 0x01 alwaysUpdate
   cpuMode        <- newIORef ModeNormal
   cpuCycleClocks <- newUnboxedRef 4
@@ -176,21 +183,21 @@ setMode mode = do
 getRegisterFile :: HasCPU env => ReaderT env IO RegisterFile
 getRegisterFile = do
   CPUState {..} <- asks forCPUState
-  liftIO $ withForeignPtr registers peek
+  liftIO $ VSM.read registers 0
 
 -- | Read data from the register file.
 {-# INLINE readRegister #-}
 readRegister :: (HasCPU env, Storable a) => Int -> ReaderT env IO a
 readRegister offset = do
   CPUState {..} <- asks forCPUState
-  liftIO $ withForeignPtr registers $ flip peekByteOff offset
+  liftIO $ VSM.read (VSM.unsafeCast registers) offset
 
 -- | Write data to the register file.
 {-# INLINE writeRegister #-}
 writeRegister :: (HasCPU env, Storable a) => Int -> a -> ReaderT env IO ()
 writeRegister offset value = do
   CPUState {..} <- asks forCPUState
-  liftIO $ withForeignPtr registers $ \ptr -> pokeByteOff ptr offset value
+  liftIO $ VSM.write (VSM.unsafeCast registers) offset value
 
 -- | Read a single register.
 {-# INLINABLE readR8 #-}
@@ -224,9 +231,9 @@ writeR16 register = writeRegister $ offsetR16 register
 
 -- | Get the offset in the register file of a register pair.
 offsetR16 :: Register16 -> Int
-offsetR16 RegBC = offsetC
-offsetR16 RegDE = offsetE
-offsetR16 RegHL = offsetL
+offsetR16 RegBC = offsetBC
+offsetR16 RegDE = offsetDE
+offsetR16 RegHL = offsetHL
 offsetR16 RegSP = offsetSP
 
 -- | Read a 16-bit register.
@@ -242,10 +249,10 @@ writeR16pp register  v = writeRegister (offsetR16pp register) v
 
 -- | Get the offset in the register file of a register pair.
 offsetR16pp :: RegisterPushPop -> Int
-offsetR16pp PushPopBC = offsetC
-offsetR16pp PushPopDE = offsetE
-offsetR16pp PushPopHL = offsetL
-offsetR16pp PushPopAF = offsetF
+offsetR16pp PushPopBC = offsetBC
+offsetR16pp PushPopDE = offsetDE
+offsetR16pp PushPopHL = offsetHL
+offsetR16pp PushPopAF = offsetAF
 
 -- | Read the PC register.
 {-# INLINABLE readPC #-}
@@ -366,43 +373,43 @@ reset = do
   setIME
   writePC 0x100
 
-  writeByte P1   0xFF
-  writeByte TIMA 0x00
-  writeByte TMA  0x00
-  writeByte TAC  0x00
-  writeByte NR10 0x00
-  writeByte NR11 0xBF
-  writeByte NR12 0xF3
-  writeByte NR13 0x00
-  writeByte NR14 0x00
-  writeByte NR21 0x00
-  writeByte NR22 0x00
-  writeByte NR23 0x00
-  writeByte NR24 0x00
-  writeByte NR30 0x00
-  writeByte NR31 0x00
-  writeByte NR32 0x00
-  writeByte NR33 0x00
-  writeByte NR34 0x00
-  writeByte NR41 0x00
-  writeByte NR42 0x00
-  writeByte NR43 0x00
-  writeByte NR44 0x00
-  writeByte NR50 0x77
-  writeByte NR51 0xF3
-  writeByte NR52 0xF1
-  writeByte LCDC 0x91
-  writeByte SCY  0x00
-  writeByte SCX  0x00
-  writeByte LYC  0x00
-  writeByte BGP  0xFC
-  writeByte OBP0 0xFF
-  writeByte OBP1 0xFF
-  writeByte WY   0x00
-  writeByte WX   0x00
-  writeByte IE   0x00
-  writeByte IF   0x00
-  
+  writeByte P1     0xFF
+  writeByte TIMA   0x00
+  writeByte TMA    0x00
+  writeByte TAC    0x00
+  writeByte NR10   0x00
+  writeByte NR11   0xBF
+  writeByte NR12   0xF3
+  writeByte NR13   0x00
+  writeByte NR14   0x00
+  writeByte NR21   0x00
+  writeByte NR22   0x00
+  writeByte NR23   0x00
+  writeByte NR24   0x00
+  writeByte NR30   0x00
+  writeByte NR31   0x00
+  writeByte NR32   0x00
+  writeByte NR33   0x00
+  writeByte NR34   0x00
+  writeByte NR41   0x00
+  writeByte NR42   0x00
+  writeByte NR43   0x00
+  writeByte NR44   0x00
+  writeByte NR50   0x77
+  writeByte NR51   0xF3
+  writeByte NR52   0xF1
+  writeByte LCDC   0x91
+  writeByte SCY    0x00
+  writeByte SCX    0x00
+  writeByte LYC    0x00
+  writeByte BGP    0xFC
+  writeByte OBP0   0xFF
+  writeByte OBP1   0xFF
+  writeByte WY     0x00
+  writeByte WX     0x00
+  writeByte IE     0x00
+  writeByte IF     0x00
+
   -- Wave memory
   writeByte 0xFF30 0x00
   writeByte 0xFF31 0xFF
