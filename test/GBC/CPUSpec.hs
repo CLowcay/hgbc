@@ -28,7 +28,7 @@ import           GBC.ROM
 import           GBC.Registers
 import           Test.Hspec
 import qualified Data.ByteString               as B
-import qualified Data.Vector.Unboxed           as VU
+import qualified Data.Vector.Storable          as VS
 
 spec :: Spec
 spec = do
@@ -45,7 +45,7 @@ spec = do
 
 romSizeInBytes = 32 * 1024 * 1024
 
-blankROM = VU.replicate romSizeInBytes 0
+blankROM = VS.replicate romSizeInBytes 0
 
 blankHeader :: Header
 blankHeader = Header { startAddress          = 0
