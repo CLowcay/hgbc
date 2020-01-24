@@ -74,7 +74,7 @@ initEmulatorState rom graphicsSync frameBufferBytes = mdo
   breakFlag     <- newIORef False
   vram          <- initVRAM mode
 
-  portIF        <- newPort 0x00 0x1F alwaysUpdate
+  portIF        <- newPort 0xE0 0x1F alwaysUpdate
   portIE        <- newPort 0x00 0xFF alwaysUpdate
 
   cpu           <- initCPU portIF portIE mode (makeCatchupFunction emulatorState)

@@ -145,6 +145,7 @@ data CPUState = CPUState {
   , portKEY1       :: !(Port Word8)
   , cpuMode        :: !(IORef CPUMode)
   , cpuCycleClocks :: !(UnboxedRef Int)
+  , haltBug        :: !(IORef Bool)
 }
 
 class HasMemory env => HasCPU env where
@@ -159,6 +160,7 @@ initCPU portIF portIE cpuType busCatchup = do
   portKEY1       <- newPort 0x00 0x01 alwaysUpdate
   cpuMode        <- newIORef ModeNormal
   cpuCycleClocks <- newUnboxedRef 4
+  haltBug        <- newIORef False
   pure CPUState { .. }
 
 cpuPorts :: CPUState -> [(Word16, Port Word8)]
@@ -285,6 +287,10 @@ allExceptN = flagH .|. flagCY .|. flagZ
 flagIME :: Word16
 flagIME = 0x0100
 
+{-# INLINABLE flagSetIME #-}
+flagSetIME :: Word16
+flagSetIME = 0x0200
+
 -- | Check if a flag is set.
 {-# INLINE testFlag #-}
 testFlag :: HasCPU env => Flag -> ReaderT env IO Bool
@@ -339,6 +345,19 @@ clearIME :: HasCPU env => ReaderT env IO ()
 clearIME = do
   ime <- readRegister offsetHidden
   writeRegister offsetHidden (ime .&. complement flagIME)
+
+{-# INLINE setIMENext #-}
+setIMENext :: HasCPU env => ReaderT env IO ()
+setIMENext = do
+  ime <- readRegister offsetHidden
+  writeRegister offsetHidden (ime .|. flagSetIME)
+
+{-# INLINE updateIME #-}
+updateIME :: HasCPU env => ReaderT env IO ()
+updateIME = do
+  ime <- readRegister offsetHidden
+  when (ime .&. flagSetIME /= 0)
+    $ writeRegister offsetHidden ((ime .|. flagIME) .&. complement flagSetIME)
 
 -- | Check the status of the interrupt flag.
 {-# INLINE testIME #-}
@@ -485,21 +504,22 @@ cpuStep = do
   -- Check if we have an interrupt
   interrupts    <- liftIO $ pendingEnabledInterrupts portIF portIE
   ime           <- testIME
+  updateIME
 
   -- Deal with HALT mode
-  mode          <- liftIO (readIORef cpuMode)
+  mode <- liftIO (readIORef cpuMode)
   case mode of
     ModeNormal -> if interrupts /= 0 && ime then handleInterrupt interrupts else executeInstruction
     ModeHalt   -> if interrupts /= 0
       then do
         liftIO (writeIORef cpuMode ModeNormal)
-        cpuStep
-      else pure 8
+        if ime then handleInterrupt interrupts else executeInstruction
+      else pure 4
     ModeStop -> if interrupts /= 0
       then do
         liftIO (writeIORef cpuMode ModeNormal)
-        cpuStep
-      else pure 8
+        if ime then handleInterrupt interrupts else executeInstruction
+      else pure 4
 
  where
   handleInterrupt interrupts = do
@@ -511,7 +531,7 @@ cpuStep = do
     clearIME
     CPUState {..} <- asks forCPUState
     liftIO $ clearInterrupt portIF nextInterrupt
-    pure 4  -- TODO: Number of clocks here is just a guess
+    pure 5
 
 {-# INLINE getCPUCycleClocks #-}
 getCPUCycleClocks :: HasCPU env => ReaderT env IO Int
@@ -537,13 +557,11 @@ newtype CPUM env a = CPUM {runCPUM :: ReaderT env IO a}
 
 instance HasCPU env => MonadFetch (CPUM env) where
   nextByte = CPUM $ do
-    pc <- readPC
-    writePC (pc + 1)
+    pc            <- readPC
+    CPUState {..} <- asks forCPUState
+    doHaltBug     <- liftIO $ readIORef haltBug
+    if doHaltBug then liftIO $ writeIORef haltBug False else writePC (pc + 1)
     readByte pc
-  nextWord = CPUM $ do
-    pc <- readPC
-    writePC (pc + 2)
-    readWord pc
 
 instance HasCPU env => MonadGMBZ80 (CPUM env) where
   type ExecuteResult (CPUM env) = Int
@@ -1030,10 +1048,16 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     clearIME
     pure 1
   ei = CPUM $ do
-    setIME
+    setIMENext
     pure 1
   halt = CPUM $ do
-    setMode ModeHalt
+    ime <- testIME
+    if not ime
+      then do
+        CPUState {..} <- asks forCPUState
+        interrupts    <- liftIO $ pendingEnabledInterrupts portIF portIE
+        if interrupts == 0 then setMode ModeHalt else liftIO $ writeIORef haltBug True
+      else setMode ModeHalt
     pure 1
   stop = CPUM $ do
     CPUState {..} <- asks forCPUState
