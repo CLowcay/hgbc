@@ -1574,13 +1574,48 @@ miscellaneous = do
       expectIME False
 
   describe "EI" $ for_ [True, False] $ \ime0 ->
-    it ("Works for EI ; IME = " <> show ime0) $ withNewCPU $ withIME ime0 $ do
+    it ("Works for EI ; IME = " <> show ime0) $ withNewCPU $ withPC 0x4001 $ withIME ime0 $ do
       ei `shouldHaveCycles` 1
+      expectIME ime0
+      CPUM cpuStep `shouldHaveCycles` 1
       expectIME True
 
-  describe "HALT" $ it "Enters salt mode" $ withNewCPU $ alteringMode $ do
-    halt `shouldHaveCycles` 1
-    expectMode ModeHalt
+  describe "HALT" $ do
+    for_ [True, False] $ \ime0 ->
+      it ("Enters halt mode when IF = IE = 0 and IME = " <> show ime0)
+        $ withNewCPU
+        $ alteringMode
+        $ withIME ime0
+        $ do
+            halt `shouldHaveCycles` 1
+            expectMode ModeHalt
+    it "Enters halt mode when IF & IE /= 0 and IME = True"
+      $ withNewCPU
+      $ alteringMode
+      $ withIME True
+      $ do
+          CPUM $ do
+            writeByte IE 1
+            writeByte IF 1
+          halt `shouldHaveCycles` 1
+          expectMode ModeHalt
+    it "Bugs out when IF & IE /= 0 and IME = False"
+      $ withNewCPU
+      $ withValuesInRegisters [(RegA, 0)]
+      $ withPC 0xC000
+      $ withIME False
+      $ alteringFlags (flagZ .|. flagN .|. flagH)
+      $ do
+          CPUM $ do
+            writeByte IE     1
+            writeByte IF     1
+            writeByte 0xC000 0x3C -- INC A
+          halt `shouldHaveCycles` 1
+          CPUM cpuStep `shouldHaveCycles` 1
+          CPUM cpuStep `shouldHaveCycles` 1
+          CPUM cpuStep `shouldHaveCycles` 1
+          RegA `registerShouldBe` 2
+          expectFlags (flagZ .|. flagN .|. flagH) 0
 
   describe "STOP" $ do
     it "Enters stop mode" $ withNewCPU $ alteringMode $ do
@@ -1651,6 +1686,8 @@ bcd = do
 
 data InterruptBehavior = Trigger | Ignore | Wakeup deriving (Eq, Show)
 
+isrClocks = 5
+
 interrupts :: Spec
 interrupts = do
   describe "Interrupt triggering"
@@ -1678,9 +1715,9 @@ interrupts = do
               CPUM $ writeByte IE (if enabled then bit vector else 0)
               cycles <- CPUM cpuStep
               liftIO $ cycles `shouldBe` case behavior of
-                Trigger -> 4
+                Trigger -> isrClocks
                 Wakeup  -> 1
-                Ignore  -> if mode == ModeNormal then 1 else 8
+                Ignore  -> if mode == ModeNormal then 1 else 4
 
               case behavior of
                 Trigger -> do
@@ -1735,7 +1772,7 @@ interrupts = do
             writeByte IF (bit l .|. bit r)
             writeByte IE (bit l .|. bit r)
             cycles <- cpuStep
-            liftIO (cycles `shouldBe` 4)
+            liftIO (cycles `shouldBe` isrClocks)
           RegSP `register16ShouldBe` 0xFFEE
           0xFFEE `atAddressShouldBe` 0x01
           0xFFEF `atAddressShouldBe` 0x40
