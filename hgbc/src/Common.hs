@@ -26,6 +26,7 @@ infixl 8 .>>.
 (.>>.) :: Bits a => a -> Int -> a
 (.>>.) = unsafeShiftR
 
+{-# INLINE isFlagSet #-}
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 

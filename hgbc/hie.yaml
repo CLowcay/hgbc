@@ -2,7 +2,5 @@ cradle:
   stack:
     - path: "./test"
       component: "hgbc:test:hgbc-test"
-    - path: "./app"
-      component: "hgbc:exe:hgbc"
     - path: "."
       component: "hgbc:lib"

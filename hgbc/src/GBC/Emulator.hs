@@ -32,7 +32,6 @@ import           GBC.Primitive.UnboxedRef
 import           GBC.ROM
 import           GBC.Registers
 import           GBC.Timer
-import           SDL.Orphans                    ( )
 import qualified SDL
 
 data EmulatorState = EmulatorState {
