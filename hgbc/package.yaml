@@ -20,8 +20,6 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
-- OpenGLRaw
-- StateVar
 - base >= 4.7 && < 5
 - binary
 - bytestring
@@ -31,7 +29,6 @@ dependencies:
 - mtl
 - resourcet
 - primitive
-- sdl2
 - time
 - unordered-containers
 - vector

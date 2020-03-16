@@ -9,13 +9,10 @@ module GBC.Emulator
   , clearBreakFlag
   , getEmulatorClock
   , step
-  , handleEvents
   )
 where
 
-import           Control.Concurrent.MVar
 import           Control.Monad.Reader
-import           Data.Foldable
 import           Data.IORef
 import           Data.Word
 import           Foreign.Ptr
@@ -32,7 +29,6 @@ import           GBC.Primitive.UnboxedRef
 import           GBC.ROM
 import           GBC.Registers
 import           GBC.Timer
-import qualified SDL
 
 data EmulatorState = EmulatorState {
     mode            :: !EmulatorMode
@@ -58,10 +54,6 @@ instance HasMemory EmulatorState where
 instance HasCPU EmulatorState where
   {-# INLINE forCPUState #-}
   forCPUState = cpu
-
--- | Number of clocks to wait between polling for events.
-pollDelay :: Int
-pollDelay = 40000
 
 -- | Create an initial bus state.
 initEmulatorState :: ROM -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
@@ -109,35 +101,6 @@ isBreakFlagSet = liftIO . readIORef . breakFlag =<< ask
 clearBreakFlag :: ReaderT EmulatorState IO ()
 clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< ask
 
--- | Close all windows.
-killWindows :: ReaderT EmulatorState IO ()
-killWindows = do
-  sync <- asks graphicsSync
-  liftIO (putMVar (signalWindow sync) Quit)
-  pure ()
-
--- | Poll and dispatch events.
-handleEvents :: ReaderT EmulatorState IO ()
-handleEvents = do
-  events      <- SDL.pollEvents
-  keypadState <- asks keypadState
-  liftIO $ keypadHandleUserEvents keypadState events
-  for_ (SDL.eventPayload <$> events) $ \case
-    (SDL.WindowClosedEvent _) -> killWindows
-    SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodeK _)) ->
-      liftIO . flip writeIORef True . breakFlag =<< ask
-    SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Released _ (SDL.Keysym _ SDL.KeycodePause _)) ->
-      liftIO . flip writeIORef True . breakFlag =<< ask
-    _ -> pure ()
-
-pollEvents :: Int -> ReaderT EmulatorState IO ()
-pollEvents now = do
-  EmulatorState {..} <- ask
-  lastPoll           <- liftIO $ readUnboxedRef lastEventPoll
-  when (now - lastPoll > pollDelay) $ do
-    handleEvents
-    liftIO $ writeUnboxedRef lastEventPoll now
-
 -- | Get the number of clocks since the emulator started.
 getEmulatorClock :: ReaderT EmulatorState IO Int
 getEmulatorClock = do
@@ -148,12 +111,10 @@ getEmulatorClock = do
 step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
-
   cycles             <- cpuStep
   now                <- liftIO $ readUnboxedRef currentTime
-  pollEvents now
 
-  cycleClocks <- getCPUCycleClocks
+  cycleClocks        <- getCPUCycleClocks
   let cpuClocks = cycles * cycleClocks
 
   graphicsEvent   <- updateHardware cycles cpuClocks
@@ -177,7 +138,7 @@ step = do
             HBlankEvent -> doPendingHBlankDMA
 
 makeCatchupFunction :: EmulatorState -> Int -> Int -> IO ()
-makeCatchupFunction emulatorState@EmulatorState {..} = \cycles clocksPerCycle ->
+makeCatchupFunction emulatorState@EmulatorState {..} cycles clocksPerCycle =
   let cpuClocks = cycles * clocksPerCycle
   in  do
         graphicsEvent <- runReaderT (updateHardware cycles cpuClocks) emulatorState

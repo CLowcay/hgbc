@@ -6,8 +6,6 @@ module GBC.Audio
   ( AudioState(..)
   , initAudioState
   , audioPorts
-  , enableAudioOut
-  , disableAudioOut
   , audioStep
   )
 where
@@ -18,33 +16,15 @@ import           Data.Bifunctor
 import           Data.Bits
 import           Data.Functor
 import           Data.Word
-import           Foreign.C.Types
-import           Foreign.Marshal.Alloc
-import           Foreign.Marshal.Array
-import           Foreign.Ptr
-import           Foreign.Storable
 import           GBC.Audio.Common
 import           GBC.Audio.NoiseChannel
 import           GBC.Audio.PulseChannel
 import           GBC.Audio.WaveChannel
 import           GBC.Primitive
 import           GBC.Registers
-import qualified SDL.Raw
-
-desiredAudioSpec :: SDL.Raw.AudioCallback -> SDL.Raw.AudioSpec
-desiredAudioSpec callback = SDL.Raw.AudioSpec { audioSpecFreq     = 44100
-                                              , audioSpecFormat   = SDL.Raw.SDL_AUDIO_U8
-                                              , audioSpecChannels = 2
-                                              , audioSpecSilence  = 0
-                                              , audioSpecSamples  = 1024
-                                              , audioSpecSize     = 0
-                                              , audioSpecCallback = callback
-                                              , audioSpecUserdata = nullPtr
-                                              }
 
 data AudioState = AudioState {
-    audioDevice    :: !SDL.Raw.AudioDeviceID
-  , audioOut       :: !(RingBuffer Word16)
+    audioOut       :: !(RingBuffer Word16)
   , sampler        :: !Counter
   , frameSequencer :: !(StateCycle FrameSequencerOutput)
   , port50         :: !(Port Word8)
@@ -62,11 +42,6 @@ frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 8192)
 initAudioState :: IO AudioState
 initAudioState = mdo
   audioOut       <- newRingBuffer 12
-
-  pAudioCallback <- SDL.Raw.mkAudioCallback (audioCallback audioOut)
-  audioDevice    <- alloca $ \desired -> alloca $ \actual -> do
-    poke desired (desiredAudioSpec pAudioCallback)
-    SDL.Raw.openAudioDevice nullPtr 0 desired actual 0
 
   sampler        <- newCounter 0xFF
   frameSequencer <- newStateCycle frameSequencerStates
@@ -107,25 +82,6 @@ audioPorts AudioState {..} =
   channel2Ports = first ((+ NR20) . fromIntegral) <$> getPorts channel2
   channel3Ports = first ((+ NR30) . fromIntegral) <$> getPorts channel3
   channel4Ports = first ((+ NR40) . fromIntegral) <$> getPorts channel4
-
-disableAudioOut :: AudioState -> IO ()
-disableAudioOut AudioState {..} = SDL.Raw.pauseAudioDevice audioDevice (-1)
-
-enableAudioOut :: AudioState -> IO ()
-enableAudioOut AudioState {..} = SDL.Raw.pauseAudioDevice audioDevice 0
-
-audioCallback :: RingBuffer Word16 -> Ptr () -> Ptr Word8 -> CInt -> IO ()
-audioCallback buffer _ stream len = do
-  size <- readableSize buffer
-  if size == 0
-    then pokeArray stream (replicate (fromIntegral len) 128)
-    else void $ foldBuffer buffer (fromIntegral len `div` 2) 0 $ \i sample ->
-      let left  = fromIntegral (sample .&. 0x00FF)
-          right = fromIntegral (sample .>>. 8)
-      in  do
-            pokeElemOff stream i       left
-            pokeElemOff stream (i + 1) right
-            pure (i + 2)
 
 samplePeriod :: Int
 samplePeriod = 94

@@ -3,7 +3,8 @@
 module GBC.Keypad
   ( KeypadState
   , initKeypadState
-  , keypadHandleUserEvents
+  , keypadPress
+  , keypadRelease
   , keypadPorts
   )
 where
@@ -11,25 +12,11 @@ where
 import           Common
 import           Control.Monad.Reader
 import           Data.Bits
-import           Data.Function
 import           Data.IORef
 import           Data.Word
 import           GBC.CPU.Interrupts
 import           GBC.Primitive
 import           GBC.Registers
-import           SDL.Event
-import           SDL.Input.Keyboard
-
--- | Keypad key flags.
-keyA, keyB, keySELECT, keySTART, keyLEFT, keyRIGHT, keyUP, keyDOWN :: Word8
-keyA = 0x01
-keyB = 0x02
-keySELECT = 0x04
-keySTART = 0x08
-keyRIGHT = 0x10
-keyLEFT = 0x20
-keyUP = 0x40
-keyDOWN = 0x80
 
 -- | Create the initial keypad state.
 initKeypadState :: Port Word8 -> IO KeypadState
@@ -46,25 +33,25 @@ data KeypadState = KeypadState {
   , portIF    :: !(Port Word8)
 }
 
--- | Update the keypad state given an SDL event payload.
-updateKeyboardState :: EventPayload -> Word8 -> Word8
-updateKeyboardState (KeyboardEvent d) keypadState =
-  let symbol = case keysymKeycode (keyboardEventKeysym d) of
-        KeycodeZ         -> Just keyA
-        KeycodeX         -> Just keyB
-        KeycodeReturn    -> Just keySTART
-        KeycodeBackspace -> Just keySELECT
-        KeycodeRight     -> Just keyRIGHT
-        KeycodeLeft      -> Just keyLEFT
-        KeycodeUp        -> Just keyUP
-        KeycodeDown      -> Just keyDOWN
-        _                -> Nothing
-  in  maybe keypadState updateBits symbol
- where
-  updateBits x = case keyboardEventKeyMotion d of
-    Pressed  -> keypadState .|. x
-    Released -> keypadState .&. complement x
-updateKeyboardState _ keypadState = keypadState
+data Key = KeyUp
+         | KeyDown
+         | KeyLeft
+         | KeyRight
+         | KeyA
+         | KeyB
+         | KeySelect
+         | KeyStart
+         deriving (Eq, Ord, Show)
+
+keyFlag :: Key -> Word8
+keyFlag KeyUp     = 0x40
+keyFlag KeyDown   = 0x80
+keyFlag KeyLeft   = 0x20
+keyFlag KeyRight  = 0x10
+keyFlag KeyA      = 0x01
+keyFlag KeyB      = 0x02
+keyFlag KeySelect = 0x04
+keyFlag KeyStart  = 0x08
 
 -- | Update the 'regKeypad' register.
 {-# INLINE refreshKeypad #-}
@@ -78,15 +65,23 @@ refreshKeypad keypad portIF _ p1 = do
   when (0 /= 0x0F .&. p1 .&. complement p1') (raiseInterrupt portIF InterruptP1Low)
   pure p1'
 
--- | Update the keypad state from a list of SDL events.
-{-# INLINE keypadHandleUserEvents #-}
-keypadHandleUserEvents :: KeypadState -> [Event] -> IO ()
-keypadHandleUserEvents KeypadState {..} events = do
+keypadPress :: KeypadState -> Key -> IO ()
+keypadPress state@KeypadState {..} key = do
   keypad0 <- readIORef keypadRef
-  let keypad1 = foldl (&) keypad0 (updateKeyboardState . eventPayload <$> events)
-  writeIORef keypadRef keypad1
+  let keypad1 = keypad0 .|. keyFlag key
+  when (keypad0 /= keypad1) $ updateKeypadState state keypad1
+
+keypadRelease :: KeypadState -> Key -> IO ()
+keypadRelease state@KeypadState {..} key = do
+  keypad0 <- readIORef keypadRef
+  let keypad1 = keypad0 .&. complement (keyFlag key)
+  when (keypad0 /= keypad1) $ updateKeypadState state keypad1
+
+updateKeypadState :: KeypadState -> Word8 -> IO ()
+updateKeypadState KeypadState {..} keypad = do
+  writeIORef keypadRef keypad
   p1 <- readPort portP1
-  when (keypad0 /= keypad1) $ void $ refreshKeypad keypad1 portIF p1 p1
+  void $ refreshKeypad keypad portIF p1 p1
 
 keypadPorts :: KeypadState -> [(Word16, Port Word8)]
 keypadPorts KeypadState {..} = [(P1, portP1)]
