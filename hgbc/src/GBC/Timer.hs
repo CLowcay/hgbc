@@ -17,7 +17,7 @@ import           GBC.Primitive
 import           GBC.Primitive.UnboxedRef
 import           GBC.Registers
 
--- | Number of clocks until the next timer tick
+-- | The current state of the timer hardware.
 data TimerState = TimerState {
     clockCounter :: !(UnboxedRef Word16)
   , timerCounter :: !(UnboxedRef Word16)
@@ -71,7 +71,6 @@ timerRegisters TimerState {..} = do
     in  [("Frequency", show frequency), ("Timer Started", show (timerStarted tac) ++ "Hz")]
 
 -- | Update the timer state.
-{-# INLINABLE updateTimer #-}
 updateTimer :: TimerState -> Int -> IO ()
 updateTimer TimerState {..} advance = do
   -- Update the internal clock count

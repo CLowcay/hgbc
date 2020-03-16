@@ -2,9 +2,6 @@ module Common
   ( (.<<.)
   , (.>>.)
   , isFlagSet
-  , SymbolTable(..)
-  , lookupByAddress
-  , lookupBySymbol
   , RegisterInfo(..)
   , Format(..)
   , padLeft
@@ -14,7 +11,6 @@ where
 
 import           Data.Bits
 import           Data.Word
-import qualified Data.HashMap.Strict           as HM
 
 infixl 8 .<<.
 {-# INLINE (.<<.) #-}
@@ -29,14 +25,6 @@ infixl 8 .>>.
 {-# INLINE isFlagSet #-}
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
-
-data SymbolTable = SymbolTable !(HM.HashMap Word16 String) !(HM.HashMap String Word16)
-
-lookupByAddress :: SymbolTable -> Word16 -> Maybe String
-lookupByAddress (SymbolTable addrTable _) addr = HM.lookup addr addrTable
-
-lookupBySymbol :: SymbolTable -> String -> Maybe Word16
-lookupBySymbol (SymbolTable _ symbolTable) label = HM.lookup label symbolTable
 
 data RegisterInfo = RegisterInfo Word16 String Word8 [(String, String)]
 

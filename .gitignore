@@ -1,4 +1,6 @@
 .stack-work/
+dist-newstyle
 hgbc.cabal
 *.prof
+*.hie
 *~

@@ -43,7 +43,6 @@ module GBC.Primitive
 where
 
 import           Control.Monad
-import           Control.Monad.Fail
 import           Control.Monad.IO.Class
 import           Data.Bits
 import           Data.IORef

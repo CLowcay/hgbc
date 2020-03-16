@@ -8,7 +8,6 @@ module GBC.Graphics
   , GraphicsSync(..)
   , Mode(..)
   , GraphicsBusEvent(..)
-  , WindowCommand(..)
   , initGraphics
   , graphicsPorts
   , newGraphicsSync
@@ -74,15 +73,12 @@ data GraphicsState = GraphicsState {
   , spritePriorityBuffer :: !(ForeignPtr Int8)
 }
 
-data WindowCommand = Redraw | Quit deriving (Eq, Ord, Show)
-
--- | Graphics synchronization objects. It's a pair of MVars. The CPU thread
--- takes from start and puts to currentLine. The graphics output thread takes
--- from currentLine and puts to start. This keeps the threads moving in
--- lockstep.
+-- | Graphics synchronization objects. The output thread should wait on
+-- signalWindow, then draw the buffer, then put to bufferAvailable when it is
+-- safe to write to the frame buffer again.
 data GraphicsSync = GraphicsSync {
-    bufferAvailable :: !(MVar ())    -- The output window puts a () here when it is safe to write to the frame buffer.
-  , signalWindow    :: !(MVar WindowCommand)    -- We write a command here for the outut window.
+    bufferAvailable :: !(MVar ())    -- ^ The output window puts a () here when it is safe to write to the frame buffer again.
+  , signalWindow    :: !(MVar ())    -- ^ Wait on this MVar before drawing the output buffer.
 }
 
 lcdStates :: [(Mode, Int)]
@@ -268,7 +264,7 @@ graphicsStep graphicsState@GraphicsState {..} graphicsSync clockAdvance = do
           setVRAMAccessible vram True
 
         when (mode' == VBlank) $ do
-          putMVar (signalWindow graphicsSync) Redraw
+          putMVar (signalWindow graphicsSync) ()
           takeMVar (bufferAvailable graphicsSync)
 
       pure $ case modeUpdate of

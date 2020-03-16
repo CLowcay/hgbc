@@ -7,11 +7,13 @@ import           Control.Exception
 import           Data.Word
 import           Common
 
-data Fault = InvalidInstruction Word8
-           | InvalidWrite Word16
-           | InvalidRead Word16
-           | InvalidAccess Word16
-           | InvalidSourceForDMA Word16
+-- | A fault in the emulated hardware. On the real hardware these conditions
+-- lead to undefined behavior.
+data Fault = InvalidInstruction Word8    -- ^ Attempted to execute an invalid instruction.
+           | InvalidWrite Word16         -- ^ Wrote to an invalid write address.
+           | InvalidRead Word16          -- ^ Read from an invalid address.
+           | InvalidAccess Word16        -- ^ Invalid access on cartridge RAM.
+           | InvalidSourceForDMA Word16  -- ^ DMA from an invalid source address.
            deriving (Eq, Ord, Show)
 
 instance Exception Fault where

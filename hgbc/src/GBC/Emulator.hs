@@ -1,12 +1,10 @@
-{-# LANGUAGE LambdaCase #-}
+
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
 
 module GBC.Emulator
   ( EmulatorState(..)
   , initEmulatorState
-  , isBreakFlagSet
-  , clearBreakFlag
   , getEmulatorClock
   , step
   )
@@ -41,7 +39,6 @@ data EmulatorState = EmulatorState {
   , keypadState     :: !KeypadState
   , timerState      :: !TimerState
   , audioState      :: !AudioState
-  , breakFlag       :: !(IORef Bool)
   , hblankPending   :: !(IORef Bool) -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
   , currentTime     :: !(UnboxedRef Int) -- Time in clocks
   , lastEventPoll   :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
@@ -55,14 +52,15 @@ instance HasCPU EmulatorState where
   {-# INLINE forCPUState #-}
   forCPUState = cpu
 
--- | Create an initial bus state.
+-- | Create a new 'EmulatorState' given a 'ROM', a 'GraphicsSync', and a pointer
+-- to the output frame buffer. The frame buffer is a 32bit RGB buffer with
+-- 160x144 pixels.
 initEmulatorState :: ROM -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
 initEmulatorState rom graphicsSync frameBufferBytes = mdo
   let mode = case cgbSupport (romHeader rom) of
         CGBCompatible   -> CGB
         CGBExclusive    -> CGB
         CGBIncompatible -> DMG
-  breakFlag     <- newIORef False
   vram          <- initVRAM mode
 
   portIF        <- newPort 0xE0 0x1F alwaysUpdate
@@ -93,21 +91,15 @@ initEmulatorState rom graphicsSync frameBufferBytes = mdo
   let emulatorState = EmulatorState { .. }
   pure emulatorState
 
--- | Check if the debug break flag is set.
-isBreakFlagSet :: ReaderT EmulatorState IO Bool
-isBreakFlagSet = liftIO . readIORef . breakFlag =<< ask
-
--- | Reset the debug break flag.
-clearBreakFlag :: ReaderT EmulatorState IO ()
-clearBreakFlag = liftIO . flip writeIORef False . breakFlag =<< ask
-
 -- | Get the number of clocks since the emulator started.
 getEmulatorClock :: ReaderT EmulatorState IO Int
 getEmulatorClock = do
   EmulatorState {..} <- ask
   liftIO $ readUnboxedRef currentTime
 
--- | Execute a single step of the emulation.
+-- | Execute one CPU instruction and update all of the emulated hardware
+-- accordingly. This may cause the audio queue to fill up, or it may trigger a
+-- request to flip the frame buffer.
 step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask

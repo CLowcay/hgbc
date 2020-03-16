@@ -30,7 +30,6 @@ dependencies:
 - resourcet
 - primitive
 - time
-- unordered-containers
 - vector
 
 library:
@@ -42,10 +41,10 @@ library:
     - -Wincomplete-record-updates
     - -Wredundant-constraints
     - -Wpartial-fields
+    - -Wall-missed-specialisations
     - -fexpose-all-unfoldings
     - -fspecialise-aggressively
     - -fcross-module-specialise
-    - -Wall-missed-specialisations
 
 tests:
   hgbc-test:

@@ -7,11 +7,9 @@ module GBC.Memory
   , initMemory
   , initMemoryForROM
   , getROMHeader
-  , shouldCheckRAMAccess
   , getMbcRegisters
   , dmaToOAM
   , readByte
-  , readWord
   , writeByte
   , writeWord
   , copy16
@@ -38,6 +36,7 @@ import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable          as VS
 import qualified Data.Vector.Storable.Mutable  as VSM
 
+-- | The gameboy memory.
 data Memory = Memory {
     mode           :: !EmulatorMode
   , mbc            :: !MBC
@@ -59,6 +58,7 @@ instance HasMemory Memory where
   {-# INLINE forMemory #-}
   forMemory = id
 
+-- | Convert an address into an internal port number.
 portOffset :: Word16 -> Int
 portOffset = subtract 0xFF00 . fromIntegral
 
@@ -105,23 +105,17 @@ initMemory rom header mbc vram rawPorts portIE mode = do
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = header
 
--- | Check that RAM access operations are valid.
-shouldCheckRAMAccess :: HasMemory env => Bool -> ReaderT env IO ()
-shouldCheckRAMAccess check = do
-  Memory {..} <- asks forMemory
-  liftIO (writeIORef checkRAMAccess check)
-
+-- | Get the current state of the MBC registers.
 getMbcRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
 getMbcRegisters = do
   Memory {..} <- asks forMemory
   liftIO (mbcRegisters mbc)
 
+-- | Total number of bytes of OAM memory.
 oamSize :: Int
 oamSize = 160
 
 -- | Copy data to OAM memory via DMA.
--- TODO: Cannot use moveArray, have to expand the bytes to ints.
-{-# INLINE dmaToOAM #-}
 dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
@@ -149,7 +143,6 @@ dmaToOAM source = do
   where offset base = fromIntegral source - base
 
 -- | Read a byte from memory.
-{-# INLINABLE readByte #-}
 readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
@@ -185,21 +178,13 @@ readByte addr = do
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 
-{-# INLINABLE readWord #-}
-readWord :: HasMemory env => Word16 -> ReaderT env IO Word16
-readWord addr = do
-  l <- readByte addr
-  h <- readByte (addr + 1)
-  pure ((fromIntegral h .<<. 8) .|. fromIntegral l)
-
-{-# INLINABLE writeWord #-}
+-- | Write a word to memory.
 writeWord :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
 writeWord addr value = do
   writeByte addr       (fromIntegral (value .&. 0xFF))
   writeByte (addr + 1) (fromIntegral (value .>>. 8))
 
 -- | Write to memory.
-{-# INLINABLE writeByte #-}
 writeByte :: HasMemory env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
   Memory {..} <- asks forMemory
@@ -229,7 +214,7 @@ writeByte addr value = do
     x -> error ("Impossible coarse read address" ++ show x)
   where offset base = fromIntegral addr - base
 
-{-# INLINABLE copy16 #-}
+-- | Copy 16 bytes from a source address to a destination address.
 copy16 :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
 copy16 source destination = do
   writeByte destination =<< readByte source
@@ -249,7 +234,6 @@ copy16 source destination = do
   writeByte (destination + 14) =<< readByte (source + 14)
   writeByte (destination + 15) =<< readByte (source + 15)
 
--- | Read a chunk of memory.
-{-# INLINABLE readChunk #-}
+-- | Read a chunk of memory. Useful for debugging.
 readChunk :: HasMemory env => Word16 -> Int -> ReaderT env IO B.ByteString
 readChunk base len = B.pack <$> traverse readByte ((base +) <$> [0 .. fromIntegral len - 1])

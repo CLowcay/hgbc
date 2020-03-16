@@ -2,6 +2,7 @@
 
 module GBC.Keypad
   ( KeypadState
+  , Key(..)
   , initKeypadState
   , keypadPress
   , keypadRelease
