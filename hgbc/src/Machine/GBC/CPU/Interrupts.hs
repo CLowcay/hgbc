@@ -51,4 +51,4 @@ getNextInterrupt pendingInterrupts = case countTrailingZeros pendingInterrupts o
   2 -> InterruptTimerOverflow
   3 -> InterruptEndSerialTransfer
   4 -> InterruptP1Low
-  n -> error ("Invalid pending interrupt " ++ show n)
+  n -> error ("Invalid pending interrupt " <> show n)

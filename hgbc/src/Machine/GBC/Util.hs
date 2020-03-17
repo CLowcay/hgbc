@@ -4,8 +4,6 @@ module Machine.GBC.Util
   , (.>>.)
   , isFlagSet
   , RegisterInfo(..)
-  , Format(..)
-  , padLeft
   , formatHex
   )
 where
@@ -28,10 +26,6 @@ isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 
 data RegisterInfo = RegisterInfo Word16 String Word8 [(String, String)]
-
-class Format c where
-  format :: c -> String
-
 {-# INLINABLE padLeft #-}
 padLeft :: Int -> Char -> String -> String
 padLeft width c s = reverse . take width $ reverse s ++ repeat c

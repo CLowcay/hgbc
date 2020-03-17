@@ -4,6 +4,7 @@
 module Machine.GBC.MBC.Interface
   ( MBC(..)
   , RTC(..)
+  , RTCRegister(..)
   , RAMAllocator
   )
 where
@@ -16,16 +17,18 @@ type RAMAllocator = Int -> IO (VSM.IOVector Word8)
 
 -- | A memory bank controller.
 data MBC = MBC {
-    bankOffset     :: IO Int
-  , writeROM       :: Word16 -> Word8 -> IO ()
-  , readRAM        :: Bool -> Word16 -> IO Word8
-  , writeRAM       :: Bool -> Word16 -> Word8 -> IO ()
-  , sliceRAM       :: Bool -> Word16 -> Int -> IO (VSM.IOVector Word8)
-  , mbcRegisters   :: IO [RegisterInfo]
+    bankOffset     :: !(IO Int)
+  , writeROM       :: !(Word16 -> Word8 -> IO ())
+  , readRAM        :: !(Bool -> Word16 -> IO Word8)
+  , writeRAM       :: !(Bool -> Word16 -> Word8 -> IO ())
+  , sliceRAM       :: !(Bool -> Word16 -> Int -> IO (VSM.IOVector Word8))
+  , mbcRegisters   :: !(IO [RegisterInfo])
 }
 
+data RTCRegister = Seconds | Minutes | Hours | DaysLow | DaysHigh deriving (Eq, Ord, Show)
+
 data RTC = RTC {
-    readRTC  :: Int -> IO Word8
-  , writeRTC :: Int -> Word8 -> IO ()
-  , latchRTC :: Word8 -> IO ()
+    readRTC  :: !(RTCRegister -> IO Word8)
+  , writeRTC :: !(RTCRegister -> Word8 -> IO ())
+  , latchRTC :: !(Word8 -> IO ())
 }

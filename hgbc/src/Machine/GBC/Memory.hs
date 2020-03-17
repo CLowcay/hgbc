@@ -175,7 +175,7 @@ readByte addr = do
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
       | addr == IE -> liftIO $ readPort portIE
       | otherwise -> VSM.unsafeRead memHigh (offset 0xFF80)
-    x -> error ("Impossible coarse read address" ++ show x)
+    x -> error ("Impossible coarse read address " ++ show x)
   where offset base = fromIntegral addr - base
 
 -- | Write a word to memory.
@@ -211,7 +211,7 @@ writeByte addr value = do
       | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
       | addr == IE -> liftIO $ writePort portIE value
       | otherwise -> VSM.unsafeWrite memHigh (offset 0xFF80) value
-    x -> error ("Impossible coarse read address" ++ show x)
+    x -> error ("Impossible coarse write address " ++ show x)
   where offset base = fromIntegral addr - base
 
 -- | Copy 16 bytes from a source address to a destination address.

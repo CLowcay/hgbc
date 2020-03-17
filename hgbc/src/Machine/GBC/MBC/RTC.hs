@@ -55,7 +55,6 @@ readBase path = do
   case mBase of
     Just base -> pure base
     Nothing   -> do
-      putStrLn ("WARNING: " <> path <> " is not a valid hgbc rtc file")
       writeBase path 0
       pure 0
 
@@ -77,7 +76,7 @@ savedRTC rtcFile = do
         halt <- readIORef haltRef
         maybe getSystemTime pure halt
 
-  let checkHaltMode register value = when (register == 0x0C) $ if isFlagSet flagHalt value
+  let checkHaltMode register value = when (register == DaysHigh) $ if isFlagSet flagHalt value
         then do
           halt <- readIORef haltRef
           case halt of
@@ -90,12 +89,11 @@ savedRTC rtcFile = do
         base      <- readIORef rtcBaseRef
         rtc       <- if isLatched then readIORef latchedRTC else makeRTC base <$> getCurrentTime
         pure $ case register of
-          0x8 -> seconds rtc
-          0x9 -> minutes rtc
-          0xA -> hours rtc
-          0xB -> daysLow rtc
-          0xC -> daysHigh rtc
-          x   -> error ("Read from invalid RTC register " <> show x)
+          Seconds  -> seconds rtc
+          Minutes  -> minutes rtc
+          Hours    -> hours rtc
+          DaysLow  -> daysLow rtc
+          DaysHigh -> daysHigh rtc
 
   let writeRTC register value = do
         checkHaltMode register value
@@ -103,12 +101,11 @@ savedRTC rtcFile = do
         base <- readIORef rtcBaseRef
         let rtc = makeRTC base now
         let rtc' = case register of
-              0x8 -> rtc { seconds = fromIntegral value }
-              0x9 -> rtc { minutes = fromIntegral value }
-              0xA -> rtc { hours = fromIntegral value }
-              0xB -> rtc { daysLow = fromIntegral value }
-              0xC -> rtc { daysHigh = fromIntegral value .&. 1 }
-              x   -> error ("Write to invalid RTC register " <> show x)
+              Seconds  -> rtc { seconds = fromIntegral value }
+              Minutes  -> rtc { minutes = fromIntegral value }
+              Hours    -> rtc { hours = fromIntegral value }
+              DaysLow  -> rtc { daysLow = fromIntegral value }
+              DaysHigh -> rtc { daysHigh = fromIntegral value .&. 1 }
         let base' = rtcBase rtc' now
         writeIORef rtcBaseRef base'
         writeBase rtcFile base'

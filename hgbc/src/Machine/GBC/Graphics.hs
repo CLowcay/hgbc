@@ -309,7 +309,7 @@ graphicsRegisters GraphicsState {..} = do
           1 -> "VBlank"
           2 -> "Scanning OAM"
           3 -> "Reading VRAM"
-          _ -> error "Impossible stat mode"
+          x -> error ("Impossible stat mode " <> show x)
     in  [ ("Mode Flag"                , gmode)
         , ("LYC = LY"                 , show $ stat `testBit` matchBit)
         , ("Interrupt on HBlank", show $ stat `testBit` interruptHBlank)

@@ -386,7 +386,7 @@ carryIntoBit i a b op =
 loads :: Spec
 loads = do
   describe "LD r, r" $ for_ [ (r, r') | r <- allRegisters, r' <- allRegisters ] $ \(r, r') ->
-    it ("Works for LD " <> format r <> ", " <> format r')
+    it ("Works for LD " <> show r <> ", " <> show r')
       $ withNewCPU
       $ alteringRegisters [r]
       $ withValuesInRegisters [(r', 42)]
@@ -395,12 +395,12 @@ loads = do
           r `registerShouldBe` 42
 
   describe "LD r, n" $ for_ allRegisters $ \r ->
-    it ("Works for LD " <> format r <> ", 42") $ withNewCPU $ alteringRegisters [r] $ do
+    it ("Works for LD " <> show r <> ", 42") $ withNewCPU $ alteringRegisters [r] $ do
       ldrn r 42 `shouldHaveCycles` 2
       r `registerShouldBe` 42
 
   describe "LD r, (HL)" $ for_ allRegisters $ \r ->
-    it ("Works for LD " <> format r <> ", (HL)")
+    it ("Works for LD " <> show r <> ", (HL)")
       $ withNewCPU
       $ alteringRegisters [r]
       $ withValueAt RegHL 0xC000 42
@@ -411,7 +411,7 @@ loads = do
           RegL `registerShouldBe` (if r == RegL then 42 else 0)
 
   describe "LD (HL), r" $ for_ allRegisters $ \r ->
-    it ("Works for LD (HL), " <> format r)
+    it ("Works for LD (HL), " <> show r)
       $ withNewCPU
       $ withValuesInRegisters [(r, 42)]
       $ withValueAt RegHL 0xC0D0 32
@@ -603,7 +603,7 @@ loads = do
         0xC002 `atAddressShouldBe` 42
 
   describe "LD dd, nn" $ for_ allRegisters16 $ \ss ->
-    it ("Works for LD " <> format ss <> ", 4243") $ withNewCPU $ alteringSSRegisters [ss] $ do
+    it ("Works for LD " <> show ss <> ", 4243") $ withNewCPU $ alteringSSRegisters [ss] $ do
       ldddnn ss 0x4232 `shouldHaveCycles` 3
       ss `register16ShouldBe` 0x4232
 
@@ -618,7 +618,7 @@ loads = do
         RegHL `register16ShouldBe` 0x4232
 
   describe "PUSH qq" $ for_ allRegistersPP $ \qq ->
-    it ("Works for PUSH " <> format qq)
+    it ("Works for PUSH " <> show qq)
       $ withNewCPU
       $ withValuesInQQRegisters [(qq, 0x4232)]
       $ withValue16At RegSP 0xFFF0 0x2221
@@ -629,7 +629,7 @@ loads = do
           0xFFEF `atAddressShouldBe` 0x42
 
   describe "POP qq" $ for_ allRegistersPP $ \qq ->
-    it ("Works for POP " <> format qq)
+    it ("Works for POP " <> show qq)
       $ withNewCPU
       $ alteringQQRegisters [qq]
       $ withValue16At RegSP 0xFFEE 0x4232
@@ -669,7 +669,7 @@ arithmetic8 = do
   describe "ADD A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for ADD A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for ADD A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -702,7 +702,7 @@ arithmetic8 = do
   describe "ADC A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for ADC A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for ADC A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -738,7 +738,7 @@ arithmetic8 = do
   describe "SUB A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for SUB A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for SUB A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -771,7 +771,7 @@ arithmetic8 = do
   describe "SBC A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for SBC A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for SBC A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -807,7 +807,7 @@ arithmetic8 = do
   describe "AND A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for AND A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for AND A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -844,7 +844,7 @@ arithmetic8 = do
   describe "OR A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for OR A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for OR A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -881,7 +881,7 @@ arithmetic8 = do
   describe "XOR A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for XOR A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for XOR A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -918,7 +918,7 @@ arithmetic8 = do
   describe "CP A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
     $ \(r, v) ->
-        it ("Works for CP A, " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+        it ("Works for CP A, " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
@@ -949,7 +949,7 @@ arithmetic8 = do
           verifyArithmetic8Flags 0x11 v (-) True
 
   describe "INC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for INC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for INC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags (flagH .|. flagN .|. flagZ)
@@ -976,7 +976,7 @@ arithmetic8 = do
                       (buildFlags False (carryIntoBit 4 v (1 :: Word8) (+)) False (expected == 0))
 
   describe "DEC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for DEC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for DEC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags (flagH .|. flagN .|. flagZ)
@@ -1020,7 +1020,7 @@ arithmetic16 = do
   describe "ADD HL, ss"
     $ for_ [ (ss, (v .<<. 8) + 1) | ss <- allRegisters16, v <- [0 .. 255] ]
     $ \(ss, v) ->
-        it ("Works for ADD HL, " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+        it ("Works for ADD HL, " <> show ss <> " ; (" <> show ss <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInSSRegisters [(RegHL, 0x11FF), (ss, v)]
           $ alteringFlags (flagCY .|. flagH .|. flagN)
@@ -1049,7 +1049,7 @@ arithmetic16 = do
   describe "INC ss"
     $ for_ [ (ss, (v .<<. 8) .|. 0xFF) | ss <- allRegisters16, v <- [0 .. 255] ]
     $ \(ss, v) ->
-        it ("Works for INC " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+        it ("Works for INC " <> show ss <> " ; (" <> show ss <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInSSRegisters [(ss, v)]
           $ do
@@ -1059,7 +1059,7 @@ arithmetic16 = do
   describe "DEC ss"
     $ for_ [ (ss, (v .<<. 8) .|. 0xFF) | ss <- allRegisters16, v <- [0 .. 255] ]
     $ \(ss, v) ->
-        it ("Works for DEC " <> format ss <> " ; (" <> format ss <> " = " <> formatHex v <> ")")
+        it ("Works for DEC " <> show ss <> " ; (" <> show ss <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInSSRegisters [(ss, v)]
           $ do
@@ -1115,7 +1115,7 @@ rotateAndShift = do
           expectFlags allFlags (if v `testBit` 0 then flagCY else 0)
 
   describe "RLC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for RLC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for RLC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1126,7 +1126,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
 
   describe "RL r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for RL " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for RL " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1138,7 +1138,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
 
   describe "RRC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for RRC " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for RRC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1149,7 +1149,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
 
   describe "RR r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for RR " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for RR " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1219,7 +1219,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
 
   describe "SLA r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for SLA " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for SLA " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1244,7 +1244,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 7) False False (expected == 0))
 
   describe "SRA r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for SRA " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for SRA " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1269,7 +1269,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
 
   describe "SRL r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for SRL " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for SRL " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1294,7 +1294,7 @@ rotateAndShift = do
           expectFlags allFlags (buildFlags (v `testBit` 0) False False (expected == 0))
 
   describe "SWAP r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
-    it ("Works for SWAP " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")")
+    it ("Works for SWAP " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
@@ -1385,13 +1385,13 @@ bitOperations = do
 
  where
   formatBitR r b v =
-    "BIT " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+    "BIT " <> show b <> ", " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")"
   formatBitHL b v = "BIT " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
   formatSetR r b v =
-    "SET " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+    "SET " <> show b <> ", " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")"
   formatSetHL b v = "SET " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
   formatResR r b v =
-    "RES " <> show b <> ", " <> format r <> " ; (" <> format r <> " = " <> formatHex v <> ")"
+    "RES " <> show b <> ", " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")"
   formatResHL b v = "RES " <> show b <> ", (HL) ; ((HL) = " <> formatHex v <> ")"
 
 jumps :: Spec
@@ -1413,7 +1413,7 @@ jumps = do
   describe "JP cc, nn"
     $ for_ [ (cc, shouldJump) | cc <- allConditions, shouldJump <- [True, False] ]
     $ \(cc, shouldJump) ->
-        it ("Works for JP " <> format cc <> ", 4232 ; when condition is " <> show shouldJump)
+        it ("Works for JP " <> show cc <> ", 4232 ; when condition is " <> show shouldJump)
           $ withNewCPU
           $ alteringFlags allFlags
           $ if shouldJump
@@ -1449,7 +1449,7 @@ jumps = do
                 notAlteringFlags allFlags $ jrcc cc e `shouldHaveCycles` 2
  where
   formatJRcc cc e shouldJump =
-    "JR " <> format cc <> ", " <> formatHex e <> "; when condition is " <> show shouldJump
+    "JR " <> show cc <> ", " <> formatHex e <> "; when condition is " <> show shouldJump
 
 callAndReturn :: Spec
 callAndReturn = do
@@ -1468,7 +1468,7 @@ callAndReturn = do
   describe "CALL cc, nn"
     $ for_ [ (cc, shouldCall) | cc <- allConditions, shouldCall <- [True, False] ]
     $ \(cc, shouldCall) ->
-        it ("Works for CALL " <> format cc <> ", 4232 ; with condition " <> show shouldCall)
+        it ("Works for CALL " <> show cc <> ", 4232 ; with condition " <> show shouldCall)
           $ withNewCPU
           $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
           $ alteringFlags allFlags
@@ -1512,7 +1512,7 @@ callAndReturn = do
   describe "RET cc"
     $ for_ [ (cc, shouldRet) | cc <- allConditions, shouldRet <- [True, False] ]
     $ \(cc, shouldRet) ->
-        it ("Works for RET " <> format cc <> "; (SP) = 4232, condition is " <> show shouldRet)
+        it ("Works for RET " <> show cc <> "; (SP) = 4232, condition is " <> show shouldRet)
           $ withNewCPU
           $ withValue16At RegSP 0xFFEE 0x4232
           $ alteringFlags allFlags

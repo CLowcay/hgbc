@@ -44,17 +44,17 @@ mbc3 bankMask ramMask ramAllocator rtc = do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidRead (address + 0xA000)))
         r2 <- readIORef register2
-        if r2 >= 8 && r2 <= 0xC
-          then readRTC rtc r2
-          else VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
+        case decodeRTCRegister r2 of
+          Nothing          -> VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
+          Just rtcRegister -> readRTC rtc rtcRegister
   let writeRAM check address value = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
           unless enabled (throwIO (InvalidWrite (address + 0xA000)))
         r2 <- readIORef register2
-        if r2 >= 8 && r2 <= 0xC
-          then writeRTC rtc r2 value
-          else VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
+        case decodeRTCRegister r2 of
+          Nothing          -> VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
+          Just rtcRegister -> writeRTC rtc rtcRegister value
   let sliceRAM check address size = do
         when check $ liftIO $ do
           enabled <- readIORef enableRAM
@@ -71,3 +71,11 @@ mbc3 bankMask ramMask ramAllocator rtc = do
           , RegisterInfo 0x4000 "R2" (fromIntegral r2)        []
           ]
   pure MBC { .. }
+
+decodeRTCRegister :: Int -> Maybe RTCRegister
+decodeRTCRegister 0x08 = Just Seconds
+decodeRTCRegister 0x09 = Just Minutes
+decodeRTCRegister 0x0A = Just Hours
+decodeRTCRegister 0x0B = Just DaysLow
+decodeRTCRegister 0x0C = Just DaysHigh
+decodeRTCRegister _    = Nothing

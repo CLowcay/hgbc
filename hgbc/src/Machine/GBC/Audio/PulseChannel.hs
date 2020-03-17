@@ -143,19 +143,17 @@ instance Channel PulseChannel where
       let i = (i0 + reloads) .&. 7
       writeUnboxedRef dutyCycle i
 
-      dutyCycleNumber <- getDutyCycle <$> directReadPort port1
-      sample          <- envelopeVolume envelope
-      writeUnboxedRef output ((if dutyCycleOutput dutyCycleNumber i then sample else 0) - 8)
-
-getDutyCycle :: Word8 -> Word8
-getDutyCycle register = register .>>. 6
+      register1 <- directReadPort port1
+      sample    <- envelopeVolume envelope
+      writeUnboxedRef output ((if dutyCycleOutput register1 i then sample else 0) - 8)
 
 dutyCycleOutput :: Word8 -> Int -> Bool
-dutyCycleOutput 0 i = i == 0
-dutyCycleOutput 1 i = i <= 1
-dutyCycleOutput 2 i = i <= 1 || i >= 6
-dutyCycleOutput 3 i = i > 1
-dutyCycleOutput x _ = error ("Invalid duty cycle " <> show x)
+dutyCycleOutput register1 i = case register1 .>>. 6 of
+  0 -> i == 0
+  1 -> i <= 1
+  2 -> i <= 1 || i >= 6
+  3 -> i > 1
+  x -> error ("Invalid duty cycle " <> show x)
 
 getTimerPeriod :: Int -> Int
 getTimerPeriod f = 4 * (2048 - f)

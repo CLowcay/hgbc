@@ -45,11 +45,12 @@ timerPorts TimerState {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), 
 -- | Select the relevant bits from the timer state given the low 2 bits of the
 -- TAC register.
 timerModulus :: Word8 -> Word16
-timerModulus 0 = 1024
-timerModulus 1 = 16
-timerModulus 2 = 64
-timerModulus 3 = 256
-timerModulus x = error ("Unknown clock control pattern " ++ formatHex x)
+timerModulus tac = case tac .&. 3 of
+  0 -> 1024
+  1 -> 16
+  2 -> 64
+  3 -> 256
+  x -> error ("Invalid timer modulus " <> show x)
 
 -- | Check the timer stop flag for the TAC register.
 timerStarted :: Word8 -> Bool
@@ -86,7 +87,7 @@ updateTimer TimerState {..} advance = do
   tac <- directReadPort portTAC
   when (timerStarted tac) $ do
     timer <- readUnboxedRef timerCounter
-    let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus (tac .&. 3)
+    let (timerAdvance, timer') = (timer + fromIntegral advance) `divMod` timerModulus tac
     writeUnboxedRef timerCounter timer'
 
     -- Update required

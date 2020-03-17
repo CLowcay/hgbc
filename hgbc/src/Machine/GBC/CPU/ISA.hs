@@ -18,16 +18,16 @@ import           Data.Word
 import           Machine.GBC.Util
 
 -- | An 8-bit register
-data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Show, Bounded, Enum)
+data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Bounded, Enum)
 
 -- | A 16-bit register.
-data Register16 = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Show, Bounded, Enum)
+data Register16 = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Bounded, Enum)
 
 -- | A 16-bit register (for push and pop instructions).
-data RegisterPushPop = PushPopAF | PushPopBC | PushPopDE | PushPopHL deriving (Eq, Ord, Show, Bounded, Enum)
+data RegisterPushPop = PushPopAF | PushPopBC | PushPopDE | PushPopHL deriving (Eq, Ord, Bounded, Enum)
 
 -- | A condition.
-data ConditionCode = CondNZ | CondZ | CondNC | CondC deriving (Eq, Ord, Show, Bounded, Enum)
+data ConditionCode = CondNZ | CondZ | CondNC | CondC deriving (Eq, Ord, Bounded, Enum)
 
 class MonadGMBZ80 m where
   type ExecuteResult m
@@ -136,32 +136,32 @@ class MonadGMBZ80 m where
   stop    :: m (ExecuteResult m)
   invalid :: Word8 -> m (ExecuteResult m)
 
-instance Format Register8 where
-  format RegA = "A"
-  format RegB = "B"
-  format RegC = "C"
-  format RegD = "D"
-  format RegE = "E"
-  format RegH = "H"
-  format RegL = "L"
+instance Show Register8 where
+  show RegA = "A"
+  show RegB = "B"
+  show RegC = "C"
+  show RegD = "D"
+  show RegE = "E"
+  show RegH = "H"
+  show RegL = "L"
 
-instance Format Register16 where
-  format RegSP = "SP"
-  format RegBC = "BC"
-  format RegDE = "DE"
-  format RegHL = "HL"
+instance Show Register16 where
+  show RegSP = "SP"
+  show RegBC = "BC"
+  show RegDE = "DE"
+  show RegHL = "HL"
 
-instance Format RegisterPushPop where
-  format PushPopAF = "AF"
-  format PushPopBC = "BC"
-  format PushPopDE = "DE"
-  format PushPopHL = "HL"
+instance Show RegisterPushPop where
+  show PushPopAF = "AF"
+  show PushPopBC = "BC"
+  show PushPopDE = "DE"
+  show PushPopHL = "HL"
 
-instance Format ConditionCode where
-  format CondNZ = "NZ"
-  format CondZ  = "Z"
-  format CondNC = "NC"
-  format CondC  = "C"
+instance Show ConditionCode where
+  show CondNZ = "NZ"
+  show CondZ  = "Z"
+  show CondNC = "NC"
+  show CondC  = "C"
 
 newtype DisassembleT m a = DisassembleT (ReaderT (Word16 -> Maybe String) m a)
   deriving (Monad, Functor, Applicative, MonadTrans, MonadFix, MonadIO)
@@ -176,10 +176,10 @@ lookupAddress address = DisassembleT $ do
 
 instance Monad m => MonadGMBZ80 (DisassembleT m) where
   type ExecuteResult (DisassembleT m) = String
-  ldrr r r' = pure ("LD " <> format r <> ", " <> format r')
-  ldrn r n = pure ("LD " <> format r <> ", " <> formatHex n)
-  ldrHL r = pure ("LD " <> format r <> ", (HL)")
-  ldHLr r = pure ("LD (HL), " <> format r)
+  ldrr r r' = pure ("LD " <> show r <> ", " <> show r')
+  ldrn r n = pure ("LD " <> show r <> ", " <> formatHex n)
+  ldrHL r = pure ("LD " <> show r <> ", (HL)")
+  ldHLr r = pure ("LD (HL), " <> show r)
   ldHLn n = pure ("LD (HL), " <> formatHex n)
   ldaBC = pure "LD A, (BC)"
   ldaDE = pure "LD A, (DE)"
@@ -203,71 +203,71 @@ instance Monad m => MonadGMBZ80 (DisassembleT m) where
   ldDEa  = pure "LD (DE), A"
   ldHLIa = pure "LD (HLI), A"
   ldHLDa = pure "LD (HLD), A"
-  ldddnn dd nn = pure ("LD " <> format dd <> ", " <> formatHex nn)
+  ldddnn dd nn = pure ("LD " <> show dd <> ", " <> formatHex nn)
   ldSPHL = pure "LD SP, HL"
-  push qq = pure ("PUSH " <> format qq)
-  pop qq = pure ("POP " <> format qq)
+  push qq = pure ("PUSH " <> show qq)
+  pop qq = pure ("POP " <> show qq)
   ldhl i = pure ("LDHL SP, " <> formatHex i)
   ldnnSP nn = do
     address <- lookupAddress nn
     pure ("LD (" <> formatHex nn <> address <> "), SP")
-  addr r = pure ("ADD A, " <> format r)
+  addr r = pure ("ADD A, " <> show r)
   addn w = pure ("ADD A, " <> formatHex w)
   addhl = pure "ADD A, (HL)"
-  adcr r = pure ("ADC A, " <> format r)
+  adcr r = pure ("ADC A, " <> show r)
   adcn i = pure ("ADC A, " <> formatHex i)
   adchl = pure "ADC A, (HL)"
-  subr r = pure ("SUB A, " <> format r)
+  subr r = pure ("SUB A, " <> show r)
   subn i = pure ("SUB A, " <> formatHex i)
   subhl = pure "SUB A, (HL)"
-  sbcr r = pure ("SBC A, " <> format r)
+  sbcr r = pure ("SBC A, " <> show r)
   sbcn i = pure ("SBC A, " <> formatHex i)
   sbchl = pure "SBC A, (HL)"
-  andr r = pure ("AND A, " <> format r)
+  andr r = pure ("AND A, " <> show r)
   andn i = pure ("AND A, " <> formatHex i)
   andhl = pure "AND A, (HL)"
-  orr r = pure ("OR A, " <> format r)
+  orr r = pure ("OR A, " <> show r)
   orn i = pure ("OR A, " <> formatHex i)
   orhl = pure "OR A, (HL)"
-  xorr r = pure ("XOR A, " <> format r)
+  xorr r = pure ("XOR A, " <> show r)
   xorn i = pure ("XOR A, " <> formatHex i)
   xorhl = pure "XOR A, (HL)"
-  cpr r = pure ("CP A, " <> format r)
+  cpr r = pure ("CP A, " <> show r)
   cpn i = pure ("CP A, " <> formatHex i)
   cphl = pure "CP A, (HL)"
-  incr r = pure ("INC " <> format r)
+  incr r = pure ("INC " <> show r)
   inchl = pure "INC (HL)"
-  decr r = pure ("DEC " <> format r)
+  decr r = pure ("DEC " <> show r)
   dechl = pure "DEC (HL)"
-  addhlss ss = pure ("ADD HL, " <> format ss)
+  addhlss ss = pure ("ADD HL, " <> show ss)
   addSP i = pure ("ADD SP, " <> formatHex i)
-  incss ss = pure ("INC " <> format ss)
-  decss ss = pure ("DEC " <> format ss)
+  incss ss = pure ("INC " <> show ss)
+  decss ss = pure ("DEC " <> show ss)
   rlca = pure "RLCA"
   rla  = pure "RLA"
   rrca = pure "RRCA"
   rra  = pure "RRA"
-  rlcr r = pure ("RLC " <> format r)
+  rlcr r = pure ("RLC " <> show r)
   rlchl = pure "RLC (HL)"
-  rlr r = pure ("RL " <> format r)
+  rlr r = pure ("RL " <> show r)
   rlhl = pure "RL (HL)"
-  rrcr r = pure ("RRC " <> format r)
+  rrcr r = pure ("RRC " <> show r)
   rrchl = pure "RRC (HL)"
-  rrr r = pure ("RR " <> format r)
+  rrr r = pure ("RR " <> show r)
   rrhl = pure "RR (HL)"
-  slar r = pure ("SLA " <> format r)
+  slar r = pure ("SLA " <> show r)
   slahl = pure "SLA (HL)"
-  srar r = pure ("SRA " <> format r)
+  srar r = pure ("SRA " <> show r)
   srahl = pure "SRA (HL)"
-  srlr r = pure ("SRL " <> format r)
+  srlr r = pure ("SRL " <> show r)
   srlhl = pure "SRL (HL)"
-  swapr r = pure ("SWAP " <> format r)
+  swapr r = pure ("SWAP " <> show r)
   swaphl = pure "SWAP (HL)"
-  bitr r i = pure ("BIT " <> show i <> ", " <> format r)
+  bitr r i = pure ("BIT " <> show i <> ", " <> show r)
   bithl i = pure ("BIT " <> show i <> ", (HL)")
-  setr r i = pure ("SET " <> show i <> ", " <> format r)
+  setr r i = pure ("SET " <> show i <> ", " <> show r)
   sethl i = pure ("SET " <> show i <> ", (HL)")
-  resr r i = pure ("RES " <> show i <> ", " <> format r)
+  resr r i = pure ("RES " <> show i <> ", " <> show r)
   reshl i = pure ("RES " <> show i <> ", (HL)")
   jpnn nn = do
     address <- lookupAddress nn
@@ -275,18 +275,18 @@ instance Monad m => MonadGMBZ80 (DisassembleT m) where
   jphl = pure "JP (HL)"
   jpccnn cc nn = do
     address <- lookupAddress nn
-    pure ("JP " <> format cc <> ", " <> formatHex nn <> address)
+    pure ("JP " <> show cc <> ", " <> formatHex nn <> address)
   jr i = pure ("JR " <> formatHex i)
-  jrcc cc i = pure ("JR " <> format cc <> ", " <> formatHex i)
+  jrcc cc i = pure ("JR " <> show cc <> ", " <> formatHex i)
   call nn = do
     address <- lookupAddress nn
     pure ("CALL " <> formatHex nn <> address)
   callcc cc nn = do
     address <- lookupAddress nn
-    pure ("CALL " <> format cc <> ", " <> formatHex nn <> address)
+    pure ("CALL " <> show cc <> ", " <> formatHex nn <> address)
   ret  = pure "RET"
   reti = pure "RETI"
-  retcc cc = pure ("RET " <> format cc)
+  retcc cc = pure ("RET " <> show cc)
   rst i = pure ("RST " <> show i)
   daa  = pure "DAA"
   cpl  = pure "CPL"
