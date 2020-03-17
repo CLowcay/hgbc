@@ -60,13 +60,18 @@ data Header = Header {
   , maskROMVersion :: Int
 } deriving (Eq, Ord, Show)
 
+-- | Paths to the ROM files.
 data ROMPaths = ROMPaths
-  { romFile     :: FilePath
-  , romSaveFile :: FilePath
-  , romRTCFile  :: FilePath
+  { romFile     :: FilePath  -- ^ The main ROM file.
+  , romSaveFile :: FilePath  -- ^ Save file for the battery backed memory.
+  , romRTCFile  :: FilePath  -- ^ Save file for the battery backed RTC.
   } deriving (Eq, Ord, Show)
 
-parseROM :: ROMPaths -> B.ByteString -> Either String ROM
+-- | Parse a ROM file.
+parseROM
+  :: ROMPaths            -- ^ Paths to the ROM files.
+  -> B.ByteString        -- ^ The ROM file content.
+  -> Either String ROM
 parseROM romPaths romContent = do
   when (romContent `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
   when (romContent `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"

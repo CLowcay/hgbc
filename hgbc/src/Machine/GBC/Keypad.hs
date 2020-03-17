@@ -80,7 +80,7 @@ keypadRelease state@KeypadState {..} key = do
 
 updateKeypadState :: KeypadState -> Word8 -> IO ()
 updateKeypadState KeypadState {..} keypad = do
-  writeIORef keypadRef keypad
+  atomicWriteIORef keypadRef $! keypad
   p1 <- readPort portP1
   void $ refreshKeypad keypad portIF p1 p1
 
