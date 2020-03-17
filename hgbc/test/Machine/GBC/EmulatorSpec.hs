@@ -17,7 +17,10 @@ import           Test.Hspec
 import qualified Data.ByteString               as B
 
 blankROM :: ROM
-blankROM = let size = 32 * 1024 * 1024 in ROM "testRom" (blankHeader size) (B.replicate size 0)
+blankROM = ROM paths (blankHeader size) (B.replicate size 0)
+ where
+  paths = ROMPaths "testRom" "testRom.sav" "testRom.rtc"
+  size  = 32 * 1024 * 1024
 
 blankHeader :: Int -> Header
 blankHeader romSize = Header { startAddress          = 0
@@ -37,7 +40,7 @@ blankHeader romSize = Header { startAddress          = 0
 
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
-  sync <- newGraphicsSync
+  sync     <- newGraphicsSync
   emulator <- initEmulatorState blankROM sync nullPtr
   let allPorts =
         cpuPorts (cpu emulator)

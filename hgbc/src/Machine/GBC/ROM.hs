@@ -3,13 +3,14 @@
 
 module Machine.GBC.ROM
   ( ROM(..)
+  , ROMPaths(..)
   , CGBSupport(..)
   , SGBSupport(..)
   , MBCType(..)
   , Destination(..)
   , CartridgeType(..)
   , Header(..)
-  , validateROM
+  , parseROM
   , MBC(..)
   , getMBC
   )
@@ -22,15 +23,20 @@ import           Machine.GBC.MBC
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
 
-data ROM = ROM { romFile :: String
-               , romHeader :: Header
-               , romContent :: B.ByteString
-               } deriving (Eq, Ord, Show)
+data ROM = ROM
+  { romPaths    :: ROMPaths
+  , romHeader   :: Header
+  , romContent  :: B.ByteString
+  } deriving (Eq, Ord, Show)
 
-data CGBSupport = CGBIncompatible | CGBCompatible | CGBExclusive deriving (Eq, Ord, Show, Bounded, Enum)
-data SGBSupport = GBOnly | UsesSGB deriving (Eq, Ord, Show, Bounded, Enum)
-data MBCType = MBC1 | MBC2 | MBC3 | MBC3RTC | MBC5 deriving (Eq, Ord, Show, Bounded, Enum)
-data Destination = Japan | Overseas deriving (Eq, Ord, Show, Bounded, Enum)
+data CGBSupport = CGBIncompatible | CGBCompatible | CGBExclusive
+  deriving (Eq, Ord, Show, Bounded, Enum)
+data SGBSupport = GBOnly | UsesSGB
+  deriving (Eq, Ord, Show, Bounded, Enum)
+data MBCType = MBC1 | MBC2 | MBC3 | MBC3RTC | MBC5
+  deriving (Eq, Ord, Show, Bounded, Enum)
+data Destination = Japan | Overseas
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 data CartridgeType = CartridgeType {
     mbcType :: Maybe MBCType
@@ -54,19 +60,25 @@ data Header = Header {
   , maskROMVersion :: Int
 } deriving (Eq, Ord, Show)
 
-validateROM :: FilePath -> B.ByteString -> Either String ROM
-validateROM file rom = do
-  when (rom `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
-  when (rom `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"
-  when (complementCheck rom /= 0) $ Left "Complement check failed"
-  header <- extractHeader rom
-  when (romSize header /= B.length rom) $ Left
+data ROMPaths = ROMPaths
+  { romFile     :: FilePath
+  , romSaveFile :: FilePath
+  , romRTCFile  :: FilePath
+  } deriving (Eq, Ord, Show)
+
+parseROM :: ROMPaths -> B.ByteString -> Either String ROM
+parseROM romPaths romContent = do
+  when (romContent `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
+  when (romContent `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"
+  when (complementCheck romContent /= 0) $ Left "Complement check failed"
+  romHeader <- extractHeader romContent
+  when (romSize romHeader /= B.length romContent) $ Left
     (  "Incorrect ROM length.  ROM header states length as "
-    <> show (romSize header)
+    <> show (romSize romHeader)
     <> " but image length is actually "
-    <> show (B.length rom)
+    <> show (B.length romContent)
     )
-  pure $ ROM file header rom
+  pure ROM { .. }
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
 
 extractHeader :: B.ByteString -> Either String Header
@@ -145,15 +157,16 @@ extractHeader rom =
 
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
-getMBC (ROM file header _) =
-  let cType     = cartridgeType header
-      allocator = if hasBackupBattery cType then savedRAM file else volatileRAM
-      bankMask  = (romSize header `div` 0x4000) - 1
-      ramMask   = (externalRAM header `div` 0x2000) - 1
+getMBC ROM {..} =
+  let ROMPaths {..} = romPaths
+      cType         = cartridgeType romHeader
+      allocator     = if hasBackupBattery cType then savedRAM romSaveFile else volatileRAM
+      bankMask      = (romSize romHeader `div` 0x4000) - 1
+      ramMask       = (externalRAM romHeader `div` 0x2000) - 1
   in  case mbcType cType of
         Nothing      -> nullMBC
         Just MBC1    -> mbc1 bankMask ramMask allocator
         Just MBC3    -> mbc3 bankMask ramMask allocator nullRTC
-        Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< savedRTC file
+        Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< savedRTC romRTCFile
         Just MBC5    -> mbc5 bankMask ramMask allocator
         Just _       -> nullMBC

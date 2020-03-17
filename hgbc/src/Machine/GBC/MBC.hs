@@ -4,7 +4,7 @@ module Machine.GBC.MBC
   , nullRTC
   , volatileRAM
   , savedRAM
-  , savedRTC
+  , RTC.savedRTC
   , mbc1
   , mbc3
   , mbc5
@@ -15,7 +15,6 @@ import           Machine.GBC.MBC.Interface
 import           Machine.GBC.MBC.MBC1
 import           Machine.GBC.MBC.MBC3
 import           Machine.GBC.MBC.MBC5
-import           System.FilePath
 import           System.IO.MMap
 import qualified Data.Vector.Storable.Mutable  as VSM
 import qualified Machine.GBC.MBC.RTC           as RTC
@@ -42,8 +41,5 @@ volatileRAM = VSM.new
 -- | Allocate non-volatile RAM backed by a file.
 savedRAM :: String -> RAMAllocator
 savedRAM filename size = do
-  (ptr, offset, _) <- mmapFileForeignPtr (filename -<.> "sav") ReadWriteEx (Just (0, size))
+  (ptr, offset, _) <- mmapFileForeignPtr filename ReadWriteEx (Just (0, size))
   pure (VSM.unsafeFromForeignPtr ptr offset size)
-
-savedRTC :: String -> IO RTC
-savedRTC filename = RTC.savedRTC (filename -<.> "rtc")
