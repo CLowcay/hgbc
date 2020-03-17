@@ -14,6 +14,7 @@ import           Data.Word
 import           Machine.GBC.MBC.Interface
 import           Machine.GBC.Util
 import           System.Directory
+import           System.IO
 import           Text.Read
 
 flagHalt :: Word8
@@ -55,6 +56,7 @@ readBase path = do
   case mBase of
     Just base -> pure base
     Nothing   -> do
+      hPutStrLn stderr "RTC file invalid"
       writeBase path 0
       pure 0
 
@@ -62,7 +64,7 @@ writeBase :: FilePath -> Int64 -> IO ()
 writeBase path i = do
   err <- try (writeFile path (show i))
   case err of
-    Left  e  -> putStrLn (displayException (e :: IOException))
+    Left  e  -> hPutStrLn stderr (displayException (e :: IOException))
     Right () -> pure ()
 
 savedRTC :: FilePath -> IO RTC
