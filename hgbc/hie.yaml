@@ -1,6 +1,0 @@
-cradle:
-  stack:
-    - path: "./test"
-      component: "hgbc:test:hgbc-test"
-    - path: "."
-      component: "hgbc:lib"

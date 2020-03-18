@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: dc824627ed1bb0e33a7205f5186bfc8fd5c149d8c8e00ad3492a929f2b165400
+-- hash: aa07ed0ad8536bd0d43125249d5ef851e7c4a3568ec34d9c3ae082f79efb420e
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -24,12 +24,8 @@ source-repository head
   location: https://github.com/CLowcay/hgbc
 
 executable hgbc-sdl
-  main-is: Main.hs
   other-modules:
       Paths_hgbc_sdl
-  hs-source-dirs:
-      src
-  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields -main-is Main
   build-depends:
       OpenGLRaw
     , StateVar

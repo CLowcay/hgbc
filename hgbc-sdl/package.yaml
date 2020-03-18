@@ -26,12 +26,13 @@ dependencies:
 - sdl2
 
 executable:
-  main: Main
-  source-dirs: src
-  ghc-options:
-    - -Wall
-    - -Wcompat
-    - -Wincomplete-uni-patterns
-    - -Wincomplete-record-updates
-    - -Wredundant-constraints
-    - -Wpartial-fields
+  hgbc-sdl:
+    main: Main
+    source-dirs: src
+    ghc-options:
+      - -Wall
+      - -Wcompat
+      - -Wincomplete-uni-patterns
+      - -Wincomplete-record-updates
+      - -Wredundant-constraints
+      - -Wpartial-fields
