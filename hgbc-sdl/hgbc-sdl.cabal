@@ -1,0 +1,39 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: dc824627ed1bb0e33a7205f5186bfc8fd5c149d8c8e00ad3492a929f2b165400
+
+name:           hgbc-sdl
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
+homepage:       https://github.com/CLowcay/hgbc#readme
+bug-reports:    https://github.com/CLowcay/hgbc/issues
+author:         Callum Lowcay
+maintainer:     cwslowcay@gmail.com
+copyright:      2019-2020 Callum Lowcay
+license:        BSD3
+build-type:     Simple
+extra-source-files:
+    ../README.md
+
+source-repository head
+  type: git
+  location: https://github.com/CLowcay/hgbc
+
+executable hgbc-sdl
+  main-is: Main.hs
+  other-modules:
+      Paths_hgbc_sdl
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields -main-is Main
+  build-depends:
+      OpenGLRaw
+    , StateVar
+    , base >=4.7 && <5
+    , hgbc
+    , sdl2
+  default-language: Haskell2010

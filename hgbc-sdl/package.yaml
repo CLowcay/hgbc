@@ -1,4 +1,4 @@
-name:                hgbc
+name:                hgbc-sdl
 version:             0.1.0.0
 github:              "CLowcay/hgbc"
 license:             BSD3
@@ -19,19 +19,14 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
+- OpenGLRaw
+- StateVar
 - base >= 4.7 && < 5
-- binary
-- bytestring
-- directory
-- filepath
-- mmap
-- mtl
-- resourcet
-- primitive
-- time
-- vector
+- hgbc
+- sdl2
 
-library:
+executable:
+  main: Main
   source-dirs: src
   ghc-options:
     - -Wall
@@ -40,19 +35,3 @@ library:
     - -Wincomplete-record-updates
     - -Wredundant-constraints
     - -Wpartial-fields
-    - -Wall-missed-specialisations
-    - -fexpose-all-unfoldings
-    - -fspecialise-aggressively
-    - -fcross-module-specialise
-
-tests:
-  hgbc-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - hgbc
-    - hspec
