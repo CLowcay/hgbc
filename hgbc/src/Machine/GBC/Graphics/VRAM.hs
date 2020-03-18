@@ -7,6 +7,7 @@ module Machine.GBC.Graphics.VRAM
   , writePalette
   , readPalette
   , readRGBPalette
+  , writeRGBPalette
   , readSpritePosition
   , readSpriteAttributes
   , readTile
@@ -90,6 +91,24 @@ readPalette VRAM {..} fg cps = VSM.unsafeRead (VSM.unsafeCast rawPalettes) (pale
 {-# INLINE readRGBPalette #-}
 readRGBPalette :: VRAM -> Bool -> Word8 -> IO Word32
 readRGBPalette VRAM {..} fg addr = VSM.unsafeRead rgbPalettes (paletteIndex fg addr)
+
+-- | Write RGB palette data.
+writeRGBPalette
+  :: VRAM    -- ^ Video RAM.
+  -> Bool    -- ^ True to write a foreground palette, otherwise write a background palette.
+  -> Int     -- ^ The palette number (0 to 7) to write.
+  -> Word32  -- ^ Color 0
+  -> Word32  -- ^ Color 1
+  -> Word32  -- ^ Color 2
+  -> Word32  -- ^ Color 3
+  -> IO ()
+writeRGBPalette VRAM {..} fg i c0 c1 c2 c3 =
+  let base = 4 * i + if fg then 32 else 0
+  in  do
+        VSM.write rgbPalettes base c0
+        VSM.write rgbPalettes (base + 1) c1
+        VSM.write rgbPalettes (base + 2) c2
+        VSM.write rgbPalettes (base + 3) c3
 
 encodeColor :: Word16 -> Word32
 encodeColor color =

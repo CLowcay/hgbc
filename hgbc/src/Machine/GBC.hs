@@ -5,6 +5,8 @@ module Machine.GBC
   , newGraphicsSync
   , audioBuffer
   , getEmulatorClock
+  , writeFgRGBPalette
+  , writeBgRGBPalette
   , step
   , keyUp
   , keyDown
@@ -20,6 +22,7 @@ import           Data.Word
 import           Machine.GBC.Audio
 import           Machine.GBC.Emulator
 import           Machine.GBC.Graphics
+import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Keypad
 import           Machine.GBC.Primitive
 import           Machine.GBC.ROM
@@ -39,3 +42,25 @@ keyUp key = do
 -- | Get the audio output buffer.
 audioBuffer :: EmulatorState -> RingBuffer Word16
 audioBuffer = audioOut . audioState
+
+-- | Set a foreground palette.
+writeFgRGBPalette
+  :: EmulatorState
+  -> Int     -- ^ The foreground palette number (0 to 7) to write.
+  -> Word32  -- ^ Color 0
+  -> Word32  -- ^ Color 1
+  -> Word32  -- ^ Color 2
+  -> Word32  -- ^ Color 3
+  -> IO ()
+writeFgRGBPalette EmulatorState {..} = writeRGBPalette vram True
+
+-- | Set a background palette.
+writeBgRGBPalette
+  :: EmulatorState
+  -> Int     -- ^ The background palette number (0 to 7) to write.
+  -> Word32  -- ^ Color 0
+  -> Word32  -- ^ Color 1
+  -> Word32  -- ^ Color 2
+  -> Word32  -- ^ Color 3
+  -> IO ()
+writeBgRGBPalette EmulatorState {..} = writeRGBPalette vram False
