@@ -17,6 +17,7 @@ module Machine.GBC.ROM
 where
 
 import           Control.Monad
+import           Control.Monad.Writer.Lazy
 import           Data.Binary.Get
 import           Data.Word
 import           Machine.GBC.MBC
@@ -71,14 +72,14 @@ data ROMPaths = ROMPaths
 parseROM
   :: ROMPaths            -- ^ Paths to the ROM files.
   -> B.ByteString        -- ^ The ROM file content.
-  -> Either String ROM
+  -> WriterT String (Either String) ROM
 parseROM romPaths romContent = do
-  when (romContent `B.index` 0x100 /= 0x00) $ Left "Header check 0x100 failed"
-  when (romContent `B.index` 0x101 /= 0xC3) $ Left "Header check 0x101 failed"
-  when (complementCheck romContent /= 0) $ Left "Complement check failed"
-  romHeader <- extractHeader romContent
-  when (romSize romHeader /= B.length romContent) $ Left
-    (  "Incorrect ROM length.  ROM header states length as "
+  when (romContent `B.index` 0x100 /= 0x00) $ tell "Header check 0x100 failed"
+  when (romContent `B.index` 0x101 /= 0xC3) $ tell "Header check 0x101 failed"
+  when (complementCheck romContent /= 0) $ tell "Complement check failed"
+  romHeader <- lift (extractHeader romContent)
+  when (romSize romHeader /= B.length romContent) $ tell
+    (  "Incorrect ROM length. ROM header states length as "
     <> show (romSize romHeader)
     <> " but image length is actually "
     <> show (B.length romContent)
