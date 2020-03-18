@@ -17,6 +17,7 @@ module Machine.GBC.ROM
 where
 
 import           Control.Monad
+import           Control.Monad.Except
 import           Control.Monad.Writer.Lazy
 import           Data.Binary.Get
 import           Data.Word
@@ -72,18 +73,20 @@ data ROMPaths = ROMPaths
 parseROM
   :: ROMPaths            -- ^ Paths to the ROM files.
   -> B.ByteString        -- ^ The ROM file content.
-  -> WriterT String (Either String) ROM
+  -> ExceptT String (Writer [String]) ROM
 parseROM romPaths romContent = do
-  when (romContent `B.index` 0x100 /= 0x00) $ tell "Header check 0x100 failed"
-  when (romContent `B.index` 0x101 /= 0xC3) $ tell "Header check 0x101 failed"
-  when (complementCheck romContent /= 0) $ tell "Complement check failed"
-  romHeader <- lift (extractHeader romContent)
+  when (romContent `B.index` 0x100 /= 0x00) $ tell ["Header check 0x100 failed"]
+  when (romContent `B.index` 0x101 /= 0xC3) $ tell ["Header check 0x101 failed"]
+  when (complementCheck romContent /= 0) $ tell ["Complement check failed"]
+  romHeader <- liftEither (extractHeader romContent)
   when (romSize romHeader /= B.length romContent) $ tell
-    (  "Incorrect ROM length. ROM header states length as "
-    <> show (romSize romHeader)
-    <> " but image length is actually "
-    <> show (B.length romContent)
-    )
+    [ "Incorrect ROM length. ROM header states length as "
+      <> show (romSize romHeader)
+      <> " bytes,"
+      <> " but image length is actually "
+      <> show (B.length romContent)
+      <> " bytes "
+    ]
   pure ROM { .. }
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
 

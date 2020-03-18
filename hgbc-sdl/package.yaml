@@ -22,12 +22,17 @@ dependencies:
 - OpenGLRaw
 - StateVar
 - base >= 4.7 && < 5
+- bytestring
+- directory
+- filepath
 - hgbc
+- mtl
+- optparse-applicative
 - sdl2
 
-executable:
+executables:
   hgbc-sdl:
-    main: Main
+    main:        Main.hs
     source-dirs: src
     ghc-options:
       - -Wall
