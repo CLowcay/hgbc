@@ -23,13 +23,21 @@ import qualified Thread.LCD                    as LCD
 import qualified Window
 
 data Options = Options
-  { debugMode :: Bool
-  , filename  :: FilePath
+  { debugMode   :: Bool
+  , scaleFactor :: Int
+  , filename    :: FilePath
   }
 
 optionsP :: Parser Options
-optionsP = Options <$> switch (long "debug" <> help "Enable the debugger") <*> strArgument
-  (metavar "ROM-FILE" <> help "The ROM file to run")
+optionsP =
+  Options
+    <$> switch (long "debug" <> help "Enable the debugger")
+    <*> option
+          auto
+          (long "scale" <> value 2 <> metavar "SCALE" <> help
+            "Default scale factor for video output"
+          )
+    <*> strArgument (metavar "ROM-FILE" <> help "The ROM file to run")
 
 description :: ParserInfo Options
 description =
@@ -60,14 +68,14 @@ main = do
     Left err -> do
       putStrLn ("Cannot load " <> filename <> " because:")
       putStrLn (" - " <> err)
-    Right rom -> emulator rom
+    Right rom -> emulator rom scaleFactor
 
-emulator :: ROM -> IO ()
-emulator rom = do
+emulator :: ROM -> Int -> IO ()
+emulator rom scaleFactor = do
   graphicsSync    <- newGraphicsSync
   emulatorChannel <- Emulator.new
   let filename = takeBaseName (romFile (romPaths rom))
-  (window, frameBuffer) <- LCD.start filename graphicsSync
+  (window, frameBuffer) <- LCD.start filename scaleFactor graphicsSync
   emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
   audio                 <- Audio.start emulatorState
   EventLoop.start window defaultKeymap emulatorChannel emulatorState

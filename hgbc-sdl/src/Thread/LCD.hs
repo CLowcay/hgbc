@@ -47,15 +47,16 @@ windowTitle romFileName isPaused =
   if isPaused then "GBC *paused* - " <> T.pack romFileName else "GBC - " <> T.pack romFileName
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> GraphicsSync -> IO (Window.Window, Ptr Word8)
-start romFileName sync = do
+start :: FilePath -> Int -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start romFileName scaleFactor sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
     (windowTitle romFileName False)
-    SDL.defaultWindow { SDL.windowInitialSize     = SDL.V2 320 288
-                      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
-                      , SDL.windowResizable       = True
-                      }
+    SDL.defaultWindow
+      { SDL.windowInitialSize     = fromIntegral <$> SDL.V2 (160 * scaleFactor) (144 * scaleFactor)
+      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
+      , SDL.windowResizable       = True
+      }
   frameBufferPointerRef <- newEmptyMVar
   threadId              <- forkOS $ do
     void (SDL.glCreateContext sdlWindow)
