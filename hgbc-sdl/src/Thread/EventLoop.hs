@@ -24,12 +24,13 @@ start window keymap emulator emulatorState = void $ forkOS go
         when (SDL.keyboardEventWindow eventData == Just (Window.sdlWindow window))
           $ case SDL.keyboardEventKeyMotion eventData of
               SDL.Pressed -> case decodeKeysym keymap (SDL.keyboardEventKeysym eventData) of
-                Just (GBCKey key) -> runReaderT (keyDown key) emulatorState
-                _                 -> pure ()
-              SDL.Released -> case decodeKeysym keymap (SDL.keyboardEventKeysym eventData) of
                 Nothing           -> pure ()
-                Just (GBCKey key) -> runReaderT (keyUp key) emulatorState
+                Just (GBCKey key) -> runReaderT (keyDown key) emulatorState
                 Just Pause        -> Emulator.sendNotification emulator Emulator.PauseNotification
+                Just Quit         -> Emulator.sendNotification emulator Emulator.QuitNotification
+              SDL.Released -> case decodeKeysym keymap (SDL.keyboardEventKeysym eventData) of
+                Just (GBCKey key) -> runReaderT (keyUp key) emulatorState
+                _                 -> pure ()
       SDL.QuitEvent -> Emulator.sendNotification emulator Emulator.QuitNotification
       payload       -> Window.dispatchNotification isMainWindow payload
 

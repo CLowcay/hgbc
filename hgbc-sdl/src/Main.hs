@@ -77,13 +77,10 @@ emulator rom = do
           Nothing                         -> emulatorLoop
           Just Emulator.QuitNotification  -> pure ()
           Just Emulator.PauseNotification -> do
-            liftIO $ putStrLn "paused"
             Window.sendNotification window Window.PausedNotification
             notification1 <- Emulator.waitNotification emulatorChannel
-            liftIO $ putStrLn ("notification: " <> show notification1)
             case notification1 of
               Emulator.PauseNotification -> do
-                liftIO $ putStrLn "resume"
                 Window.sendNotification window Window.ResumedNotification
                 emulatorLoop
               Emulator.QuitNotification -> pure ()

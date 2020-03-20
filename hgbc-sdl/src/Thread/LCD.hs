@@ -10,6 +10,7 @@ where
 import           Control.Concurrent
 import           Control.Exception
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.FileEmbed
 import           Data.StateVar
 import           Data.Word
@@ -33,6 +34,7 @@ data WindowContext = WindowContext {
 -- | OpenGL state variables.
 data GLState = GLState {
     scaleProgram            :: !Program
+  , aspectCorrection        :: !(StateVar GLmatrix4)
   , frameVAO                :: !VertexArrayObject
   , frameTexture            :: !Texture
   , frameTextureBuffer      :: !BufferObject
@@ -78,6 +80,9 @@ eventLoop context@WindowContext {..} = mask $ \restore -> do
 
     Left (Window.SizeChangedNotification (SDL.V2 w h)) -> do
       glViewport 0 0 w h
+      matrix <- aspectCorrectionMatrix w h
+      aspectCorrection glState $= matrix
+      glClear GL_COLOR_BUFFER_BIT
       eventLoop context
 
     Left Window.PausedNotification -> do
@@ -122,6 +127,10 @@ setUpOpenGL = do
   linkAttribute scaleProgram position 0 8
   void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
 
+  aspectCorrection        <- linkUniform scaleProgram "aspectCorrection"
+  initialAspectCorrection <- aspectCorrectionMatrix 160 144
+  aspectCorrection $= initialAspectCorrection
+
   activeTextureUnit (TextureUnit 0)
   frameSampler <- linkUniform scaleProgram "frame"
   frameSampler $= TextureUnit 0
@@ -136,3 +145,16 @@ setUpOpenGL = do
                                                                                 (160 * 144 * 4)
 
   pure GLState { .. }
+
+aspectCorrectionMatrix :: MonadIO m => GLsizei -> GLsizei -> m GLmatrix4
+aspectCorrectionMatrix w h | w * 144 == h * 160 = identity
+                           | w * 144 > h * 160  = tooWide
+                           | otherwise          = tooTall
+ where
+  wf       = fromIntegral w
+  hf       = fromIntegral h
+  wc       = 160.0 * hf / 144.0
+  hc       = 144.0 * wf / 160.0
+  identity = makeMatrix ([1, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+  tooWide  = makeMatrix ([wc / wf, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+  tooTall  = makeMatrix ([1, 0, 0, 0] <> [0, hc / hf, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])

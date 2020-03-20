@@ -19,6 +19,7 @@ data Modifier = Control | Alt | Shift
 data Key
   = GBCKey GBC.Key
   | Pause
+  | Quit
   deriving (Eq, Ord, Show)
 
 -- | A mapping from SDL key symbols to 'Key's.
@@ -37,6 +38,7 @@ defaultKeymap = Keymap $ M.fromList
   , ((SDL.ScancodeRight, [])    , GBCKey GBC.KeyRight)
   , ((SDL.ScancodePause, [])    , Pause)
   , ((SDL.ScancodeK, [])        , Pause)
+  , ((SDL.ScancodeQ, [Control]) , Quit)
   ]
 
 -- | Decode an SDL key symbol into a 'Key'.
