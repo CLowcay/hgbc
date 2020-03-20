@@ -14,6 +14,7 @@ import           Machine.GBC
 import           Options.Applicative
 import           System.Directory
 import           System.FilePath
+import qualified Audio
 import qualified Data.ByteString               as B
 import qualified Emulator
 import qualified SDL
@@ -68,7 +69,10 @@ emulator rom = do
   let filename = takeBaseName (romFile (romPaths rom))
   (window, frameBuffer) <- LCD.start filename graphicsSync
   emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
+  audio                 <- Audio.start emulatorState
   EventLoop.start window defaultKeymap emulatorChannel emulatorState
+
+  Audio.resume audio
 
   let emulatorLoop = do
         step
@@ -77,10 +81,12 @@ emulator rom = do
           Nothing                         -> emulatorLoop
           Just Emulator.QuitNotification  -> pure ()
           Just Emulator.PauseNotification -> do
+            Audio.pause audio
             Window.sendNotification window Window.PausedNotification
             notification1 <- Emulator.waitNotification emulatorChannel
             case notification1 of
               Emulator.PauseNotification -> do
+                Audio.resume audio
                 Window.sendNotification window Window.ResumedNotification
                 emulatorLoop
               Emulator.QuitNotification -> pure ()

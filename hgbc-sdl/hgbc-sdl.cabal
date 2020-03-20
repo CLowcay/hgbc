@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 443d9f20f6517edbc0f637ac4bc1215fbef379e63e69bf90e4b497855655c042
+-- hash: 8a16273a5d822947dabe18cba1d735dc2d5949457cf145be6609251ba1e5fff1
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -26,6 +26,7 @@ source-repository head
 executable hgbc-sdl
   main-is: Main.hs
   other-modules:
+      Audio
       Emulator
       GLUtils
       Keymap
