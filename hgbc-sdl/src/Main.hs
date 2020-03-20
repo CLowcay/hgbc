@@ -24,6 +24,7 @@ import qualified Window
 
 data Options = Options
   { debugMode   :: Bool
+  , noSound     :: Bool
   , scaleFactor :: Int
   , filename    :: FilePath
   }
@@ -32,6 +33,7 @@ optionsP :: Parser Options
 optionsP =
   Options
     <$> switch (long "debug" <> help "Enable the debugger")
+    <*> switch (long "no-sound" <> help "Disable audio output")
     <*> option
           auto
           (long "scale" <> value 2 <> metavar "SCALE" <> help
@@ -55,9 +57,9 @@ getROMPaths romFile = do
 main :: IO ()
 main = do
   SDL.initializeAll
-  Options {..} <- execParser description
-  fileContent  <- B.readFile filename
-  romPaths     <- getROMPaths filename
+  allOptions@Options {..} <- execParser description
+  fileContent             <- B.readFile filename
+  romPaths                <- getROMPaths filename
   let (eROM, warnings) = runWriter (runExceptT (parseROM romPaths fileContent))
 
   unless (null warnings) $ do
@@ -68,19 +70,18 @@ main = do
     Left err -> do
       putStrLn ("Cannot load " <> filename <> " because:")
       putStrLn (" - " <> err)
-    Right rom -> emulator rom scaleFactor
+    Right rom -> emulator rom allOptions
 
-emulator :: ROM -> Int -> IO ()
-emulator rom scaleFactor = do
-  graphicsSync    <- newGraphicsSync
-  emulatorChannel <- Emulator.new
-  let filename = takeBaseName (romFile (romPaths rom))
-  (window, frameBuffer) <- LCD.start filename scaleFactor graphicsSync
+emulator :: ROM -> Options -> IO ()
+emulator rom Options {..} = do
+  graphicsSync          <- newGraphicsSync
+  emulatorChannel       <- Emulator.new
+  (window, frameBuffer) <- LCD.start (takeBaseName filename) scaleFactor graphicsSync
   emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
-  audio                 <- Audio.start emulatorState
+  audio                 <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window defaultKeymap emulatorChannel emulatorState
 
-  Audio.resume audio
+  maybe (pure ()) Audio.resume audio
 
   let emulatorLoop = do
         step
@@ -89,12 +90,12 @@ emulator rom scaleFactor = do
           Nothing                         -> emulatorLoop
           Just Emulator.QuitNotification  -> pure ()
           Just Emulator.PauseNotification -> do
-            Audio.pause audio
+            maybe (pure ()) Audio.pause audio
             Window.sendNotification window Window.PausedNotification
             notification1 <- Emulator.waitNotification emulatorChannel
             case notification1 of
               Emulator.PauseNotification -> do
-                Audio.resume audio
+                maybe (pure ()) Audio.resume audio
                 Window.sendNotification window Window.ResumedNotification
                 emulatorLoop
               Emulator.QuitNotification -> pure ()
