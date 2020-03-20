@@ -1,6 +1,7 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Thread.LCD
   ( start
@@ -12,16 +13,19 @@ import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.FileEmbed
+import           Data.Functor
 import           Data.StateVar
 import           Data.Word
-import           Foreign.Ptr
 import           Foreign.Marshal.Array
+import           Foreign.Ptr
 import           GLUtils
 import           Graphics.GL.Core44
 import           Machine.GBC
+import           SDL.Extras
 import qualified Data.ByteString               as B
 import qualified Data.Text                     as T
 import qualified SDL
+import qualified SDL.Raw
 import qualified Window
 
 -- | Window state.
@@ -29,6 +33,9 @@ data WindowContext = WindowContext {
     sdlWindow       :: !SDL.Window
   , romFileName     :: !FilePath
   , sync            :: !GraphicsSync
+  , displayIndex    :: !DisplayIndex  -- ^ The SDL display that the current window is centred on.
+  , framesPerVsync  :: !Double
+  , speed           :: !Double        -- ^ Speed relative to full speed (60fps)
   , glState         :: !GLState
 }
 
@@ -46,9 +53,17 @@ windowTitle :: FilePath -> Bool -> T.Text
 windowTitle romFileName isPaused =
   if isPaused then "GBC *paused* - " <> T.pack romFileName else "GBC - " <> T.pack romFileName
 
+getFramesPerVsync :: DisplayIndex -> Double -> IO Double
+getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
+  Nothing -> 1
+  Just mode ->
+    let rawRefreshRate = SDL.Raw.displayModeRefreshRate mode
+        refreshRate    = (15 :: Int) * round (fromIntegral rawRefreshRate / 15.0 :: Double)
+    in  fromIntegral refreshRate / (60.0 * speed)
+
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> Int -> GraphicsSync -> IO (Window.Window, Ptr Word8)
-start romFileName scaleFactor sync = do
+start :: FilePath -> Int -> Double -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start romFileName scaleFactor speed sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
     (windowTitle romFileName False)
@@ -57,6 +72,8 @@ start romFileName scaleFactor sync = do
       , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
       , SDL.windowResizable       = True
       }
+  displayIndex          <- getWindowDisplayIndex sdlWindow
+  framesPerVsync        <- getFramesPerVsync displayIndex speed
   frameBufferPointerRef <- newEmptyMVar
   threadId              <- forkOS $ do
     void (SDL.glCreateContext sdlWindow)
@@ -64,7 +81,7 @@ start romFileName scaleFactor sync = do
     glState <- setUpOpenGL
     putMVar frameBufferPointerRef (frameTextureBufferBytes glState)
 
-    eventLoop WindowContext { .. }
+    eventLoop 0 WindowContext { .. }
     SDL.destroyWindow sdlWindow
 
   frameBufferPointer <- takeMVar frameBufferPointerRef
@@ -72,8 +89,17 @@ start romFileName scaleFactor sync = do
   pure (Window.new sdlWindow threadId, frameBufferPointer)
 
 -- | The main event loop for the renderer.
-eventLoop :: WindowContext -> IO ()
-eventLoop context@WindowContext {..} = mask $ \restore -> do
+--
+-- A note on speed control:
+--
+-- There are two refresh rates to consider, the simulated refresh rate (60fps *
+-- speed), and the hardware refresh rate (determined by the user's display
+-- hardware). These refresh rates might not divide evenly. As such, the number
+-- of frames to render for each simulated frame is a floating point number. We
+-- can only render a whole number of frames, so the fractional remainder is
+-- accumulated and passed on to the next iteration of the 'eventLoop'.
+eventLoop :: Double -> WindowContext -> IO ()
+eventLoop extraFrames context@WindowContext {..} = mask $ \restore -> do
   signal <- try (restore (takeMVar (signalWindow sync)))
   case signal of
     Left Window.CloseNotification ->
@@ -85,29 +111,63 @@ eventLoop context@WindowContext {..} = mask $ \restore -> do
       matrix <- aspectCorrectionMatrix w h
       aspectCorrection glState $= matrix
       glClear GL_COLOR_BUFFER_BIT
-      eventLoop context
+      eventLoop extraFrames context
 
-    Left Window.PausedNotification -> do
+    Left (Window.MovedNotification _) -> eventLoop extraFrames =<< updateFramesPerSync context
+
+    Left Window.PausedNotification    -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName True
-      eventLoop context
+      eventLoop extraFrames context
 
     Left Window.ResumedNotification -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName False
-      eventLoop context
+      eventLoop extraFrames context
 
     Right () -> do
-      bindBuffer PixelUpload (frameTextureBuffer glState)
-      glFlushMappedBufferRange GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 4)
-      bindTexture Texture2D (frameTexture glState)
-      glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGBA GL_UNSIGNED_BYTE nullPtr
+      let frames = extraFrames + framesPerVsync
+
+      if frames < 1
+        then do
+          void $ tryPutMVar (bufferAvailable sync) ()
+          eventLoop frames context
+        else do
+          bindBuffer PixelUpload (frameTextureBuffer glState)
+          glFlushMappedBufferRange GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 4)
+          bindTexture Texture2D (frameTexture glState)
+          glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGBA GL_UNSIGNED_BYTE nullPtr
+
+          extraFrames' <- renderFrames frames
+          eventLoop extraFrames' context
+
+ where
+  -- Draw as many frames as required
+  renderFrames frames
+    | frames < 1 = pure frames
+    | frames < 2 = do
+      -- This is the last frame, so notify that we're done with the buffer.
       glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
       glFinish
-
       void $ tryPutMVar (bufferAvailable sync) ()
       SDL.glSwapWindow sdlWindow
-      eventLoop context
+      renderFrames (frames - 1)
+    | otherwise = do
+      -- There is at least one more frame after this one, so put out the frame
+      -- quickly and carry one.
+      glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+      SDL.glSwapWindow sdlWindow
+      renderFrames (frames - 1)
 
--- | Position of the scanline.
+-- | Update framesPerVsync based on the current refresh rate.
+updateFramesPerSync :: WindowContext -> IO WindowContext
+updateFramesPerSync context = do
+  display <- getWindowDisplayIndex (sdlWindow context)
+  if display == displayIndex context
+    then pure context
+    else do
+      f <- getFramesPerVsync display (speed context)
+      pure (context { displayIndex = display, framesPerVsync = f })
+
+-- | Position of the output point.
 position :: Attribute
 position = Attribute "position" 2 Ints PerVertex KeepInteger
 

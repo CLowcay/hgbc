@@ -26,6 +26,7 @@ data Options = Options
   { debugMode   :: Bool
   , noSound     :: Bool
   , scaleFactor :: Int
+  , speedFactor :: Double
   , filename    :: FilePath
   }
 
@@ -39,6 +40,9 @@ optionsP =
           (long "scale" <> value 2 <> metavar "SCALE" <> help
             "Default scale factor for video output"
           )
+    <*> option
+          auto
+          (long "speed" <> value 1 <> metavar "SPEED" <> help "Speed as a fraction of normal speed")
     <*> strArgument (metavar "ROM-FILE" <> help "The ROM file to run")
 
 description :: ParserInfo Options
@@ -76,19 +80,24 @@ emulator :: ROM -> Options -> IO ()
 emulator rom Options {..} = do
   graphicsSync          <- newGraphicsSync
   emulatorChannel       <- Emulator.new
-  (window, frameBuffer) <- LCD.start (takeBaseName filename) scaleFactor graphicsSync
+  (window, frameBuffer) <- LCD.start (takeBaseName filename) scaleFactor speedFactor graphicsSync
   emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
   audio                 <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window defaultKeymap emulatorChannel emulatorState
 
   maybe (pure ()) Audio.resume audio
 
+  let onQuit =
+        -- Switch off audio so that the audio callback is not invoked
+        -- after the Haskell RTS has shut down.
+        maybe (pure ()) Audio.pause audio
+
   let emulatorLoop = do
         step
         notification <- Emulator.getNotification emulatorChannel
         case notification of
           Nothing                         -> emulatorLoop
-          Just Emulator.QuitNotification  -> pure ()
+          Just Emulator.QuitNotification  -> onQuit
           Just Emulator.PauseNotification -> do
             maybe (pure ()) Audio.pause audio
             Window.sendNotification window Window.PausedNotification
@@ -98,6 +107,6 @@ emulator rom Options {..} = do
                 maybe (pure ()) Audio.resume audio
                 Window.sendNotification window Window.ResumedNotification
                 emulatorLoop
-              Emulator.QuitNotification -> pure ()
+              Emulator.QuitNotification -> onQuit
 
   runReaderT (reset >> emulatorLoop) emulatorState

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8a16273a5d822947dabe18cba1d735dc2d5949457cf145be6609251ba1e5fff1
+-- hash: 62b518ac1e7b77776338c52112e204a439c6b0e84541b6112d83b6a197c574bb
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -30,6 +30,7 @@ executable hgbc-sdl
       Emulator
       GLUtils
       Keymap
+      SDL.Extras
       Thread.EventLoop
       Thread.LCD
       Window

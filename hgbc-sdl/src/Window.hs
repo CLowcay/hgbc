@@ -22,6 +22,7 @@ data Notification
   | PausedNotification                     -- ^ The emulator has been paused.
   | ResumedNotification                    -- ^ The emulator has been resumed.
   | SizeChangedNotification (SDL.V2 Int32) -- ^ The window size was changed.
+  | MovedNotification (SDL.Point SDL.V2 Int32) -- ^ The window was moved.
   deriving (Eq, Ord, Show)
 
 instance Exception Notification
@@ -48,6 +49,8 @@ dispatchNotification lookup event = case event of
     maybeSendNotification (lookup window) CloseNotification
   (SDL.WindowSizeChangedEvent (SDL.WindowSizeChangedEventData window size)) ->
     maybeSendNotification (lookup window) (SizeChangedNotification size)
+  (SDL.WindowMovedEvent (SDL.WindowMovedEventData window position)) ->
+    maybeSendNotification (lookup window) (MovedNotification position)
   _ -> pure ()
  where
   maybeSendNotification Nothing       _            = pure ()
