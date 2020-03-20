@@ -3,6 +3,7 @@ module Machine.GBC
   ( initEmulatorState
   , reset
   , parseROM
+  , requiresSaveFiles
   , newGraphicsSync
   , audioBuffer
   , getEmulatorClock

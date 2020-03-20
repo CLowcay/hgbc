@@ -52,8 +52,7 @@ description =
 getROMPaths :: FilePath -> IO ROMPaths
 getROMPaths romFile = do
   baseDir <- getAppUserDataDirectory "hgbc" <&> (</> "rom")
-  let romDir = baseDir </> takeBaseName romFile
-  createDirectoryIfMissing True romDir
+  let romDir      = baseDir </> takeBaseName romFile
   let romSaveFile = romDir </> "battery"
   let romRTCFile  = romDir </> "rtc"
   pure ROMPaths { .. }
@@ -74,7 +73,10 @@ main = do
     Left err -> do
       putStrLn ("Cannot load " <> filename <> " because:")
       putStrLn (" - " <> err)
-    Right rom -> emulator rom allOptions
+    Right rom -> do
+      when (requiresSaveFiles rom) $ do
+        createDirectoryIfMissing True (takeDirectory (romSaveFile romPaths))
+      emulator rom allOptions
 
 emulator :: ROM -> Options -> IO ()
 emulator rom Options {..} = do

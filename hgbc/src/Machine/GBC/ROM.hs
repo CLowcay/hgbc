@@ -11,6 +11,7 @@ module Machine.GBC.ROM
   , CartridgeType(..)
   , Header(..)
   , parseROM
+  , requiresSaveFiles
   , MBC(..)
   , getMBC
   )
@@ -68,6 +69,10 @@ data ROMPaths = ROMPaths
   , romSaveFile :: FilePath  -- ^ Save file for the battery backed memory.
   , romRTCFile  :: FilePath  -- ^ Save file for the battery backed RTC.
   } deriving (Eq, Ord, Show)
+
+requiresSaveFiles :: ROM -> Bool
+requiresSaveFiles rom =
+  let CartridgeType {..} = cartridgeType (romHeader rom) in hasBackupBattery || mbcType == Just MBC3RTC
 
 -- | Parse a ROM file.
 parseROM
