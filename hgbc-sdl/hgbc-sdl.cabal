@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 956eb30f9e8650c7f16e2596c5d1b56e5897a1a6228474eaf6451d5181afd108
+-- hash: 443d9f20f6517edbc0f637ac4bc1215fbef379e63e69bf90e4b497855655c042
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -26,19 +26,30 @@ source-repository head
 executable hgbc-sdl
   main-is: Main.hs
   other-modules:
+      Emulator
+      GLUtils
+      Keymap
+      Thread.EventLoop
+      Thread.LCD
+      Window
       Paths_hgbc_sdl
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
   build-depends:
       OpenGLRaw
     , StateVar
     , base >=4.7 && <5
     , bytestring
+    , containers
     , directory
+    , file-embed
     , filepath
     , hgbc
     , mtl
     , optparse-applicative
+    , resourcet
     , sdl2
+    , stm
+    , text
   default-language: Haskell2010

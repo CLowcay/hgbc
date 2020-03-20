@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC
   ( initEmulatorState
+  , reset
   , parseROM
   , newGraphicsSync
   , audioBuffer
@@ -12,14 +13,17 @@ module Machine.GBC
   , keyDown
   , ROMPaths(..)
   , ROM(..)
+  , Key(..)
   , Header(..)
   , GraphicsSync(..)
+  , EmulatorState(..)
   )
 where
 
 import           Control.Monad.Reader
 import           Data.Word
 import           Machine.GBC.Audio
+import           Machine.GBC.CPU
 import           Machine.GBC.Emulator
 import           Machine.GBC.Graphics
 import           Machine.GBC.Graphics.VRAM
