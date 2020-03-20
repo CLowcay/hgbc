@@ -15,6 +15,7 @@ import           Data.FileEmbed
 import           Data.StateVar
 import           Data.Word
 import           Foreign.Ptr
+import           Foreign.Marshal.Array
 import           GLUtils
 import           Graphics.GL.Core44
 import           Machine.GBC
@@ -143,6 +144,7 @@ setUpOpenGL = do
   (frameTextureBuffer, frameTextureBufferBytes) <- makeWritablePersistentBuffer ExplicitFlush
                                                                                 PixelUpload
                                                                                 (160 * 144 * 4)
+  pokeArray frameTextureBufferBytes (replicate (160 * 144 * 4) 0)
 
   pure GLState { .. }
 
