@@ -1,0 +1,23 @@
+# Speed relative to full speed
+speed = 1
+# Video scale factor
+scale = 2
+
+# Keybindings. Key names are the same as the unshifted symbol on the key. For
+# example puctuation keys are '`', '[', ']', etc. Special keys are 'Esc',
+# 'Tab', 'LShift', 'RShift', 'LControl', 'RControl', 'LAlt', 'RAlt', 'Enter',
+# 'Backspace', 'PrintScreen', 'Pause', 'Up', 'Down', 'Left', 'Right', 'Insert',
+# 'Home', 'End', 'PageUp', 'F1', etc. Keypad keys are 'KP1', 'KP2', 'KPEnter',
+# 'KP.', etc. Modifiers can be added with prefixes 'C-', 'S-', 'A-' for
+# control, shift, and alt respectively.
+[keypad]
+a = 'Z'
+b = 'X'
+start = 'Backspace'
+select = 'Enter'
+up = 'Up'
+down = 'Down'
+left = 'Left'
+right = 'Right'
+pause = ['Pause', 'C-K']
+quit = ['C-Q']

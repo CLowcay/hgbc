@@ -12,6 +12,7 @@ import           Control.Concurrent
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Identity
 import           Data.FileEmbed
 import           Data.Functor
 import           Data.StateVar
@@ -22,6 +23,7 @@ import           GLUtils
 import           Graphics.GL.Core44
 import           Machine.GBC
 import           SDL.Extras
+import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.Text                     as T
 import qualified SDL
@@ -62,16 +64,15 @@ getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
     in  fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> Int -> Double -> GraphicsSync -> IO (Window.Window, Ptr Word8)
-start romFileName scaleFactor speed sync = do
+start :: FilePath -> Config.Config Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start romFileName Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
     (windowTitle romFileName False)
-    SDL.defaultWindow
-      { SDL.windowInitialSize     = fromIntegral <$> SDL.V2 (160 * scaleFactor) (144 * scaleFactor)
-      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
-      , SDL.windowResizable       = True
-      }
+    SDL.defaultWindow { SDL.windowInitialSize = fromIntegral <$> SDL.V2 (160 * scale) (144 * scale)
+                      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
+                      , SDL.windowResizable = True
+                      }
   displayIndex          <- getWindowDisplayIndex sdlWindow
   framesPerVsync        <- getFramesPerVsync displayIndex speed
   frameBufferPointerRef <- newEmptyMVar
