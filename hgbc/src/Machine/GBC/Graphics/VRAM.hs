@@ -105,10 +105,17 @@ writeRGBPalette
 writeRGBPalette VRAM {..} fg i c0 c1 c2 c3 =
   let base = 4 * i + if fg then 32 else 0
   in  do
-        VSM.write rgbPalettes base c0
-        VSM.write rgbPalettes (base + 1) c1
-        VSM.write rgbPalettes (base + 2) c2
-        VSM.write rgbPalettes (base + 3) c3
+        VSM.write rgbPalettes base (swizzle c0)
+        VSM.write rgbPalettes (base + 1) (swizzle c1)
+        VSM.write rgbPalettes (base + 2) (swizzle c2)
+        VSM.write rgbPalettes (base + 3) (swizzle c3)
+ where
+  swizzle x =
+    let r = x .>>. 24
+        g = (x .>>. 16) .&. 0xFF
+        b = (x .>>. 8) .&. 0xFF
+        a = x .&. 0xFF
+    in  (a .<<. 24) .|. (b .<<. 16) .|. (g .<<. 8) .|. r
 
 encodeColor :: Word16 -> Word32
 encodeColor color =

@@ -25,6 +25,7 @@ import           Data.Word
 import           Foreign.ForeignPtr
 import           Foreign.Ptr
 import           Foreign.Storable
+import           Foreign.Marshal.Array
 import           Machine.GBC.CPU.Interrupts
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Mode
@@ -140,6 +141,9 @@ initGraphics vram mode frameBufferBytes portIF = mdo
 
   lineAssemblySpace    <- mallocForeignPtrBytes 160
   spritePriorityBuffer <- mallocForeignPtrBytes 160
+
+  withForeignPtr lineAssemblySpace $ \p -> pokeArray p (replicate 160 0)
+  withForeignPtr spritePriorityBuffer $ \p -> pokeArray p (replicate 160 0)
 
   pure GraphicsState { .. }
 
@@ -490,7 +494,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
                )
             )
           $ do
-              pokeElemOff assemblySpace  outPos (blendInfo .|. pixel)
+              pokeElemOff assemblySpace outPos (blendInfo .|. pixel)
               pokeElemOff priorityBuffer outPos priority
       go (i + 1)
 
@@ -501,20 +505,21 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
     obp0 <- readPort portOBP0
     obp1 <- readPort portOBP1
 
-    let go !offset = do
-          blendResult <- peekElemOff assemblySpace offset
-          let (palette, index) = decodeBlendInfo blendResult
-          let paletteData = case palette of
-                0 -> bgp :: Word8
-                1 -> obp0
-                2 -> obp1
-                _ -> error "Framebuffer corrupted"
-          let pixel = (3 - ((paletteData .>>. (fromIntegral index * 2)) .&. 0x03)) * 85
-          let outputOffset = offset * 4
-          pokeElemOff outputBase outputOffset       pixel
-          pokeElemOff outputBase (outputOffset + 1) pixel
-          pokeElemOff outputBase (outputOffset + 2) pixel
-          if offset >= 159 then pure () else go (offset + 1)
+    let
+      go !offset = do
+        blendResult <- peekElemOff assemblySpace offset
+        let (palette, index) = decodeBlendInfo blendResult
+        let paletteData = case palette of
+              0 -> bgp :: Word8
+              1 -> obp0
+              2 -> obp1
+              x -> error ("Framebuffer corrupted " <> show x <> " at " <> show offset)
+        let mappedIndex = 3 - ((paletteData .>>. (fromIntegral index * 2)) .&. 0x03)
+        color <- readRGBPalette vram
+                                (palette > 0)
+                                (if palette == 2 then 4 .|. mappedIndex else mappedIndex)
+        pokeElemOff (castPtr outputBase) offset color
+        if offset >= 159 then pure () else go (offset + 1)
 
     go 0
 
