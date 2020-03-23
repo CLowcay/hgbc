@@ -7,6 +7,9 @@
 
 module Config
   ( Config(..)
+  , Options(..)
+  , optionsToConfig
+  , optionsP
   , parseConfig
   , parseConfigFile
   , finalize
@@ -21,7 +24,9 @@ import           Data.Maybe
 import           Data.Monoid
 import           Data.Word
 import           Keymap
+import           Machine.GBC
 import           Machine.GBC.Util
+import           Options.Applicative
 import qualified Data.ByteString               as B
 import qualified Data.HashMap.Strict           as HM
 import qualified Data.Text                     as T
@@ -32,6 +37,43 @@ import qualified Data.Vector                   as V
 import qualified Text.Toml                     as Toml
 import qualified Text.Toml.Types               as Toml
 
+data Options = Options
+  { optionDebugMode       :: Bool
+  , optionNoSound         :: Bool
+  , optionScale           :: Maybe Int
+  , optionSpeed           :: Maybe Double
+  , optionColorCorrection :: Maybe ColorCorrection
+  , optionFilename        :: FilePath
+  }
+
+optionsToConfig :: Options -> Config.Config Maybe
+optionsToConfig Options {..} = mempty { Config.scale           = optionScale
+                                      , Config.speed           = optionSpeed
+                                      , Config.colorCorrection = optionColorCorrection
+                                      }
+
+optionsP :: Parser Options
+optionsP =
+  Options
+    <$> switch (long "debug" <> help "Enable the debugger")
+    <*> switch (long "no-sound" <> help "Disable audio output")
+    <*> option
+          (Just <$> auto)
+          (long "scale" <> value Nothing <> metavar "SCALE" <> help
+            "Default scale factor for video output"
+          )
+    <*> option
+          (Just <$> auto)
+          (long "speed" <> value Nothing <> metavar "SPEED" <> help
+            "Speed as a fraction of normal speed"
+          )
+    <*> option
+          (Just <$> eitherReader (decodeColorCorrection . T.pack))
+          (long "color-correction" <> value Nothing <> metavar "CORRECTION-MODE" <> help
+            "Color correction mode. Recognized values are 'none' and 'default'"
+          )
+    <*> strArgument (metavar "ROM-FILE" <> help "The ROM file to run")
+
 type family HKD f a where
   HKD Identity a = a
   HKD f a        = f a
@@ -41,6 +83,7 @@ type Palette = (Word32, Word32, Word32, Word32)
 data Config f = Config
   { speed :: HKD f Double
   , scale :: HKD f Int
+  , colorCorrection :: HKD f ColorCorrection
   , keypad :: HKD f Keymap
   , backgroundPalette :: HKD f Palette
   , sprite1Palette :: HKD f Palette
@@ -57,6 +100,7 @@ deriving instance Show (Config Maybe)
 instance Semigroup (Config Maybe) where
   left <> right = Config { speed             = lastOf speed
                          , scale             = lastOf scale
+                         , colorCorrection   = lastOf colorCorrection
                          , keypad            = keypad left <> keypad right
                          , backgroundPalette = lastOf backgroundPalette
                          , sprite1Palette    = lastOf sprite1Palette
@@ -67,11 +111,12 @@ instance Semigroup (Config Maybe) where
     lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
 
 instance Monoid (Config Maybe) where
-  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing
+  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 finalize :: Config Maybe -> Config Identity
 finalize Config {..} = Config { speed             = fromMaybe 1 speed
                               , scale             = fromMaybe 2 scale
+                              , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
                               , keypad            = fromMaybe defaultKeymap keypad
                               , backgroundPalette = fromMaybe defaultPalette backgroundPalette
                               , sprite1Palette    = fromMaybe defaultPalette sprite1Palette
@@ -92,13 +137,16 @@ parseConfig filename contents = case Toml.parseTomlDoc filename contents of
 decodeConfig :: Toml.Table -> Either [String] (Config Maybe)
 decodeConfig = decodeTable rootTable
  where
-  rootTable ("speed", Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
-  rootTable ("speed", Toml.VFloat f  ) = Right (mempty { speed = Just f })
-  rootTable ("scale", Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("speed"           , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
+  rootTable ("speed"           , Toml.VFloat f  ) = Right (mempty { speed = Just f })
+  rootTable ("scale"           , Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("color-correction", Toml.VString t ) = do
+    v <- first pure (decodeColorCorrection t)
+    pure (mempty { colorCorrection = Just v })
   rootTable ("keypad", Toml.VTable keypadTable) =
     bimap keypadError (\k -> mempty { keypad = Just k }) (decodeKeymap keypadTable)
   rootTable ("colors", Toml.VTable table) = decodeTable colorTable table
-  rootTable (key     , value            ) = Left ["Invalid row " <> show key <> " = " <> show value]
+  rootTable (key     , v                ) = Left ["Invalid row " <> show key <> " = " <> show v]
 
   colorTable ("background", Toml.VArray v) = do
     p <- paletteNode =<< decodeArray colorNode v
@@ -109,16 +157,14 @@ decodeConfig = decodeTable rootTable
   colorTable ("sprite2", Toml.VArray v) = do
     p <- paletteNode =<< decodeArray colorNode v
     pure (mempty { sprite2Palette = Just p })
-  colorTable (key, value) =
-    Left ["Invalid row in colors section " <> show key <> " = " <> show value]
+  colorTable (key, v) = Left ["Invalid row in colors section " <> show key <> " = " <> show v]
 
   colorNode (Toml.VString t) = decodeColor t
   colorNode x                = Left ("Expected a color, got " <> show x)
   paletteNode [c0, c1, c2, c3] = Right (c0, c1, c2, c3)
   paletteNode x = Left ["A palette must have four colors, not " <> show (length x) <> " colors"]
 
-  keypadError =
-    fmap (\(key, value) -> "Invalid row in keypad section: " <> show key <> " = " <> value)
+  keypadError = fmap (\(key, v) -> "Invalid row in keypad section: " <> show key <> " = " <> v)
 
 decodeArray :: (Toml.Node -> Either String a) -> V.Vector Toml.Node -> Either [String] [a]
 decodeArray decode array = case partitionEithers (decode <$> V.toList array) of
@@ -130,6 +176,11 @@ decodeTable
 decodeTable decode table = case partitionEithers (decode <$> HM.toList table) of
   ([]    , rows) -> Right (mconcat rows)
   (errors, _   ) -> Left (mconcat errors)
+
+decodeColorCorrection :: T.Text -> Either String ColorCorrection
+decodeColorCorrection "none"    = Right NoColorCorrection
+decodeColorCorrection "default" = Right DefaultColorCorrection
+decodeColorCorrection x         = Left ("Unknown color correction mode " <> show x)
 
 decodeColor :: T.Text -> Either String Word32
 decodeColor t = case T.stripPrefix "#" t of

@@ -54,13 +54,13 @@ instance HasCPU EmulatorState where
 -- | Create a new 'EmulatorState' given a 'ROM', a 'GraphicsSync', and a pointer
 -- to the output frame buffer. The frame buffer is a 32bit RGB buffer with
 -- 160x144 pixels.
-initEmulatorState :: ROM -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
-initEmulatorState rom graphicsSync frameBufferBytes = mdo
+initEmulatorState :: ROM -> ColorCorrection -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
+initEmulatorState rom colorCorrection graphicsSync frameBufferBytes = mdo
   let mode = case cgbSupport (romHeader rom) of
         CGBCompatible   -> CGB
         CGBExclusive    -> CGB
         CGBIncompatible -> DMG
-  vram <- initVRAM mode
+  vram <- initVRAM mode colorCorrection
 
   writeRGBPalette vram True  0 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
   writeRGBPalette vram True  1 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)

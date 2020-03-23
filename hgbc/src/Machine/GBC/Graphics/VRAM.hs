@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC.Graphics.VRAM
   ( VRAM
+  , ColorCorrection(..)
   , initVRAM
   , setVRAMAccessible
   , setVRAMBank
@@ -31,6 +32,14 @@ import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
 
+-- | The color correction scheme to use.
+data ColorCorrection
+  = NoColorCorrection
+  | DefaultColorCorrection
+  deriving (Eq, Ord, Show)
+
+type ColorFunction = (Word16, Word16, Word16) -> (Word32, Word32, Word32)
+
 data VRAM = VRAM {
     vram           :: !(VSM.IOVector Word8)
   , oam            :: !(VSM.IOVector Word8)
@@ -39,13 +48,14 @@ data VRAM = VRAM {
   , mode           :: !EmulatorMode
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(UnboxedRef Int)
+  , colorFunction  :: !ColorFunction
 }
 
 totalPaletteEntries :: Int
 totalPaletteEntries = 8 * 4 * 2 -- 2 sets of 8 palettes with 4 colors each.
 
-initVRAM :: EmulatorMode -> IO VRAM
-initVRAM mode = do
+initVRAM :: EmulatorMode -> ColorCorrection -> IO VRAM
+initVRAM mode colorCorrection = do
   let size = case mode of
         DMG -> 0x2000
         CGB -> 0x4000
@@ -55,6 +65,10 @@ initVRAM mode = do
   vramBank       <- newUnboxedRef 0
   rawPalettes    <- VSM.replicate totalPaletteEntries 0x7FFF
   rgbPalettes    <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
+  let colorFunction = case colorCorrection of
+        NoColorCorrection      -> vgaColors
+        DefaultColorCorrection -> defaultColors
+
   pure VRAM { .. }
 
 {-# INLINE setVRAMAccessible #-}
@@ -74,13 +88,12 @@ paletteIndex :: Bool -> Word8 -> Int
 paletteIndex fg addr = (if fg then 8 * 4 else 0) + fromIntegral addr .&. 0x1F
 
 -- | Write a palette given the values of the cps and cpd registers.
-{-# INLINE writePalette #-}
 writePalette :: VRAM -> Bool -> Word8 -> Word8 -> IO ()
 writePalette VRAM {..} fg cps cpd = do
   VSM.unsafeWrite (VSM.unsafeCast rawPalettes) (paletteByte fg cps) cpd
   let i = paletteIndex fg (cps .>>. 1)
   raw <- VSM.unsafeRead rawPalettes i
-  VSM.unsafeWrite rgbPalettes i (encodeColor raw)
+  VSM.unsafeWrite rgbPalettes i (encodeColor colorFunction raw)
 
 -- | Read a palette given the value of the cps register.
 {-# INLINE readPalette #-}
@@ -113,23 +126,6 @@ writeRGBPalette VRAM {..} fg i (c0, c1, c2, c3) =
         b = (x .>>. 8) .&. 0xFF
         a = x .&. 0xFF
     in  (a .<<. 24) .|. (b .<<. 16) .|. (g .<<. 8) .|. r
-
-encodeColor :: Word16 -> Word32
-encodeColor color =
-  let b            = (color .>>. 10) .&. 0x1F
-      g            = (color .>>. 5) .&. 0x1F
-      r            = color .&. 0x1F
-      (r', g', b') = cgbColors (fromIntegral r, fromIntegral g, fromIntegral b)
-  in  (fromIntegral b' .<<. 16) .|. (fromIntegral g' .<<. 8) .|. fromIntegral r'
-
-type ColorCorrection = (Int, Int, Int) -> (Word8, Word8, Word8)
-
-cgbColors :: ColorCorrection
-cgbColors (r, g, b) =
-  let r' = 960 `min` (r * 26 + g * 4 + b * 2)
-      g' = 960 `min` (g * 24 + b * 8)
-      b' = 960 `min` (r * 6 + g * 4 + b * 22)
-  in  (fromIntegral (r' `div` 4), fromIntegral (g' `div` 4), fromIntegral (b' `div` 4))
 
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)
@@ -197,12 +193,28 @@ writeVRAM VRAM {..} addr value = do
       VSM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
 
 -- Copy a slice of memory into OAM.  The slice MUST have length 160.
-{-# INLINE copyToOAM #-}
 copyToOAM :: VRAM -> VSM.IOVector Word8 -> IO ()
 copyToOAM VRAM {..} = VSM.unsafeMove oam
 
 -- DMA from VRAM to OAM does not respect the VRAM bank according to the docs.
-{-# INLINE copyVRAMToOAM #-}
 copyVRAMToOAM :: VRAM -> Word16 -> IO ()
 copyVRAMToOAM VRAM {..} from =
   VSM.unsafeMove oam (VSM.unsafeSlice (fromIntegral from - 0x8000) 160 vram)
+
+encodeColor :: ColorFunction -> Word16 -> Word32
+encodeColor correction color =
+  let b            = (color .>>. 10) .&. 0x1F
+      g            = (color .>>. 5) .&. 0x1F
+      r            = color .&. 0x1F
+      (r', g', b') = correction (r, g, b)
+  in  (b' .<<. 16) .|. (g' .<<. 8) .|. r'
+
+vgaColors :: ColorFunction
+vgaColors (r, g, b) = (fromIntegral (8 * r), fromIntegral (8 * g), fromIntegral (8 * b))
+
+defaultColors :: ColorFunction
+defaultColors (r, g, b) =
+  let r' = 960 `min` (r * 26 + g * 4 + b * 2)
+      g' = 960 `min` (g * 24 + b * 8)
+      b' = 960 `min` (r * 6 + g * 4 + b * 22)
+  in  (fromIntegral (r' `div` 4), fromIntegral (g' `div` 4), fromIntegral (b' `div` 4))

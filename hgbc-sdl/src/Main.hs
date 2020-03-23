@@ -26,46 +26,19 @@ import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
 import qualified Window
 
-data Options = Options
-  { debugMode   :: Bool
-  , noSound     :: Bool
-  , scaleFactor :: Maybe Int
-  , speedFactor :: Maybe Double
-  , filename    :: FilePath
-  }
 
-optionsToConfig :: Options -> Config.Config Maybe
-optionsToConfig Options {..} = mempty { Config.scale = scaleFactor, Config.speed = speedFactor }
-
-optionsP :: Parser Options
-optionsP =
-  Options
-    <$> switch (long "debug" <> help "Enable the debugger")
-    <*> switch (long "no-sound" <> help "Disable audio output")
-    <*> option
-          (Just <$> auto)
-          (long "scale" <> value Nothing <> metavar "SCALE" <> help
-            "Default scale factor for video output"
-          )
-    <*> option
-          (Just <$> auto)
-          (long "speed" <> value Nothing <> metavar "SPEED" <> help
-            "Speed as a fraction of normal speed"
-          )
-    <*> strArgument (metavar "ROM-FILE" <> help "The ROM file to run")
-
-description :: ParserInfo Options
+description :: ParserInfo Config.Options
 description =
-  info (optionsP <**> helper) (fullDesc <> header "hgbc-sdl - a Gameboy Color emulator")
+  info (Config.optionsP <**> helper) (fullDesc <> header "hgbc-sdl - a Gameboy Color emulator")
 
 hgbcBaseDir :: IO FilePath
 hgbcBaseDir = getAppUserDataDirectory "hgbc"
 
-getEffectiveConfig :: ROM -> Options -> IO (Config.Config Identity)
+getEffectiveConfig :: ROM -> Config.Options -> IO (Config.Config Identity)
 getEffectiveConfig rom options = do
   mainConfig <- getMainConfig
   romConfig  <- getROMConfig (romPaths rom)
-  pure (Config.finalize (mainConfig <> romConfig <> optionsToConfig options))
+  pure (Config.finalize (mainConfig <> romConfig <> Config.optionsToConfig options))
 
 getMainConfig :: IO (Config.Config Maybe)
 getMainConfig = do
@@ -104,38 +77,38 @@ getROMPaths romFile = do
 main :: IO ()
 main = do
   SDL.initializeAll
-  allOptions@Options {..} <- execParser description
-  fileContent             <- B.readFile filename
-  romPaths                <- getROMPaths filename
+  allOptions@Config.Options {..} <- execParser description
+  fileContent                    <- B.readFile optionFilename
+  romPaths                       <- getROMPaths optionFilename
   let (eROM, warnings) = runWriter (runExceptT (parseROM romPaths fileContent))
 
   unless (null warnings) $ do
-    putStrLn ("Some problems were detected in " <> filename <> ":")
+    putStrLn ("Some problems were detected in " <> optionFilename <> ":")
     for_ warnings $ \message -> putStrLn (" - " <> message)
 
   case eROM of
     Left err -> do
-      putStrLn ("Cannot load " <> filename <> " because:")
+      putStrLn ("Cannot load " <> optionFilename <> " because:")
       putStrLn (" - " <> err)
     Right rom -> do
       when (requiresSaveFiles rom)
         $ createDirectoryIfMissing True (takeDirectory (romSaveFile romPaths))
       emulator rom allOptions
 
-emulator :: ROM -> Options -> IO ()
-emulator rom allOptions@Options {..} = do
+emulator :: ROM -> Config.Options -> IO ()
+emulator rom allOptions@Config.Options {..} = do
   config                <- getEffectiveConfig rom allOptions
   graphicsSync          <- newGraphicsSync
   emulatorChannel       <- Emulator.new
-  (window, frameBuffer) <- LCD.start (takeBaseName filename) config graphicsSync
-  emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
+  (window, frameBuffer) <- LCD.start (takeBaseName optionFilename) config graphicsSync
+  emulatorState <- initEmulatorState rom (Config.colorCorrection config) graphicsSync frameBuffer
 
   when (mode emulatorState == DMG) $ do
     writeBgRGBPalette emulatorState 0 (Config.backgroundPalette config)
     writeFgRGBPalette emulatorState 0 (Config.sprite1Palette config)
     writeFgRGBPalette emulatorState 1 (Config.sprite2Palette config)
 
-  audio <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
+  audio <- if optionNoSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
   maybe (pure ()) Audio.resume audio

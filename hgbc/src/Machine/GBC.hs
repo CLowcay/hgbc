@@ -14,6 +14,7 @@ module Machine.GBC
   , keyDown
   , ROMPaths(..)
   , ROM(..)
+  , ColorCorrection(..)
   , Key(..)
   , Header(..)
   , GraphicsSync(..)
