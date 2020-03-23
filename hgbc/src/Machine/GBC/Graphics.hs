@@ -66,13 +66,19 @@ data GraphicsState = GraphicsState {
   -- bit 6 ~ 5: DMG palette
   -- bit 4 ~ 2: CGB palette
   -- bit 1 ~ 0: Index into palette
-  , lineAssemblySpace :: !(VUM.IOVector Word8)
+  , lineAssemblySpace :: !(VUM.IOVector PixelInfo)
   -- | Each byte in this buffer corresponds to one of the pixels in the
   -- lineAssembly space. When a sprite pixel is drawn, the x-position of that
   -- sprite is written to the spritePriorityBuffer. This allows us to simulate
   -- the DMG behavior where sprites with lower x-positions take priority.
   , spritePriorityBuffer :: !(VUM.IOVector Int8)
 }
+
+type Index = Word8     -- 0 ~ 3
+type Palette = Word8   -- 0 ~ 7, only valid for CGB.
+type Layer = Word8     -- 0, 1, or 2.  0 for background, 1 for sprite layer 1, 2 for sprite layer 2.
+type BGPriority = Bool -- True if the background layer has priority.
+type PixelInfo = (Index, (Layer, Palette, BGPriority))
 
 -- | Graphics synchronization objects. The output thread should wait on
 -- signalWindow, then draw the buffer, then put to bufferAvailable when it is
@@ -139,7 +145,7 @@ initGraphics vram mode frameBufferBytes portIF = mdo
       setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
       pure vbk
 
-  lineAssemblySpace    <- VUM.replicate 168 0
+  lineAssemblySpace    <- VUM.replicate 168 (0, (0, 0, False))
   spritePriorityBuffer <- VUM.replicate 168 0
 
   pure GraphicsState { .. }
@@ -320,39 +326,20 @@ graphicsRegisters GraphicsState {..} = do
 dmgBackgroundTileAttrs :: Word8
 dmgBackgroundTileAttrs = 0
 
-{-# INLINE getBlendInfo #-}
-getBlendInfo :: Word8 -> Word8
-getBlendInfo attrs =
-  let priorityToBackground = isFlagSet flagDisplayPriority attrs
-      cgbPalette           = attrs .&. 7
-  in  (if priorityToBackground then 0x80 else 0) .|. (cgbPalette .<<. 2)
+{-# INLINE getBackgroundBlendInfo #-}
+getBackgroundBlendInfo :: Word8 -> (Layer, Palette, BGPriority)
+getBackgroundBlendInfo attrs =
+  let cgbPalette = (attrs .&. 7) .<<. 2 in (0, cgbPalette, isFlagSet flagDisplayPriority attrs)
 
 {-# INLINE getSpriteBlendInfo #-}
-getSpriteBlendInfo :: Word8 -> Word8
+getSpriteBlendInfo :: Word8 -> (Layer, Palette, BGPriority)
 getSpriteBlendInfo attrs =
-  let priorityToBackground = isFlagSet flagDisplayPriority attrs
-      dmgPalette           = isFlagSet flagOAMPalette attrs
-      cgbPalette           = attrs .&. 7
-  in  (if priorityToBackground then 0x80 else 0)
-        .|. (cgbPalette .<<. 2)
-        .|. (if dmgPalette then 0x40 else 0x20)
+  let layer      = if isFlagSet flagOAMPalette attrs then 2 else 1
+      cgbPalette = (attrs .&. 7) .<<. 2
+  in  (layer, cgbPalette, isFlagSet flagDisplayPriority attrs)
 
-decodeBlendInfo :: Word8 -> (Word8, Int)
-decodeBlendInfo blendInfo =
-  let palette = (blendInfo .>>. 5) .&. 3
-      index   = blendInfo .&. 3
-  in  (palette, fromIntegral index)
-
-cgbDecodeBlendInfo :: Word8 -> (Word8, Bool)
-cgbDecodeBlendInfo blendInfo = (blendInfo .&. 0x1F, blendInfo .&. blendInfoDMGPaletteMask /= 0)
-
-blendInfoDMGPaletteMask :: Word8
-blendInfoDMGPaletteMask = 0x60
-
-blendInfoIndexMask :: Word8
-blendInfoIndexMask = 3
-
-renderLine :: GraphicsState -> Word8 -> VUM.IOVector Word8 -> VUM.IOVector Int8 -> Ptr Word8 -> IO ()
+renderLine
+  :: GraphicsState -> Word8 -> VUM.IOVector PixelInfo -> VUM.IOVector Int8 -> Ptr Word8 -> IO ()
 renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
   scx  <- readPort portSCX
   scy  <- readPort portSCY
@@ -419,7 +406,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
         (byte0, byte1) <- if isFlagSet flagBank tileAttrs
           then readBankedTileData vram (tileDataBase + fontLineOffset)
           else readTileData vram (tileDataBase + fontLineOffset)
-        outPos' <- pixelMachine byte0 byte1 (getBlendInfo tileAttrs) hflip 7 outPos
+        outPos' <- pixelMachine byte0 byte1 (getBackgroundBlendInfo tileAttrs) hflip 7 outPos
         go ((inPos + 1) .&. 0x1F) outPos'  -- wrap inPos back to 0 when it gets to the end of the line
 
   {-# INLINE decodePixel #-}
@@ -437,7 +424,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
       then go (byteOffset - 1) (pixelOffset + 1)
       else do
         let pixel = decodePixel byte0 byte1 (if hflip then 7 - byteOffset else byteOffset)
-        VUM.write assemblySpace pixelOffset (blendInfo .|. pixel)
+        VUM.unsafeWrite assemblySpace pixelOffset (pixel, blendInfo)
         if byteOffset == 0 then pure (pixelOffset + 1) else go (byteOffset - 1) (pixelOffset + 1)
 
   -- Write sprites to the assembly area.
@@ -472,26 +459,25 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
           blendSprite priority hflip blendInfo byte0 byte1 xOffset
         pure True
 
-  blendSprite !priority !hflip !blendInfo !byte0 !byte1 !outOffset = go 0
+  blendSprite !priority !hflip blendInfo@(_, _, blendBgPriority) !byte0 !byte1 !outOffset = go 0
    where
     go 8  = pure ()
     go !i = do
       let pixel = decodePixel byte0 byte1 (if hflip then i else 7 - i)
       let outPos = outOffset + i
       when (pixel /= 0 && outPos >= 0) $ do
-        previous         <- VUM.read assemblySpace outPos
-        previousPriority <- VUM.read priorityBuffer outPos
-        let drawOverSprite = previous .&. blendInfoDMGPaletteMask /= 0
-        let bgPriority     = (blendInfo .|. previous) .&. 0x80 /= 0
+        (previousPixel, (previousLayer, _, previousBgPriority)) <- VUM.unsafeRead assemblySpace
+                                                                                  outPos
+        previousPriority <- VUM.unsafeRead priorityBuffer outPos
+        let drawOverSprite = previousLayer /= 0
+        let bgPriority     = blendBgPriority || previousBgPriority
         when
             (  (drawOverSprite && priority < previousPriority)
-            || (  not drawOverSprite
-               && (not bgPriority || (bgPriority && (previous .&. blendInfoIndexMask == 0)))
-               )
+            || (not drawOverSprite && (not bgPriority || (bgPriority && (previousPixel == 0))))
             )
           $ do
-              VUM.write assemblySpace  outPos (blendInfo .|. pixel)
-              VUM.write priorityBuffer outPos priority
+              VUM.unsafeWrite assemblySpace outPos (pixel, blendInfo)
+              VUM.unsafeWrite priorityBuffer outPos priority
       go (i + 1)
 
   -- Generate actual pixel data in the frame texture buffer based on the data in
@@ -503,17 +489,16 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
     let
       go !offset = do
-        blendResult <- VUM.read assemblySpace offset
-        let (palette, index) = decodeBlendInfo blendResult
-        let paletteData = case palette of
+        (index, (layer, _, _)) <- VUM.unsafeRead assemblySpace offset
+        let paletteData = case layer of
               0 -> bgp :: Word8
               1 -> obp0
               2 -> obp1
               x -> error ("Framebuffer corrupted " <> show x <> " at " <> show offset)
         let mappedIndex = 3 - ((paletteData .>>. (fromIntegral index * 2)) .&. 0x03)
         color <- readRGBPalette vram
-                                (palette > 0)
-                                (if palette == 2 then 4 .|. mappedIndex else mappedIndex)
+                                (layer > 0)
+                                (if layer == 2 then 4 .|. mappedIndex else mappedIndex)
         pokeElemOff (castPtr outputBase) offset color
         if offset >= 159 then pure () else go (offset + 1)
 
@@ -522,8 +507,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
   applyCGBPalettes = go 0
    where
     go !offset = do
-      blendResult <- VUM.read assemblySpace offset
-      let (colorIndex, isForeground) = cgbDecodeBlendInfo blendResult
-      color <- readRGBPalette vram isForeground colorIndex
+      (index, (layer, palette, _)) <- VUM.unsafeRead assemblySpace offset
+      color                        <- readRGBPalette vram (layer > 0) (index .|. palette)
       pokeElemOff (castPtr outputBase) offset color
       if offset >= 159 then pure () else go (offset + 1)
