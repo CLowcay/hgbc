@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE BangPatterns #-}
@@ -22,16 +23,15 @@ import           Data.Bits
 import           Data.Functor
 import           Data.Int
 import           Data.Word
-import           Foreign.ForeignPtr
 import           Foreign.Ptr
 import           Foreign.Storable
-import           Foreign.Marshal.Array
 import           Machine.GBC.CPU.Interrupts
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import qualified Data.Vector.Unboxed.Mutable   as VUM
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
@@ -57,7 +57,7 @@ data GraphicsState = GraphicsState {
   , portVBK       :: !(Port Word8)
   , portIF        :: !(Port Word8)
   , vram          :: !VRAM
-  , mode :: !EmulatorMode
+  , mode          :: !EmulatorMode
   , frameBufferBytes :: !(Ptr Word8)
 
   -- | This is a temporary area for blending the background, window, and
@@ -66,12 +66,12 @@ data GraphicsState = GraphicsState {
   -- bit 6 ~ 5: DMG palette
   -- bit 4 ~ 2: CGB palette
   -- bit 1 ~ 0: Index into palette
-  , lineAssemblySpace :: !(ForeignPtr Word8)
+  , lineAssemblySpace :: !(VUM.IOVector Word8)
   -- | Each byte in this buffer corresponds to one of the pixels in the
   -- lineAssembly space. When a sprite pixel is drawn, the x-position of that
   -- sprite is written to the spritePriorityBuffer. This allows us to simulate
   -- the DMG behavior where sprites with lower x-positions take priority.
-  , spritePriorityBuffer :: !(ForeignPtr Int8)
+  , spritePriorityBuffer :: !(VUM.IOVector Int8)
 }
 
 -- | Graphics synchronization objects. The output thread should wait on
@@ -139,11 +139,8 @@ initGraphics vram mode frameBufferBytes portIF = mdo
       setVRAMBank vram (if vbk .&. 1 == 0 then 0 else 0x2000)
       pure vbk
 
-  lineAssemblySpace    <- mallocForeignPtrBytes 160
-  spritePriorityBuffer <- mallocForeignPtrBytes 160
-
-  withForeignPtr lineAssemblySpace $ \p -> pokeArray p (replicate 160 0)
-  withForeignPtr spritePriorityBuffer $ \p -> pokeArray p (replicate 160 0)
+  lineAssemblySpace    <- VUM.replicate 168 0
+  spritePriorityBuffer <- VUM.replicate 168 0
 
   pure GraphicsState { .. }
 
@@ -262,9 +259,7 @@ graphicsStep graphicsState@GraphicsState {..} graphicsSync clockAdvance = do
 
         when (mode' == HBlank) $ do
           let outputBase = frameBufferBytes `plusPtr` (fromIntegral line' * 640)
-          withForeignPtr lineAssemblySpace $ \lineAssembly ->
-            withForeignPtr spritePriorityBuffer $ \priorityBuffer ->
-              renderLine graphicsState line' lineAssembly priorityBuffer outputBase
+          renderLine graphicsState line' lineAssemblySpace spritePriorityBuffer outputBase
           setVRAMAccessible vram True
 
         when (mode' == VBlank) $ do
@@ -357,7 +352,7 @@ blendInfoDMGPaletteMask = 0x60
 blendInfoIndexMask :: Word8
 blendInfoIndexMask = 3
 
-renderLine :: GraphicsState -> Word8 -> Ptr Word8 -> Ptr Int8 -> Ptr Word8 -> IO ()
+renderLine :: GraphicsState -> Word8 -> VUM.IOVector Word8 -> VUM.IOVector Int8 -> Ptr Word8 -> IO ()
 renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
   scx  <- readPort portSCX
   scy  <- readPort portSCY
@@ -433,8 +428,8 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
   -- Write pixels to the assembly area. Takes two bytes containing the pixel
   -- data, the bit offset into the bytes, and the x position to output the
-  -- pixels to. Returns the final x position. Negative values for outPos are
-  -- acceptable, pixelMachine will skip pixels that were scheduled to go to
+  -- pixels to. Returns the final x position. Negative values for pixelOffset
+  -- are acceptable, pixelMachine will skip pixels that were scheduled to go to
   -- negative positions.
   pixelMachine !byte0 !byte1 !blendInfo !hflip = go
    where
@@ -442,7 +437,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
       then go (byteOffset - 1) (pixelOffset + 1)
       else do
         let pixel = decodePixel byte0 byte1 (if hflip then 7 - byteOffset else byteOffset)
-        pokeElemOff assemblySpace pixelOffset (blendInfo .|. pixel)
+        VUM.write assemblySpace pixelOffset (blendInfo .|. pixel)
         if byteOffset == 0 then pure (pixelOffset + 1) else go (byteOffset - 1) (pixelOffset + 1)
 
   -- Write sprites to the assembly area.
@@ -460,20 +455,21 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
     if not spriteVisible
       then pure False
       else do
-        (rawCode, attrs) <- readSpriteAttributes vram offset
-        let code  = if h == 16 then rawCode .&. 0xFE else rawCode
-        let vflip = isFlagSet flagVerticalFlip attrs
-        let hflip = isFlagSet flagHorizontalFlip attrs
-        let fontLineOffset = (16 * fromIntegral code) + 2 * fromIntegral
-              (if vflip then y + h - 17 - line else line + 16 - y)
-        let blendInfo = getSpriteBlendInfo attrs
-        let xOffset   = fromIntegral x - 8
-        (byte0, byte1) <- if mode == CGB && isFlagSet flagBank attrs
-          then readBankedTileData vram fontLineOffset
-          else readTileData vram fontLineOffset
+        when (x < 168) $ do
+          (rawCode, attrs) <- readSpriteAttributes vram offset
+          let code  = if h == 16 then rawCode .&. 0xFE else rawCode
+          let vflip = isFlagSet flagVerticalFlip attrs
+          let hflip = isFlagSet flagHorizontalFlip attrs
+          let fontLineOffset = (16 * fromIntegral code) + 2 * fromIntegral
+                (if vflip then y + h - 17 - line else line + 16 - y)
+          let blendInfo = getSpriteBlendInfo attrs
+          let xOffset   = fromIntegral x - 8
+          (byte0, byte1) <- if mode == CGB && isFlagSet flagBank attrs
+            then readBankedTileData vram fontLineOffset
+            else readTileData vram fontLineOffset
 
-        let priority = if mode == CGB then 0 else fromIntegral xOffset
-        blendSprite priority hflip blendInfo byte0 byte1 xOffset
+          let priority = if mode == CGB then 0 else fromIntegral xOffset
+          blendSprite priority hflip blendInfo byte0 byte1 xOffset
         pure True
 
   blendSprite !priority !hflip !blendInfo !byte0 !byte1 !outOffset = go 0
@@ -481,10 +477,10 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
     go 8  = pure ()
     go !i = do
       let pixel = decodePixel byte0 byte1 (if hflip then i else 7 - i)
-      unless (pixel == 0) $ do
-        let outPos = outOffset + i
-        previous         <- peekElemOff assemblySpace outPos
-        previousPriority <- peekElemOff priorityBuffer outPos
+      let outPos = outOffset + i
+      when (pixel /= 0 && outPos >= 0) $ do
+        previous         <- VUM.read assemblySpace outPos
+        previousPriority <- VUM.read priorityBuffer outPos
         let drawOverSprite = previous .&. blendInfoDMGPaletteMask /= 0
         let bgPriority     = (blendInfo .|. previous) .&. 0x80 /= 0
         when
@@ -494,8 +490,8 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
                )
             )
           $ do
-              pokeElemOff assemblySpace outPos (blendInfo .|. pixel)
-              pokeElemOff priorityBuffer outPos priority
+              VUM.write assemblySpace  outPos (blendInfo .|. pixel)
+              VUM.write priorityBuffer outPos priority
       go (i + 1)
 
   -- Generate actual pixel data in the frame texture buffer based on the data in
@@ -507,7 +503,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
 
     let
       go !offset = do
-        blendResult <- peekElemOff assemblySpace offset
+        blendResult <- VUM.read assemblySpace offset
         let (palette, index) = decodeBlendInfo blendResult
         let paletteData = case palette of
               0 -> bgp :: Word8
@@ -526,7 +522,7 @@ renderLine GraphicsState {..} line assemblySpace priorityBuffer outputBase = do
   applyCGBPalettes = go 0
    where
     go !offset = do
-      blendResult <- peekElemOff assemblySpace offset
+      blendResult <- VUM.read assemblySpace offset
       let (colorIndex, isForeground) = cgbDecodeBlendInfo blendResult
       color <- readRGBPalette vram isForeground colorIndex
       pokeElemOff (castPtr outputBase) offset color

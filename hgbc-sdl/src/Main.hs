@@ -124,12 +124,12 @@ main = do
 
 emulator :: ROM -> Options -> IO ()
 emulator rom allOptions@Options {..} = do
-  config                <- getEffectiveConfig rom allOptions
-  graphicsSync          <- newGraphicsSync
-  emulatorChannel       <- Emulator.new
+  config <- getEffectiveConfig rom allOptions
+  graphicsSync <- newGraphicsSync
+  emulatorChannel <- Emulator.new
   (window, frameBuffer) <- LCD.start (takeBaseName filename) config graphicsSync
-  emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
-  audio                 <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
+  emulatorState <- initEmulatorState rom graphicsSync frameBuffer
+  audio <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
   maybe (pure ()) Audio.resume audio

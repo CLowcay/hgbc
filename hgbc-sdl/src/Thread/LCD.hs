@@ -17,7 +17,6 @@ import           Data.FileEmbed
 import           Data.Functor
 import           Data.StateVar
 import           Data.Word
-import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           GLUtils
 import           Graphics.GL.Core44
@@ -82,7 +81,7 @@ start romFileName Config.Config {..} sync = do
     glState <- setUpOpenGL
     putMVar frameBufferPointerRef (frameTextureBufferBytes glState)
 
-    eventLoop 0 WindowContext { .. }
+    mask $ \_ -> eventLoop 0 WindowContext { .. }
     SDL.destroyWindow sdlWindow
 
   frameBufferPointer <- takeMVar frameBufferPointerRef
@@ -100,8 +99,8 @@ start romFileName Config.Config {..} sync = do
 -- can only render a whole number of frames, so the fractional remainder is
 -- accumulated and passed on to the next iteration of the 'eventLoop'.
 eventLoop :: Double -> WindowContext -> IO ()
-eventLoop extraFrames context@WindowContext {..} = mask $ \restore -> do
-  signal <- try (restore (takeMVar (signalWindow sync)))
+eventLoop extraFrames context@WindowContext {..} = do
+  signal <- try (takeMVar (signalWindow sync))
   case signal of
     Left Window.CloseNotification ->
       -- Drain the signal MVar to prevent the emulator thread from blocking.
@@ -206,7 +205,6 @@ setUpOpenGL = do
   (frameTextureBuffer, frameTextureBufferBytes) <- makeWritablePersistentBuffer ExplicitFlush
                                                                                 PixelUpload
                                                                                 (160 * 144 * 4)
-  pokeArray frameTextureBufferBytes (replicate (160 * 144 * 4) 0)
 
   pure GLState { .. }
 
