@@ -62,9 +62,9 @@ initEmulatorState rom graphicsSync frameBufferBytes = mdo
         CGBIncompatible -> DMG
   vram <- initVRAM mode
 
-  writeRGBPalette vram True  0 0x0f380fff 0x306230ff 0x8bac0fff 0x9bbc0fff
-  writeRGBPalette vram True  1 0x0f380fff 0x306230ff 0x8bac0fff 0x9bbc0fff
-  writeRGBPalette vram False 0 0x0f380fff 0x306230ff 0x8bac0fff 0x9bbc0fff
+  writeRGBPalette vram True  0 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
+  writeRGBPalette vram True  1 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
+  writeRGBPalette vram False 0 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
 
   portIF        <- newPort 0xE0 0x1F alwaysUpdate
   portIE        <- newPort 0x00 0xFF alwaysUpdate

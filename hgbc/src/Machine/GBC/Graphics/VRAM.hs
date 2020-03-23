@@ -97,12 +97,9 @@ writeRGBPalette
   :: VRAM    -- ^ Video RAM.
   -> Bool    -- ^ True to write a foreground palette, otherwise write a background palette.
   -> Int     -- ^ The palette number (0 to 7) to write.
-  -> Word32  -- ^ Color 0
-  -> Word32  -- ^ Color 1
-  -> Word32  -- ^ Color 2
-  -> Word32  -- ^ Color 3
+  -> (Word32, Word32, Word32, Word32)
   -> IO ()
-writeRGBPalette VRAM {..} fg i c0 c1 c2 c3 =
+writeRGBPalette VRAM {..} fg i (c0, c1, c2, c3) =
   let base = 4 * i + if fg then 32 else 0
   in  do
         VSM.write rgbPalettes base (swizzle c0)

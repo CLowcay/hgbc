@@ -36,6 +36,7 @@ dependencies:
 - stm
 - text
 - unordered-containers
+- vector
 
 executables:
   hgbc-sdl:

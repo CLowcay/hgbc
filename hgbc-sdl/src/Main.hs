@@ -124,11 +124,17 @@ main = do
 
 emulator :: ROM -> Options -> IO ()
 emulator rom allOptions@Options {..} = do
-  config <- getEffectiveConfig rom allOptions
-  graphicsSync <- newGraphicsSync
-  emulatorChannel <- Emulator.new
+  config                <- getEffectiveConfig rom allOptions
+  graphicsSync          <- newGraphicsSync
+  emulatorChannel       <- Emulator.new
   (window, frameBuffer) <- LCD.start (takeBaseName filename) config graphicsSync
-  emulatorState <- initEmulatorState rom graphicsSync frameBuffer
+  emulatorState         <- initEmulatorState rom graphicsSync frameBuffer
+
+  when (mode emulatorState == DMG) $ do
+    writeBgRGBPalette emulatorState 0 (Config.backgroundPalette config)
+    writeFgRGBPalette emulatorState 0 (Config.sprite1Palette config)
+    writeFgRGBPalette emulatorState 1 (Config.sprite2Palette config)
+
   audio <- if noSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 

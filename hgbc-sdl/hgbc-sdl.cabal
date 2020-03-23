@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7a286ff2cff1af92189837fadc6bdbf02ddbca336f199f0242c2ab10b1c586c4
+-- hash: ab19e364ad3ab1c49bf52a8d862dc892c03445730ccbf209b42eb3b57f0f6762
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -57,4 +57,5 @@ executable hgbc-sdl
     , stm
     , text
     , unordered-containers
+    , vector
   default-language: Haskell2010

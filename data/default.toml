@@ -13,11 +13,22 @@ scale = 2
 [keypad]
 a = 'Z'
 b = 'X'
-start = 'Backspace'
-select = 'Enter'
+start = 'Enter'
+select = 'Backspace'
 up = 'Up'
 down = 'Down'
 left = 'Left'
 right = 'Right'
 pause = ['Pause', 'C-K']
 quit = ['C-Q']
+
+# Colors for gameboy original games (games without Gameboy Color support).
+[colors]
+# Grayscale colors.
+background = ['#000', '#555', '#aaa', '#fff']
+sprite1 = ['#000', '#555', '#aaa', '#fff']
+sprite2 = ['#000', '#555', '#aaa', '#fff']
+# Simulated original gameboy LCD colors.
+# background = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']
+# sprite1 = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']
+# sprite2 = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']

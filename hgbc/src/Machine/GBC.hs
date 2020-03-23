@@ -17,6 +17,7 @@ module Machine.GBC
   , Key(..)
   , Header(..)
   , GraphicsSync(..)
+  , EmulatorMode(..)
   , EmulatorState(..)
   )
 where
@@ -29,6 +30,7 @@ import           Machine.GBC.Emulator
 import           Machine.GBC.Graphics
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Keypad
+import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.ROM
 
@@ -52,10 +54,7 @@ audioBuffer = audioOut . audioState
 writeFgRGBPalette
   :: EmulatorState
   -> Int     -- ^ The foreground palette number (0 to 7) to write.
-  -> Word32  -- ^ Color 0
-  -> Word32  -- ^ Color 1
-  -> Word32  -- ^ Color 2
-  -> Word32  -- ^ Color 3
+  -> (Word32, Word32, Word32, Word32)
   -> IO ()
 writeFgRGBPalette EmulatorState {..} = writeRGBPalette vram True
 
@@ -63,9 +62,6 @@ writeFgRGBPalette EmulatorState {..} = writeRGBPalette vram True
 writeBgRGBPalette
   :: EmulatorState
   -> Int     -- ^ The background palette number (0 to 7) to write.
-  -> Word32  -- ^ Color 0
-  -> Word32  -- ^ Color 1
-  -> Word32  -- ^ Color 2
-  -> Word32  -- ^ Color 3
+  -> (Word32, Word32, Word32, Word32)
   -> IO ()
 writeBgRGBPalette EmulatorState {..} = writeRGBPalette vram False
