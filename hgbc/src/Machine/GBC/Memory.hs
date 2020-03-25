@@ -40,6 +40,7 @@ import qualified Data.Vector.Storable.Mutable  as VSM
 data Memory = Memory {
     mode           :: !EmulatorMode
   , mbc            :: !MBC
+  , bootROMLockout :: !(UnboxedRef Int)
   , header         :: !Header
   , rom            :: !(VS.Vector Word8)
   , vram           :: !VRAM
@@ -84,19 +85,60 @@ initMemory
   -> EmulatorMode
   -> IO Memory
 initMemory rom header mbc vram rawPorts portIE mode = do
-  memRam        <- VSM.new 0x10000
-  memHigh       <- VSM.new 0x80
-  emptyPort     <- newPort 0xFF 0x00 neverUpdate
+  memRam         <- VSM.new 0x10000
+  memHigh        <- VSM.new 0x80
+  emptyPort      <- newPort 0xFF 0x00 neverUpdate
+  bootROMLockout <- newUnboxedRef 0
 
-  ramBankOffset <- newUnboxedRef 0
-  svbk          <- newPort 0xF8 0x07 $ \_ newValue -> do
-    let bank = fromIntegral (newValue .&. 7)
-    writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
-    pure newValue
+  ramBankOffset  <- newUnboxedRef 0
 
-  let ports = V.accum (flip const)
-                      (V.replicate 128 emptyPort)
-                      (first portOffset <$> ((SVBK, svbk) : rawPorts))
+  -- SVBK: RAM bank.
+  svbk           <- case mode of
+    DMG -> pure emptyPort
+    CGB -> newPort 0xF8 0x07 $ \_ newValue -> do
+      let bank = fromIntegral (newValue .&. 7)
+      writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
+      pure newValue
+
+  -- BLCK: BIOS lockout.
+  blck <- newPort 0xFE 0xFE $ \oldValue newValue -> do
+    when (isFlagSet 1 newValue) $ writeUnboxedRef bootROMLockout 1
+    pure (newValue .|. oldValue)
+
+  -- Undocumented registers
+  r4c <- newPortWithReadAction
+    0x00
+    0xFF
+    (\a -> do
+      lockout <- readUnboxedRef bootROMLockout
+      pure (if lockout == 0 then a else 0xFF)
+    )
+    alwaysUpdate
+  r6c <- case mode of
+    DMG -> pure emptyPort
+    CGB -> newPort 0xFE 0xFE alwaysUpdate
+  r72 <- newPort 0x00 0x00 alwaysUpdate
+  r73 <- newPort 0x00 0x00 alwaysUpdate
+  r74 <- case mode of
+    DMG -> pure emptyPort
+    CGB -> newPort 0x00 0x00 alwaysUpdate
+  r75 <- newPort 0x8F 0x70 alwaysUpdate
+
+  let ports = V.accum
+        (flip const)
+        (V.replicate 128 emptyPort)
+        (   first portOffset
+        <$> ( (BLCK, blck)
+            : (SVBK, svbk)
+            : (R4C , r4c)
+            : (R6C , r6c)
+            : (R72 , r72)
+            : (R73 , r73)
+            : (R74 , r74)
+            : (R75 , r75)
+            : rawPorts
+            )
+        )
 
   checkRAMAccess <- newIORef False
   pure Memory { .. }
@@ -133,9 +175,7 @@ dmaToOAM source = do
       check <- liftIO (readIORef checkRAMAccess)
       copyToOAM vram =<< sliceRAM mbc check (source - 0xA000) oamSize
     6
-      | source < 0xD000 || mode == DMG -> copyToOAM
-        vram
-        (VSM.unsafeSlice (offset 0xC000) oamSize memRam)
+      | source < 0xD000 -> copyToOAM vram (VSM.unsafeSlice (offset 0xC000) oamSize memRam)
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
         copyToOAM vram (VSM.unsafeSlice (bank + offset 0xC000) oamSize memRam)
@@ -160,7 +200,7 @@ readByte addr = do
       check <- liftIO (readIORef checkRAMAccess)
       readRAM mbc check (addr - 0xA000)
     6
-      | addr < 0xD000 || mode == DMG -> VSM.unsafeRead memRam (offset 0xC000)
+      | addr < 0xD000 -> VSM.unsafeRead memRam (offset 0xC000)
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
         VSM.unsafeRead memRam (bank + offset 0xC000)
@@ -198,7 +238,7 @@ writeByte addr value = do
       check <- liftIO (readIORef checkRAMAccess)
       writeRAM mbc check (addr - 0xA000) value
     6
-      | addr < 0xD000 || mode == DMG -> VSM.unsafeWrite memRam (offset 0xC000) value
+      | addr < 0xD000 -> VSM.unsafeWrite memRam (offset 0xC000) value
       | otherwise -> do
         bank <- readUnboxedRef ramBankOffset
         VSM.unsafeWrite memRam (bank + offset 0xC000) value

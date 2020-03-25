@@ -77,7 +77,7 @@ instance HasMemory CPUTestState where
 
 withNewCPU :: CPUM CPUTestState () -> IO ()
 withNewCPU computation = mdo
-  vram        <- initVRAM DMG
+  vram        <- initVRAM DMG NoColorCorrection
   portIF      <- newPort 0x00 0x1F alwaysUpdate
   portIE      <- newPort 0x00 0xFF alwaysUpdate
   mbc         <- nullMBC

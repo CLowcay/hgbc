@@ -9,6 +9,7 @@ import           Machine.GBC.CPU
 import           Machine.GBC.DMA
 import           Machine.GBC.Emulator
 import           Machine.GBC.Graphics
+import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Keypad
 import           Machine.GBC.ROM
 import           Machine.GBC.Registers
@@ -41,7 +42,7 @@ blankHeader romSize = Header { startAddress          = 0
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
   sync     <- newGraphicsSync
-  emulator <- initEmulatorState blankROM sync nullPtr
+  emulator <- initEmulatorState blankROM NoColorCorrection sync nullPtr
   let allPorts =
         cpuPorts (cpu emulator)
           ++ dmaPorts (dmaState emulator)
@@ -102,5 +103,7 @@ spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
        , BCPD
        , OCPS
        , OCPD
+       , PCM12
+       , PCM34
        ]
     )

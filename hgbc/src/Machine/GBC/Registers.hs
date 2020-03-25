@@ -45,8 +45,10 @@ module Machine.GBC.Registers (
   , pattern OBP1
   , pattern WY
   , pattern WX
+  , pattern R4C
   , pattern KEY1
   , pattern VBK
+  , pattern BLCK
   , pattern HDMA1
   , pattern HDMA2
   , pattern HDMA3
@@ -57,7 +59,14 @@ module Machine.GBC.Registers (
   , pattern BCPD
   , pattern OCPS
   , pattern OCPD
+  , pattern R6C
   , pattern SVBK
+  , pattern R72
+  , pattern R73
+  , pattern R74
+  , pattern R75
+  , pattern PCM12
+  , pattern PCM34
   , pattern IE
   ) where
 
@@ -192,11 +201,20 @@ pattern WY = 0xFF4A
 pattern WX :: Word16
 pattern WX = 0xFF4B
 
+-- This undocumented register is suspected to have something to do with DMG
+-- compatibility. It is disabled after BLCK is set to 1 and only reads FF after
+-- that point.
+pattern R4C :: Word16
+pattern R4C = 0xFF4C
+
 pattern KEY1 :: Word16
 pattern KEY1 = 0xFF4D
 
 pattern VBK :: Word16
 pattern VBK = 0xFF4F
+
+pattern BLCK :: Word16
+pattern BLCK = 0xFF50
 
 pattern HDMA1 :: Word16
 pattern HDMA1 = 0xFF51
@@ -228,8 +246,36 @@ pattern OCPS = 0xFF6A
 pattern OCPD :: Word16
 pattern OCPD = 0xFF6B
 
+-- disabled on DMG, always reads FF. FE on CGB. Can be written in CGB mode only.
+pattern R6C :: Word16
+pattern R6C = 0xFF6C
+
 pattern SVBK :: Word16
 pattern SVBK = 0xFF70
+
+-- Fully read/write in all modes. Initial value = 0.
+pattern R72 :: Word16
+pattern R72 = 0xFF72
+
+-- Fully read/write in all modes. Initial value = 0.
+pattern R73 :: Word16
+pattern R73 = 0xFF73
+
+-- Fully read/write in CGB mode only, otherwise masked with 0xFF.
+pattern R74 :: Word16
+pattern R74 = 0xFF74
+
+-- Bits 4, 5, and 6 read/write in all modes. Initial value = 0.
+pattern R75 :: Word16
+pattern R75 = 0xFF75
+
+-- CGB only.
+pattern PCM12 :: Word16
+pattern PCM12 = 0xFF76
+
+-- CGB only.
+pattern PCM34 :: Word16
+pattern PCM34 = 0xFF77
 
 pattern IE :: Word16
 pattern IE = 0xFFFF

@@ -30,6 +30,8 @@ data AudioState = AudioState {
   , port50         :: !(Port Word8)
   , port51         :: !(Port Word8)
   , port52         :: !(Port Word8)
+  , portPCM12      :: !(Port Word8)
+  , portPCM34      :: !(Port Word8)
   , channel1       :: !PulseChannel
   , channel2       :: !PulseChannel
   , channel3       :: !WaveChannel
@@ -68,11 +70,14 @@ initAudioState = mdo
         pure (register52' .&. 0xF0)
       else pure register52'
 
+  portPCM12 <- newPort 0x00 0x00 neverUpdate
+  portPCM34 <- newPort 0x00 0x00 neverUpdate
+
   pure AudioState { .. }
 
 audioPorts :: AudioState -> [(Word16, Port Word8)]
 audioPorts AudioState {..} =
-  [(NR50, port50), (NR51, port51), (NR52, port52)]
+  [(NR50, port50), (NR51, port51), (NR52, port52), (PCM12, portPCM12), (PCM34, portPCM34)]
     ++ channel1Ports
     ++ channel2Ports
     ++ channel3Ports
@@ -86,16 +91,16 @@ audioPorts AudioState {..} =
 samplePeriod :: Int
 samplePeriod = 94
 
-mixOutputChannel :: AudioState -> Word8 -> IO Word8
-mixOutputChannel AudioState {..} channelFlags = do
-  out1 <- if channelFlags `testBit` 0 then getOutput channel1 else pure 0
-  out2 <- if channelFlags `testBit` 1 then getOutput channel2 else pure 0
-  out3 <- if channelFlags `testBit` 2 then getOutput channel3 else pure 0
-  out4 <- if channelFlags `testBit` 3 then getOutput channel4 else pure 0
-  pure (fromIntegral (((out1 + out2 + out3 + out4) * 4) + 128))
+mixOutputChannel :: (Int, Int, Int, Int) -> Word8 -> Word8
+mixOutputChannel (v1, v2, v3, v4) channelFlags =
+  let out1 = if channelFlags `testBit` 0 then v1 else 0
+      out2 = if channelFlags `testBit` 1 then v2 else 0
+      out3 = if channelFlags `testBit` 2 then v3 else 0
+      out4 = if channelFlags `testBit` 3 then v4 else 0
+  in  fromIntegral (((out1 + out2 + out3 + out4) * 4) + 128)
 
 audioStep :: AudioState -> Int -> IO ()
-audioStep audioState@AudioState {..} clockAdvance = do
+audioStep AudioState {..} clockAdvance = do
   register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52) $ do
     void $ updateStateCycle frameSequencer clockAdvance $ \state -> do
@@ -109,14 +114,22 @@ audioStep audioState@AudioState {..} clockAdvance = do
     masterClock channel4 clockAdvance
 
     updateCounter sampler clockAdvance $ do
+      v1 <- getOutput channel1
+      v2 <- getOutput channel2
+      v3 <- getOutput channel3
+      v4 <- getOutput channel4
+      directWritePort portPCM12 (fromIntegral v1 .|. fromIntegral v2 .<<. 4)
+      directWritePort portPCM34 (fromIntegral v3 .|. fromIntegral v4 .<<. 4)
+
       register50 <- directReadPort port50
       register51 <- directReadPort port51
       let volumeLeft  = 8 - (register50 .>>. 4 .&. 0x07)
       let volumeRight = 8 - (register50 .&. 0x07)
       let left        = register51 .>>. 4
       let right       = register51 .&. 0x0F
-      leftSample  <- (`div` volumeLeft) <$> mixOutputChannel audioState left
-      rightSample <- (`div` volumeRight) <$> mixOutputChannel audioState right
-      let stereo = fromIntegral leftSample .|. (fromIntegral rightSample `unsafeShiftL` 8)
+
+      let leftSample = mixOutputChannel (v1, v2, v3, v4) left `div` volumeLeft
+      let rightSample = mixOutputChannel (v1, v2, v3, v4) right `div` volumeRight
+      let stereo = fromIntegral leftSample .|. (fromIntegral rightSample .<<. 8)
       writeBuffer audioOut stereo
       pure samplePeriod
