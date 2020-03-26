@@ -3,6 +3,18 @@ speed = 1
 # Video scale factor
 scale = 2
 
+# Emulation mode. Values are 'dmg' for original Gameboy, 'cgb' for Gameboy
+# Color, and 'auto' to choose automatically based on the cartridge header and
+# boot ROM. Note that a boot ROM, if used, may switch from cgb to dmg mode.
+mode = 'auto'
+
+# An optional boot ROM.
+# boot-rom = 'boot.bin'
+
+# Color correction for Gameboy Color games. Allowed values are 'none' or
+# 'default'.
+color-correction = 'default'
+
 # Keybindings. Key names are the same as the unshifted symbol on the key. For
 # example puctuation keys are '`', '[', ']', etc. Special keys are 'Esc',
 # 'Tab', 'LShift', 'RShift', 'LControl', 'RControl', 'LAlt', 'RAlt', 'Enter',
@@ -22,13 +34,13 @@ right = 'Right'
 pause = ['Pause', 'C-K']
 quit = ['C-Q']
 
-# Colors for gameboy original games (games without Gameboy Color support).
+# Colors for Gameboy original games (games without Gameboy Color support).
 [colors]
 # Grayscale colors.
-background = ['#000', '#555', '#aaa', '#fff']
-sprite1 = ['#000', '#555', '#aaa', '#fff']
-sprite2 = ['#000', '#555', '#aaa', '#fff']
-# Simulated original gameboy LCD colors.
-# background = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']
-# sprite1 = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']
-# sprite2 = ['#0f380f', '#306230', '#8bac0f', '#9bbc0f']
+background = ['#fff', '#aaa', '#555', '#000']
+sprite1 = ['#fff', '#aaa', '#555', '#000']
+sprite2 = ['#fff', '#aaa', '#555', '#000']
+# Simulated Gameboy LCD colors.
+# background = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f']
+# sprite1 = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f']
+# sprite2 = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f']

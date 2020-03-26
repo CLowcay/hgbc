@@ -10,6 +10,7 @@ module Machine.GBC.Emulator
 where
 
 import           Control.Monad.Reader
+import           Control.Applicative
 import           Data.IORef
 import           Data.Word
 import           Foreign.Ptr
@@ -26,6 +27,10 @@ import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.ROM
 import           Machine.GBC.Registers
 import           Machine.GBC.Timer
+import qualified Data.ByteString               as B
+import qualified Data.Vector.Storable          as VS
+import           Data.Functor
+import           Data.Maybe
 
 data EmulatorState = EmulatorState {
     mode            :: !EmulatorMode
@@ -54,24 +59,34 @@ instance HasCPU EmulatorState where
 -- | Create a new 'EmulatorState' given a 'ROM', a 'GraphicsSync', and a pointer
 -- to the output frame buffer. The frame buffer is a 32bit RGB buffer with
 -- 160x144 pixels.
-initEmulatorState :: ROM -> ColorCorrection -> GraphicsSync -> Ptr Word8 -> IO EmulatorState
-initEmulatorState rom colorCorrection graphicsSync frameBufferBytes = mdo
-  let mode = case cgbSupport (romHeader rom) of
+initEmulatorState
+  :: Maybe B.ByteString
+  -> ROM
+  -> Maybe EmulatorMode
+  -> ColorCorrection
+  -> GraphicsSync
+  -> Ptr Word8
+  -> IO EmulatorState
+initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBufferBytes = mdo
+  let bootMode = bootROM <&> \content -> if B.length content > 0x100 then CGB else DMG
+  let romMode = case cgbSupport (romHeader rom) of
         CGBCompatible   -> CGB
         CGBExclusive    -> CGB
         CGBIncompatible -> DMG
-  vram <- initVRAM mode colorCorrection
+  let mode = fromMaybe romMode (requestedMode <|> bootMode)
+  vram <- initVRAM colorCorrection
 
-  writeRGBPalette vram True  0 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
-  writeRGBPalette vram True  1 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
-  writeRGBPalette vram False 0 (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
+  writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  writeRGBPalette vram True  0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  writeRGBPalette vram True  1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
 
+  modeRef       <- newIORef mode
   portIF        <- newPort 0xE0 0x1F alwaysUpdate
   portIE        <- newPort 0x00 0xFF alwaysUpdate
 
   cpu           <- initCPU portIF portIE mode (makeCatchupFunction emulatorState)
   dmaState      <- initDMA
-  graphicsState <- initGraphics vram mode frameBufferBytes portIF
+  graphicsState <- initGraphics vram modeRef frameBufferBytes portIF
   keypadState   <- initKeypadState portIF
   timerState    <- initTimerState portIF
   audioState    <- initAudioState
@@ -85,7 +100,7 @@ initEmulatorState rom colorCorrection graphicsSync frameBufferBytes = mdo
           ++ timerPorts timerState
           ++ audioPorts audioState
 
-  memory        <- initMemoryForROM rom vram allPorts portIE mode
+  memory <- initMemoryForROM (VS.fromList . B.unpack <$> bootROM) rom vram allPorts portIE modeRef
 
   hblankPending <- newIORef False
   currentTime   <- newUnboxedRef 0

@@ -43,13 +43,17 @@ data Options = Options
   , optionScale           :: Maybe Int
   , optionSpeed           :: Maybe Double
   , optionColorCorrection :: Maybe ColorCorrection
+  , optionBootROM         :: Maybe FilePath
+  , optionMode            :: Maybe EmulatorMode
   , optionFilename        :: FilePath
   }
 
 optionsToConfig :: Options -> Config.Config Maybe
 optionsToConfig Options {..} = mempty { Config.scale           = optionScale
                                       , Config.speed           = optionSpeed
+                                      , Config.bootROM         = optionBootROM
                                       , Config.colorCorrection = optionColorCorrection
+                                      , Config.mode            = optionMode
                                       }
 
 optionsP :: Parser Options
@@ -69,20 +73,34 @@ optionsP =
           )
     <*> option
           (Just <$> eitherReader (decodeColorCorrection . T.pack))
-          (long "color-correction" <> value Nothing <> metavar "CORRECTION-MODE" <> help
+          (long "color-correction" <> value Nothing <> metavar "CORRECTION_MODE" <> help
             "Color correction mode. Recognized values are 'none' and 'default'"
           )
-    <*> strArgument (metavar "ROM-FILE" <> help "The ROM file to run")
+    <*> option
+          (Just <$> str)
+          (long "boot-rom" <> value Nothing <> metavar "BOOT_FILE" <> help
+            "Use an optional boot ROM"
+          )
+    <*> option
+          (eitherReader (decodeMode . T.pack))
+          (long "mode" <> value Nothing <> metavar "MODE" <> help
+            "Graphics mode at startup. Can be 'dmg', 'cgb', or 'auto' (default)."
+          )
+
+    <*> strArgument (metavar "ROM_FILE" <> help "The ROM file to run")
 
 type family HKD f a where
-  HKD Identity a = a
-  HKD f a        = f a
+  HKD Identity a      = a
+  HKD Maybe (Maybe a) = Maybe a
+  HKD f a             = f a
 
 type Palette = (Word32, Word32, Word32, Word32)
 
 data Config f = Config
   { speed :: HKD f Double
   , scale :: HKD f Int
+  , bootROM :: HKD f (Maybe FilePath)
+  , mode :: HKD f (Maybe EmulatorMode)
   , colorCorrection :: HKD f ColorCorrection
   , keypad :: HKD f Keymap
   , backgroundPalette :: HKD f Palette
@@ -100,7 +118,9 @@ deriving instance Show (Config Maybe)
 instance Semigroup (Config Maybe) where
   left <> right = Config { speed             = lastOf speed
                          , scale             = lastOf scale
+                         , bootROM           = lastOf bootROM
                          , colorCorrection   = lastOf colorCorrection
+                         , mode              = lastOf Config.mode
                          , keypad            = keypad left <> keypad right
                          , backgroundPalette = lastOf backgroundPalette
                          , sprite1Palette    = lastOf sprite1Palette
@@ -111,12 +131,14 @@ instance Semigroup (Config Maybe) where
     lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
 
 instance Monoid (Config Maybe) where
-  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 finalize :: Config Maybe -> Config Identity
 finalize Config {..} = Config { speed             = fromMaybe 1 speed
                               , scale             = fromMaybe 2 scale
+                              , bootROM           = bootROM
                               , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
+                              , mode              = mode
                               , keypad            = fromMaybe defaultKeymap keypad
                               , backgroundPalette = fromMaybe defaultPalette backgroundPalette
                               , sprite1Palette    = fromMaybe defaultPalette sprite1Palette
@@ -137,10 +159,15 @@ parseConfig filename contents = case Toml.parseTomlDoc filename contents of
 decodeConfig :: Toml.Table -> Either [String] (Config Maybe)
 decodeConfig = decodeTable rootTable
  where
-  rootTable ("speed"           , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
-  rootTable ("speed"           , Toml.VFloat f  ) = Right (mempty { speed = Just f })
-  rootTable ("scale"           , Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
-  rootTable ("color-correction", Toml.VString t ) = do
+  rootTable ("speed", Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
+  rootTable ("speed", Toml.VFloat f  ) = Right (mempty { speed = Just f })
+  rootTable ("scale", Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("boot-rom", Toml.VString filename) =
+    Right (mempty { bootROM = Just (T.unpack filename) })
+  rootTable ("mode", Toml.VString t) = do
+    v <- first pure (decodeMode t)
+    pure (mempty { Config.mode = v })
+  rootTable ("color-correction", Toml.VString t) = do
     v <- first pure (decodeColorCorrection t)
     pure (mempty { colorCorrection = Just v })
   rootTable ("keypad", Toml.VTable keypadTable) =
@@ -176,6 +203,12 @@ decodeTable
 decodeTable decode table = case partitionEithers (decode <$> HM.toList table) of
   ([]    , rows) -> Right (mconcat rows)
   (errors, _   ) -> Left (mconcat errors)
+
+decodeMode :: T.Text -> Either String (Maybe EmulatorMode)
+decodeMode "auto" = Right Nothing
+decodeMode "dmg"  = Right (Just DMG)
+decodeMode "cgb"  = Right (Just CGB)
+decodeMode x      = Left ("Unknown graphics mode " <> show x)
 
 decodeColorCorrection :: T.Text -> Either String ColorCorrection
 decodeColorCorrection "none"    = Right NoColorCorrection

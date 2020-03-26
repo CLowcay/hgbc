@@ -27,7 +27,6 @@ where
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
-import           Machine.GBC.Mode
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
@@ -45,7 +44,6 @@ data VRAM = VRAM {
   , oam            :: !(VSM.IOVector Word8)
   , rawPalettes    :: !(VSM.IOVector Word16)
   , rgbPalettes    :: !(VSM.IOVector Word32)
-  , mode           :: !EmulatorMode
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(UnboxedRef Int)
   , colorFunction  :: !ColorFunction
@@ -54,12 +52,9 @@ data VRAM = VRAM {
 totalPaletteEntries :: Int
 totalPaletteEntries = 8 * 4 * 2 -- 2 sets of 8 palettes with 4 colors each.
 
-initVRAM :: EmulatorMode -> ColorCorrection -> IO VRAM
-initVRAM mode colorCorrection = do
-  let size = case mode of
-        DMG -> 0x2000
-        CGB -> 0x4000
-  vram           <- VSM.new size
+initVRAM :: ColorCorrection -> IO VRAM
+initVRAM colorCorrection = do
+  vram           <- VSM.new 0x4000
   oam            <- VSM.new 160
   vramAccessible <- newIORef True
   vramBank       <- newUnboxedRef 0

@@ -10,6 +10,7 @@ import           Control.Monad.Except
 import           Control.Monad.Identity
 import           Control.Monad.Reader
 import           Control.Monad.Writer.Lazy
+import           Control.Exception
 import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
@@ -25,7 +26,6 @@ import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
 import qualified Window
-
 
 description :: ParserInfo Config.Options
 description =
@@ -74,6 +74,19 @@ getROMPaths romFile = do
   let romRTCFile  = romDir </> "rtc"
   pure ROMPaths { .. }
 
+readBootROMFile :: Maybe FilePath -> IO (Maybe B.ByteString)
+readBootROMFile Nothing            = pure Nothing
+readBootROMFile (Just bootROMFile) = do
+  mContent <- try (B.readFile bootROMFile)
+  case mContent of
+    Left err -> do
+      putStrLn
+        ("Cannot load boot ROM file " <> bootROMFile <> ":\n" <> displayException
+          (err :: IOException)
+        )
+      pure Nothing
+    Right content -> pure (Just content)
+
 main :: IO ()
 main = do
   SDL.initializeAll
@@ -83,12 +96,12 @@ main = do
   let (eROM, warnings) = runWriter (runExceptT (parseROM romPaths fileContent))
 
   unless (null warnings) $ do
-    putStrLn ("Some problems were detected in " <> optionFilename <> ":")
+    putStrLn ("Some problems were detected in ROM file " <> optionFilename <> ":")
     for_ warnings $ \message -> putStrLn (" - " <> message)
 
   case eROM of
     Left err -> do
-      putStrLn ("Cannot load " <> optionFilename <> " because:")
+      putStrLn ("Cannot read ROM file " <> optionFilename <> " because:")
       putStrLn (" - " <> err)
     Right rom -> do
       when (requiresSaveFiles rom)
@@ -101,7 +114,13 @@ emulator rom allOptions@Config.Options {..} = do
   graphicsSync          <- newGraphicsSync
   emulatorChannel       <- Emulator.new
   (window, frameBuffer) <- LCD.start (takeBaseName optionFilename) config graphicsSync
-  emulatorState <- initEmulatorState rom (Config.colorCorrection config) graphicsSync frameBuffer
+  bootROM               <- readBootROMFile (Config.bootROM config)
+  emulatorState         <- initEmulatorState bootROM
+                                             rom
+                                             (Config.mode config)
+                                             (Config.colorCorrection config)
+                                             graphicsSync
+                                             frameBuffer
 
   when (mode emulatorState == DMG) $ do
     writeBgRGBPalette emulatorState 0 (Config.backgroundPalette config)

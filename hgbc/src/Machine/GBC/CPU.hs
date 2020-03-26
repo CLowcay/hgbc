@@ -379,55 +379,55 @@ reset :: HasCPU env => ReaderT env IO ()
 reset = do
   CPUState {..} <- asks forCPUState
 
-  writeR8 RegA (if cpuType == DMG then 0x01 else 0x11)
-  writeF 0xB0
-  writeR8 RegB 0x00
-  writeR8 RegC 0x13
-  writeR8 RegD 0x00
-  writeR8 RegE 0xD8
-  writeR8 RegH 0x01
-  writeR8 RegL 0x4D
-  writeR16 RegSP 0xFFFE
+  writeR8 RegA 0
+  writeF 0
+  writeR8 RegB 0
+  writeR8 RegC 0
+  writeR8 RegD 0
+  writeR8 RegE 0
+  writeR8 RegH 0
+  writeR8 RegL 0
+  writeR16 RegSP 0
   writeRegister offsetHidden (0 :: Word8)
   setIME
-  writePC 0x100
+  writePC 0
 
   writeByte P1     0xFF
-  writeByte TIMA   0x00
-  writeByte TMA    0x00
-  writeByte TAC    0x00
-  writeByte NR10   0x00
-  writeByte NR11   0xBF
-  writeByte NR12   0xF3
-  writeByte NR13   0x00
-  writeByte NR14   0x00
-  writeByte NR21   0x00
-  writeByte NR22   0x00
-  writeByte NR23   0x00
-  writeByte NR24   0x00
-  writeByte NR30   0x00
-  writeByte NR31   0x00
-  writeByte NR32   0x00
-  writeByte NR33   0x00
-  writeByte NR34   0x00
-  writeByte NR41   0x00
-  writeByte NR42   0x00
-  writeByte NR43   0x00
-  writeByte NR44   0x00
-  writeByte NR50   0x77
-  writeByte NR51   0xF3
-  writeByte NR52   0xF1
-  writeByte LCDC   0x91
-  writeByte SCY    0x00
-  writeByte SCX    0x00
-  writeByte LYC    0x00
-  writeByte BGP    0xFC
-  writeByte OBP0   0xFF
-  writeByte OBP1   0xFF
-  writeByte WY     0x00
-  writeByte WX     0x00
-  writeByte IE     0x00
-  writeByte IF     0x00
+  writeByte TIMA   0
+  writeByte TMA    0
+  writeByte TAC    0
+  writeByte NR10   0
+  writeByte NR11   0
+  writeByte NR12   0
+  writeByte NR13   0
+  writeByte NR14   0
+  writeByte NR21   0
+  writeByte NR22   0
+  writeByte NR23   0
+  writeByte NR24   0
+  writeByte NR30   0
+  writeByte NR31   0
+  writeByte NR32   0
+  writeByte NR33   0
+  writeByte NR34   0
+  writeByte NR41   0
+  writeByte NR42   0
+  writeByte NR43   0
+  writeByte NR44   0
+  writeByte NR50   0
+  writeByte NR51   0
+  writeByte NR52   0
+  writeByte LCDC   0
+  writeByte SCY    0
+  writeByte SCX    0
+  writeByte LYC    0
+  writeByte BGP    0
+  writeByte OBP0   0
+  writeByte OBP1   0
+  writeByte WY     0
+  writeByte WX     0
+  writeByte IE     0
+  writeByte IF     0
 
   -- Wave memory
   writeByte 0xFF30 0x00
@@ -446,6 +446,31 @@ reset = do
   writeByte 0xFF3D 0xFF
   writeByte 0xFF3E 0x00
   writeByte 0xFF3F 0xFF
+
+  resetAndBoot $ do
+    -- Set all registers and ports to their post-boot values.
+    writeR8 RegA (if cpuType == DMG then 0x01 else 0x11)
+    writeF 0xB0
+    writeR8 RegB 0x00
+    writeR8 RegC 0x13
+    writeR8 RegD 0x00
+    writeR8 RegE 0xD8
+    writeR8 RegH 0x01
+    writeR8 RegL 0x4D
+    writeR16 RegSP 0xFFFE
+    writeRegister offsetHidden (0 :: Word8)
+    setIME
+    writePC 0x100
+
+    writeByte NR11   0xBF
+    writeByte NR12   0xF3
+    writeByte NR50   0x77
+    writeByte NR51   0xF3
+    writeByte NR52   0xF1
+    writeByte LCDC   0x91
+    writeByte BGP    0xFC
+    writeByte OBP0   0xFF
+    writeByte OBP1   0xFF
 
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}

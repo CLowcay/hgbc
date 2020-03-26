@@ -4,6 +4,7 @@
 module Machine.GBC.Memory
   ( Memory
   , HasMemory(..)
+  , resetAndBoot
   , initMemory
   , initMemoryForROM
   , getROMHeader
@@ -35,19 +36,23 @@ import qualified Data.ByteString               as B
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable          as VS
 import qualified Data.Vector.Storable.Mutable  as VSM
+import           Data.Functor
+import           Data.Maybe
 
 -- | The gameboy memory.
 data Memory = Memory {
-    mode           :: !EmulatorMode
-  , mbc            :: !MBC
-  , bootROMLockout :: !(UnboxedRef Int)
+    mbc            :: !MBC
   , header         :: !Header
-  , rom            :: !(VS.Vector Word8)
+  , rom0           :: !(IORef (VS.Vector Word8))  -- The first 8kb of ROM. Can be switched between cartridge ROM and boot ROM.
+  , rom            :: !(VS.Vector Word8)          -- All of cartrige ROM.
+  , bootROM        :: !(Maybe (VS.Vector Word8))
   , vram           :: !VRAM
   , memRam         :: !(VSM.IOVector Word8)
   , ramBankOffset  :: !(UnboxedRef Int)
   , ports          :: !(V.Vector (Port Word8))
   , portIE         :: !(Port Word8)
+  , portSVBK       :: !(Port Word8)
+  , portBLCK       :: !(Port Word8)
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
@@ -63,73 +68,102 @@ instance HasMemory Memory where
 portOffset :: Word16 -> Int
 portOffset = subtract 0xFF00 . fromIntegral
 
+-- | Reset the memory system. If there is no boot ROM, then also run the
+-- supplied boot code.
+resetAndBoot :: HasMemory env => ReaderT env IO () -> ReaderT env IO ()
+resetAndBoot pseudoBootROM = do
+  Memory {..} <- asks forMemory
+  liftIO $ do
+    writePort portSVBK 0
+    directWritePort portBLCK 0
+  case bootROM of
+    Nothing      -> pseudoBootROM
+    Just content -> liftIO $ writeIORef rom0 content
+
 -- | The initial memory state.
-initMemoryForROM :: ROM -> VRAM -> [(Word16, Port Word8)] -> Port Word8 -> EmulatorMode -> IO Memory
-initMemoryForROM romInfo vram ports portIE mode = do
+initMemoryForROM
+  :: Maybe (VS.Vector Word8)
+  -> ROM
+  -> VRAM
+  -> [(Word16, Port Word8)]
+  -> Port Word8
+  -> IORef EmulatorMode
+  -> IO Memory
+initMemoryForROM boot romInfo vram ports portIE modeRef = do
   mbc <- getMBC romInfo
-  initMemory (VS.fromList (B.unpack (romContent romInfo)))
+  initMemory boot
+             (VS.fromList (B.unpack (romContent romInfo)))
              (romHeader romInfo)
              mbc
              vram
              ports
              portIE
-             mode
+             modeRef
 
 initMemory
-  :: VS.Vector Word8
+  :: Maybe (VS.Vector Word8)
+  -> VS.Vector Word8
   -> Header
   -> MBC
   -> VRAM
   -> [(Word16, Port Word8)]
   -> Port Word8
-  -> EmulatorMode
+  -> IORef EmulatorMode
   -> IO Memory
-initMemory rom header mbc vram rawPorts portIE mode = do
-  memRam         <- VSM.new 0x10000
-  memHigh        <- VSM.new 0x80
-  emptyPort      <- newPort 0xFF 0x00 neverUpdate
-  bootROMLockout <- newUnboxedRef 0
+initMemory boot rom header mbc vram rawPorts portIE modeRef = do
+  let bootROM = boot <&> \content ->
+        let boot1 = VS.take 0x100 content
+            boot2 = VS.drop 0x200 content
+        in  if VS.length content <= 0x200
+              then boot1 <> VS.drop (VS.length boot1) rom
+              else boot1 <> VS.slice 0x100 0x100 rom <> boot2 <> VS.drop (VS.length content) rom
 
-  ramBankOffset  <- newUnboxedRef 0
+  memRam        <- VSM.new 0x10000
+  memHigh       <- VSM.new 0x80
+  rom0          <- newIORef $ fromMaybe rom bootROM
+
+  emptyPort     <- newPort 0xFF 0x00 neverUpdate
+  ramBankOffset <- newUnboxedRef 0
 
   -- SVBK: RAM bank.
-  svbk           <- case mode of
-    DMG -> pure emptyPort
-    CGB -> newPort 0xF8 0x07 $ \_ newValue -> do
-      let bank = fromIntegral (newValue .&. 7)
-      writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
-      pure newValue
+  portSVBK      <- cgbOnlyPort modeRef 0xF8 0x07 $ \_ v' -> v' <$ do
+    let bank = fromIntegral (v' .&. 7)
+    writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
 
-  -- BLCK: BIOS lockout.
-  blck <- newPort 0xFE 0xFE $ \oldValue newValue -> do
-    when (isFlagSet 1 newValue) $ writeUnboxedRef bootROMLockout 1
-    pure (newValue .|. oldValue)
-
-  -- Undocumented registers
-  r4c <- newPortWithReadAction
+  -- R4C: An undocumented register that appears to control DMG compatibility in
+  -- the LCD.
+  bootROMLockout <- newIORef False
+  r4c            <- newPortWithReadAction
     0x00
     0xFF
     (\a -> do
-      lockout <- readUnboxedRef bootROMLockout
-      pure (if lockout == 0 then a else 0xFF)
+      lockout <- readIORef bootROMLockout
+      pure (if lockout then a else 0xFF)
     )
     alwaysUpdate
-  r6c <- case mode of
-    DMG -> pure emptyPort
-    CGB -> newPort 0xFE 0xFE alwaysUpdate
-  r72 <- newPort 0x00 0x00 alwaysUpdate
-  r73 <- newPort 0x00 0x00 alwaysUpdate
-  r74 <- case mode of
-    DMG -> pure emptyPort
-    CGB -> newPort 0x00 0x00 alwaysUpdate
+
+  -- BLCK: BIOS lockout.
+  portBLCK <- newPort 0xFE 0x01 $ \oldValue newValue -> do
+    when (isFlagSet 1 newValue) $ do
+      lcdMode <- directReadPort r4c
+      when (lcdMode == 4) (writeIORef modeRef DMG)
+      writeIORef rom0           rom
+      writeIORef bootROMLockout True
+    pure (newValue .|. oldValue)
+
+  -- Undocumented registers
+  r6c <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
+  r72 <- newPort 0x00 0xFF alwaysUpdate
+  r73 <- newPort 0x00 0xFF alwaysUpdate
+  r74 <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
   r75 <- newPort 0x8F 0x70 alwaysUpdate
 
   let ports = V.accum
         (flip const)
         (V.replicate 128 emptyPort)
         (   first portOffset
-        <$> ( (BLCK, blck)
-            : (SVBK, svbk)
+        <$> ( (BLCK, portBLCK)
+            : (SVBK, portSVBK)
             : (R4C , r4c)
             : (R6C , r6c)
             : (R72 , r72)
@@ -162,7 +196,9 @@ dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
   Memory {..} <- asks forMemory
   liftIO $ case source .>>. 13 of
-    0 -> copyToOAM vram . VSM.unsafeSlice (fromIntegral source) oamSize =<< VS.unsafeThaw rom
+    0 -> do
+      content <- readIORef rom0
+      copyToOAM vram . VSM.unsafeSlice (fromIntegral source) oamSize =<< VS.unsafeThaw content
     1 -> copyToOAM vram . VSM.unsafeSlice (fromIntegral source) oamSize =<< VS.unsafeThaw rom
     2 -> do
       bank <- bankOffset mbc
@@ -187,7 +223,9 @@ readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory
   liftIO $ case addr .>>. 13 of
-    0 -> pure (rom `VS.unsafeIndex` fromIntegral addr)
+    0 -> do
+      content <- readIORef rom0
+      pure (content `VS.unsafeIndex` fromIntegral addr)
     1 -> pure (rom `VS.unsafeIndex` fromIntegral addr)
     2 -> do
       bank <- bankOffset mbc
