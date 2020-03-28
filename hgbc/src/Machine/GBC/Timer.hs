@@ -33,6 +33,7 @@ data TimerState = TimerState {
   , resetDIVRef  :: !(IORef Bool)
   , timaMaskRef  :: !(UnboxedRef Word16)
   , timaStateRef :: !(IORef TIMAState)
+  , clockAudio   :: !(IO ())
   , portDIV      :: !(Port Word8)
   , portTIMA     :: !(Port Word8)
   , portTMA      :: !(Port Word8)
@@ -42,8 +43,8 @@ data TimerState = TimerState {
 }
 
 -- | Create the initial timer state.
-initTimerState :: Port Word8 -> Port Word8 -> IO TimerState
-initTimerState portKEY1 portIF = do
+initTimerState :: IO () -> Port Word8 -> Port Word8 -> IO TimerState
+initTimerState clockAudio portKEY1 portIF = do
   systemDIV    <- newUnboxedRef 0
   resetDIVRef  <- newIORef False
   timaMaskRef  <- newUnboxedRef (decodeTimaMask 0)
@@ -83,10 +84,13 @@ timerStarted = (`testBit` 2)
 timerInterrupt :: Word8
 timerInterrupt = flagInterrupt InterruptTimerOverflow
 
+-- | Detect a falling edge.
+fallingEdge :: (Bits a, Integral a) => a -> a -> a -> Bool
+fallingEdge mask v v' = mask .&. v .&. complement (mask .&. v') /= 0
+
 -- | Update the systemDIV, IF, TIMA, and TIMA state.
 updateClocks
-  :: Int                               -- ^ Number of clocks in one cycle
-  -> Word16                            -- ^ TIMA edge detector bit
+  :: Word16                            -- ^ TIMA edge detector bit
   -> Word8                             -- ^ TMA register
   -> Bool                              -- ^ TIMA enabled
   -> Word8                             -- ^ Initial IF register
@@ -96,35 +100,29 @@ updateClocks
   -> Word16                            -- ^ Initial systemDIV
   -> Int                               -- ^ Clocks to advance
   -> (Word16, Word8, Word8, TIMAState) -- ^ (systemDIV, IF, TIMA, TIMA state)
-updateClocks cycleClocks timaMask tma timaEnabled = outerLoop
+updateClocks timaMask tma timaEnabled = outerLoop
  where
-  systemClockAdvance = fromIntegral cycleClocks
   outerLoop !rif !tima !timaState !reset = innerLoop
    where
-    innerLoop systemClock 0 = (systemClock, rif, tima, timaState)
-    innerLoop systemClock clocks =
-      let systemClock' = if reset then 1 else systemClock + systemClockAdvance
-          clocks'      = clocks - cycleClocks
+    innerLoop !systemClock 0 = (systemClock, rif, tima, timaState)
+    innerLoop !systemClock !cycles =
+      let systemClock' = if reset then 1 else systemClock + 4
+          cycles'      = cycles - 1
       in  case timaState of
-            TIMANormal ->
-              if timaEnabled
-                 && (complement (systemClock' .&. timaMask) .&. (systemClock .&. timaMask) /= 0)
-              then
-                if tima == 0xFF
-                  then outerLoop rif 0 TIMAOverflow False systemClock' clocks'
-                  else outerLoop rif (tima + 1) TIMANormal False systemClock' clocks'
-              else
-                innerLoop systemClock' clocks'
+            TIMANormal -> if timaEnabled && fallingEdge timaMask systemClock systemClock'
+              then if tima == 0xFF
+                then outerLoop rif 0 TIMAOverflow False systemClock' cycles'
+                else outerLoop rif (tima + 1) TIMANormal False systemClock' cycles'
+              else innerLoop systemClock' cycles'
             TIMAOverflow ->
-              outerLoop (rif .|. timerInterrupt) tma TIMAReload False systemClock' clocks'
-            TIMAReload -> outerLoop rif tma TIMANormal False systemClock' clocks'
+              outerLoop (rif .|. timerInterrupt) tma TIMAReload False systemClock' cycles'
+            TIMAReload -> outerLoop rif tma TIMANormal False systemClock' cycles'
 
 updateTimer :: TimerState -> Int -> IO ()
 updateTimer TimerState {..} advance = do
   key1 <- directReadPort portKEY1
-  let doubleSpeed = fromIntegral (key1 .>>. 7)
-  -- let audioFrameMask = 0x2000 .<<. doubleSpeed
-  let cycleClocks = 4 .>>. doubleSpeed
+  let doubleSpeed    = fromIntegral (key1 .>>. 7)
+  let audioFrameMask = 0x1000 .<<. doubleSpeed
   tima <- directReadPort portTIMA
   tma  <- directReadPort portTMA
   tac  <- directReadPort portTAC
@@ -134,20 +132,14 @@ updateTimer TimerState {..} advance = do
   timaMask   <- readUnboxedRef timaMaskRef
   timaState  <- readIORef timaStateRef
   resetDIV   <- readIORef resetDIVRef
-  let (systemDIV1, rif', tima', timaState') = updateClocks cycleClocks
-                                                           timaMask
-                                                           tma
-                                                           timaEnabled
-                                                           rif
-                                                           tima
-                                                           timaState
-                                                           resetDIV
-                                                           systemDIV0
-                                                           advance
+  let (systemDIV1, rif', tima', timaState') =
+        updateClocks timaMask tma timaEnabled rif tima timaState resetDIV systemDIV0 advance
   directWritePort portTIMA tima'
   directWritePort portIF   rif'
   writeIORef timaStateRef $! timaState'
   writeUnboxedRef systemDIV systemDIV1
+
+  when (fallingEdge audioFrameMask systemDIV0 systemDIV1) clockAudio
 
 -- | Prepare a status report on the timer registers.
 timerRegisters :: TimerState -> IO [RegisterInfo]

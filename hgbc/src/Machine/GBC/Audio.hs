@@ -5,6 +5,7 @@
 module Machine.GBC.Audio
   ( AudioState(..)
   , initAudioState
+  , clockFrameSequencer
   , audioPorts
   , audioStep
   )
@@ -39,7 +40,7 @@ data AudioState = AudioState {
 }
 
 frameSequencerStates :: [(FrameSequencerOutput, Int)]
-frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 8192)
+frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 1)
 
 initAudioState :: IO AudioState
 initAudioState = mdo
@@ -99,15 +100,22 @@ mixOutputChannel (v1, v2, v3, v4) channelFlags =
       out4 = if channelFlags `testBit` 3 then v4 else 0
   in  fromIntegral (((out1 + out2 + out3 + out4) * 4) + 128)
 
+clockFrameSequencer :: AudioState -> IO ()
+clockFrameSequencer AudioState {..} = do
+  register52 <- directReadPort port52
+  when (isFlagSet flagMasterPower register52)
+    $ void
+    $ updateStateCycle frameSequencer 1
+    $ \state -> do
+        frameSequencerClock channel1 state
+        frameSequencerClock channel2 state
+        frameSequencerClock channel3 state
+        frameSequencerClock channel4 state
+
 audioStep :: AudioState -> Int -> IO ()
 audioStep AudioState {..} clockAdvance = do
   register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52) $ do
-    void $ updateStateCycle frameSequencer clockAdvance $ \state -> do
-      frameSequencerClock channel1 state
-      frameSequencerClock channel2 state
-      frameSequencerClock channel3 state
-      frameSequencerClock channel4 state
     masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance

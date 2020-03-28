@@ -88,8 +88,8 @@ initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBu
   dmaState      <- initDMA
   graphicsState <- initGraphics vram modeRef frameBufferBytes portIF
   keypadState   <- initKeypadState portIF
-  timerState    <- initTimerState (portKEY1 cpu) portIF
   audioState    <- initAudioState
+  timerState    <- initTimerState (clockFrameSequencer audioState) (portKEY1 cpu) portIF
 
   let allPorts =
         (IF, portIF)
@@ -160,6 +160,6 @@ updateHardware :: Int -> Int -> ReaderT EmulatorState IO GraphicsBusEvent
 updateHardware cycles cpuClocks = do
   EmulatorState {..} <- ask
   liftIO $ do
-    updateTimer timerState (cycles * 4)
+    updateTimer timerState cycles
     audioStep audioState cpuClocks
     graphicsStep graphicsState graphicsSync cpuClocks
