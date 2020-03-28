@@ -77,11 +77,19 @@ instance HasMemory CPUTestState where
 
 withNewCPU :: CPUM CPUTestState () -> IO ()
 withNewCPU computation = mdo
-  vram        <- initVRAM DMG NoColorCorrection
-  portIF      <- newPort 0x00 0x1F alwaysUpdate
-  portIE      <- newPort 0x00 0xFF alwaysUpdate
-  mbc         <- nullMBC
-  mem         <- initMemory blankROM blankHeader mbc vram ((IF, portIF) : cpuPorts cpu) portIE DMG
+  vram    <- initVRAM NoColorCorrection
+  portIF  <- newPort 0x00 0x1F alwaysUpdate
+  portIE  <- newPort 0x00 0xFF alwaysUpdate
+  mbc     <- nullMBC
+  modeRef <- newIORef DMG
+  mem     <- initMemory Nothing
+                        blankROM
+                        blankHeader
+                        mbc
+                        vram
+                        ((IF, portIF) : cpuPorts cpu)
+                        portIE
+                        modeRef
   extraCycles <- newIORef 0
   cpu <- initCPU portIF portIE DMG (\cycles clocksPerCycle -> modifyIORef' extraCycles (+ cycles))
   void $ runReaderT checkingFlags $ CPUTestState cpu mem extraCycles

@@ -88,7 +88,7 @@ initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBu
   dmaState      <- initDMA
   graphicsState <- initGraphics vram modeRef frameBufferBytes portIF
   keypadState   <- initKeypadState portIF
-  timerState    <- initTimerState portIF
+  timerState    <- initTimerState (portKEY1 cpu) portIF
   audioState    <- initAudioState
 
   let allPorts =

@@ -42,7 +42,7 @@ blankHeader romSize = Header { startAddress          = 0
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
   sync     <- newGraphicsSync
-  emulator <- initEmulatorState blankROM NoColorCorrection sync nullPtr
+  emulator <- initEmulatorState Nothing blankROM Nothing NoColorCorrection sync nullPtr
   let allPorts =
         cpuPorts (cpu emulator)
           ++ dmaPorts (dmaState emulator)
