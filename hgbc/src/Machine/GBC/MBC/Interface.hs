@@ -19,9 +19,9 @@ type RAMAllocator = Int -> IO (VSM.IOVector Word8)
 data MBC = MBC {
     bankOffset     :: !(IO Int)
   , writeROM       :: !(Word16 -> Word8 -> IO ())
-  , readRAM        :: !(Bool -> Word16 -> IO Word8)
-  , writeRAM       :: !(Bool -> Word16 -> Word8 -> IO ())
-  , sliceRAM       :: !(Bool -> Word16 -> Int -> IO (VSM.IOVector Word8))
+  , readRAM        :: !(Word16 -> IO Word8)
+  , writeRAM       :: !(Word16 -> Word8 -> IO ())
+  , sliceRAM       :: !(Word16 -> Int -> IO (VSM.IOVector Word8))
   , mbcRegisters   :: !(IO [RegisterInfo])
 }
 

@@ -149,7 +149,7 @@ eventLoop extraFrames context@WindowContext {..} = do
       glFinish
       void $ tryPutMVar (bufferAvailable sync) ()
       SDL.glSwapWindow sdlWindow
-      renderFrames (frames - 1)
+      pure (frames - 1)
     | otherwise = do
       -- There is at least one more frame after this one, so put out the frame
       -- quickly and carry one.

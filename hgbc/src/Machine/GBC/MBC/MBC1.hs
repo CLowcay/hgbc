@@ -5,12 +5,9 @@ module Machine.GBC.MBC.MBC1
   )
 where
 
-import           Control.Exception              ( throwIO )
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Data.Bits
 import           Data.IORef
-import           Machine.GBC.Errors
 import           Machine.GBC.MBC.Interface
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
@@ -61,24 +58,25 @@ mbc1 bankMask ramMask ramAllocator = do
           writeIORef ramSelect (value /= 0)
           updateROMOffset
           updateRAMOffset
-  let readRAM check address = do
-        when check $ liftIO $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidRead (address + 0xA000)))
-        offset <- readIORef cachedRAMOffset
-        VSM.unsafeRead ram (offset + fromIntegral address)
-  let writeRAM check address value = do
-        when check $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-        offset <- readIORef cachedRAMOffset
-        VSM.unsafeWrite ram (offset + fromIntegral address) value
-  let sliceRAM check address size = do
-        when check $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidAccess (address + 0xA000)))
-        offset <- readIORef cachedRAMOffset
-        pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
+  let readRAM address = do
+        enabled <- readIORef enableRAM
+        if not enabled
+          then pure 0xFF
+          else do
+            offset <- readIORef cachedRAMOffset
+            VSM.unsafeRead ram (offset + fromIntegral address)
+  let writeRAM address value = do
+        enabled <- readIORef enableRAM
+        when enabled $ do
+          offset <- readIORef cachedRAMOffset
+          VSM.unsafeWrite ram (offset + fromIntegral address) value
+  let sliceRAM address size = do
+        enabled <- readIORef enableRAM
+        if not enabled
+          then VSM.replicate size 0xFF
+          else do
+            offset <- readIORef cachedRAMOffset
+            pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   let mbcRegisters = do
         r1 <- readIORef romOffset
         r2 <- readIORef ramOffset

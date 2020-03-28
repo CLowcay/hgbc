@@ -4,12 +4,9 @@ module Machine.GBC.MBC.MBC3
   )
 where
 
-import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Data.Bits
 import           Data.IORef
-import           Machine.GBC.Errors
 import           Machine.GBC.MBC.Interface
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
@@ -39,28 +36,29 @@ mbc3 bankMask ramMask ramAllocator rtc = do
       | otherwise
       = latchRTC rtc value
 
-  let readRAM check address = do
-        when check $ liftIO $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidRead (address + 0xA000)))
-        r2 <- readIORef register2
-        case decodeRTCRegister r2 of
-          Nothing          -> VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
-          Just rtcRegister -> readRTC rtc rtcRegister
-  let writeRAM check address value = do
-        when check $ liftIO $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidWrite (address + 0xA000)))
-        r2 <- readIORef register2
-        case decodeRTCRegister r2 of
-          Nothing          -> VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
-          Just rtcRegister -> writeRTC rtc rtcRegister value
-  let sliceRAM check address size = do
-        when check $ liftIO $ do
-          enabled <- readIORef enableRAM
-          unless enabled (throwIO (InvalidAccess (address + 0xA000)))
-        offset <- getRAMOffset <$> readIORef register2
-        pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
+  let readRAM address = do
+        enabled <- readIORef enableRAM
+        if not enabled
+          then pure 0xFF
+          else do
+            r2 <- readIORef register2
+            case decodeRTCRegister r2 of
+              Nothing          -> VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
+              Just rtcRegister -> readRTC rtc rtcRegister
+  let writeRAM address value = do
+        enabled <- readIORef enableRAM
+        when enabled $ do
+          r2 <- readIORef register2
+          case decodeRTCRegister r2 of
+            Nothing          -> VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
+            Just rtcRegister -> writeRTC rtc rtcRegister value
+  let sliceRAM address size = do
+        enabled <- readIORef enableRAM
+        if not enabled
+          then VSM.replicate size 0xFF
+          else do
+            offset <- getRAMOffset <$> readIORef register2
+            pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   let mbcRegisters = do
         r1 <- readIORef romOffset
         r2 <- readIORef register2

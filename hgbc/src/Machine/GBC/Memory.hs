@@ -207,9 +207,7 @@ dmaToOAM source = do
       bank <- bankOffset mbc
       copyToOAM vram . VSM.unsafeSlice (bank + offset 0x4000) oamSize =<< VS.unsafeThaw rom
     4 -> copyVRAMToOAM vram source
-    5 -> do
-      check <- liftIO (readIORef checkRAMAccess)
-      copyToOAM vram =<< sliceRAM mbc check (source - 0xA000) oamSize
+    5 -> copyToOAM vram =<< sliceRAM mbc (source - 0xA000) oamSize
     6
       | source < 0xD000 -> copyToOAM vram (VSM.unsafeSlice (offset 0xC000) oamSize memRam)
       | otherwise -> do
@@ -234,9 +232,7 @@ readByte addr = do
       bank <- bankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + offset 0x4000))
     4 -> readVRAM vram addr
-    5 -> do
-      check <- liftIO (readIORef checkRAMAccess)
-      readRAM mbc check (addr - 0xA000)
+    5 -> readRAM mbc (addr - 0xA000)
     6
       | addr < 0xD000 -> VSM.unsafeRead memRam (offset 0xC000)
       | otherwise -> do
@@ -272,9 +268,7 @@ writeByte addr value = do
     2 -> writeROM mbc addr value
     3 -> writeROM mbc addr value
     4 -> writeVRAM vram addr value
-    5 -> do
-      check <- liftIO (readIORef checkRAMAccess)
-      writeRAM mbc check (addr - 0xA000) value
+    5 -> writeRAM mbc (addr - 0xA000) value
     6
       | addr < 0xD000 -> VSM.unsafeWrite memRam (offset 0xC000) value
       | otherwise -> do
