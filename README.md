@@ -11,25 +11,35 @@ Work in progress!
 
 2. Install dependencies
 
-    sudo apt install libsdl2-dev
+```
+sudo apt install libsdl2-dev
+```
 
 3. Build with
 
-    stack build
+```
+stack build
+```
 
 # Run
 
 Make executables available on your PATH with:
 
-    stack install
+```
+stack install
+```
 
 Run the SDL frontend with:
 
-    hgbc-sdl <rom file>
+```
+hgbc-sdl <rom file>
+```    
 
 For a list of command line options:
 
-    hgbc-sdl --help
+```
+hgbc-sdl --help
+```
 
 After the first run, there will be a configuration `~/.hgbc/config.toml`
 where default options can be set globally. This file also allows the user to
