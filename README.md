@@ -6,10 +6,14 @@ Work in progress!
 
 # Build
 
-Requires Haskell Stack, which you can install from
-<https://docs.haskellstack.org/en/stable/README/>
+1. Install Haskell Stack from
+   <https://docs.haskellstack.org/en/stable/README/>
 
-Build with:
+2. Install dependencies
+
+    sudo apt install libsdl2-dev
+
+3. Build with
 
     stack build
 
