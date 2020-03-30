@@ -30,17 +30,13 @@ jobs:
         path: ~/.stack
         key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/stack.yaml.lock') }}
         restore-keys: ${{ runner.os }}-build-${{ env.cache-name }}-
-
-    - name: Get Package
-      uses: mstksg/get-package@v1
-      with:
-        # brew: # optional
-        apt-get: libsdl2-dev
       
     - name: Setup Stack
       uses: mstksg/setup-stack@v2
       
-    # Runs a set of commands using the runners shell
+    - name: Install packages
+      run: sudo apt-get update && sudo apt-get install libsdl2-dev
+      
     - name: Build and test
       run: |
         stack test
