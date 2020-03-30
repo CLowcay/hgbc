@@ -1,8 +1,8 @@
 cradle:
   stack:
-    - path: "./test"
+    - path: "./hgbc/test"
       component: "hgbc:test:hgbc-test"
-    - path: "./app"
-      component: "hgbc:exe:hgbc"
-    - path: "."
+    - path: "./hgbc/src"
       component: "hgbc:lib"
+    - path: "./hgbc-sdl/src"
+      component: "hgbc-sdl:exe:hgbc-sdl"
