@@ -663,7 +663,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
     writeByte hl =<< readR8 RegA
-    pure 2
+    pure 3
   ldHLDa = CPUM $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
