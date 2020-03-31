@@ -38,5 +38,7 @@ jobs:
       run: sudo apt-get update && sudo apt-get install libsdl2-dev
       
     - name: Build and test
+      env:
+        HSPEC_OPTIONS: --format=failed-examples
       run: |
         stack test
