@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: ab19e364ad3ab1c49bf52a8d862dc892c03445730ccbf209b42eb3b57f0f6762
+-- hash: 7df3e53e3fad96b7efca44174df1ce83760d29ba0fd908252207c373c5abd2eb
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -28,6 +28,8 @@ executable hgbc-sdl
   other-modules:
       Audio
       Config
+      Debug.AST
+      Debug.Parser
       Emulator
       GLUtils
       Keymap
@@ -50,8 +52,10 @@ executable hgbc-sdl
     , filepath
     , hgbc
     , htoml
+    , megaparsec
     , mtl
     , optparse-applicative
+    , parser-combinators
     , resourcet
     , sdl2
     , stm

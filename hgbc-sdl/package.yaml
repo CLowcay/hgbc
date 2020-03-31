@@ -29,8 +29,10 @@ dependencies:
 - filepath
 - hgbc
 - htoml
+- megaparsec
 - mtl
 - optparse-applicative
+- parser-combinators
 - resourcet
 - sdl2
 - stm
