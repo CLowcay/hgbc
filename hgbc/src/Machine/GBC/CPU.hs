@@ -392,6 +392,12 @@ reset = do
   setIME
   writePC 0
 
+  liftIO $ do
+    directWritePort portKEY1 0
+    writeIORef cpuMode ModeNormal
+    writeUnboxedRef cpuCycleClocks 4
+    writeIORef haltBug False
+
   writeByte P1     0xFF
   writeByte TIMA   0
   writeByte TMA    0
@@ -462,15 +468,15 @@ reset = do
     setIME
     writePC 0x100
 
-    writeByte NR11   0xBF
-    writeByte NR12   0xF3
-    writeByte NR50   0x77
-    writeByte NR51   0xF3
-    writeByte NR52   0xF1
-    writeByte LCDC   0x91
-    writeByte BGP    0xFC
-    writeByte OBP0   0xFF
-    writeByte OBP1   0xFF
+    writeByte NR11 0xBF
+    writeByte NR12 0xF3
+    writeByte NR50 0x77
+    writeByte NR51 0xF3
+    writeByte NR52 0xF1
+    writeByte LCDC 0x91
+    writeByte BGP  0xFC
+    writeByte OBP0 0xFF
+    writeByte OBP1 0xFF
 
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}

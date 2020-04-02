@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debug.Parser
+module Debugger.Parser
   ( statement
   , statements
   , expression
@@ -10,7 +10,7 @@ where
 import           Control.Monad.Combinators.Expr
 import           Data.Void
 import           Data.Word
-import           Debug.AST
+import           Debugger.AST
 import           Text.Megaparsec
 import           Text.Megaparsec.Char
 import qualified Data.Text                     as T

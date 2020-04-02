@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0a388280977574beed3c29826ea785fa9fa5be7103c21ed626fe5ce47ff6e6e2
+-- hash: f456f3a0193d699c0d61c5f9c4a9e8b42680ee11cf747f9e9b3a86ad80880645
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -28,9 +28,10 @@ executable hgbc-sdl
   other-modules:
       Audio
       Config
-      Debug.AST
-      Debug.Parser
       Debugger
+      Debugger.AST
+      Debugger.Parser
+      Debugger.Status
       Emulator
       GLUtils
       Keymap
@@ -45,6 +46,7 @@ executable hgbc-sdl
   build-depends:
       OpenGLRaw
     , StateVar
+    , aeson
     , async
     , base >=4.7 && <5
     , bytestring

@@ -5,7 +5,10 @@ where
 
 import           Control.Monad.Reader
 import           Control.Concurrent
-import           Machine.GBC
+import           Machine.GBC                    ( EmulatorState
+                                                , keyUp
+                                                , keyDown
+                                                )
 import           Keymap
 import qualified Emulator
 import qualified SDL

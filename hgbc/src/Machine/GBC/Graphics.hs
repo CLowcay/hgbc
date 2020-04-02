@@ -11,7 +11,6 @@ module Machine.GBC.Graphics
   , GraphicsBusEvent(..)
   , initGraphics
   , graphicsPorts
-  , switchMode
   , newGraphicsSync
   , graphicsRegisters
   , graphicsStep
@@ -162,9 +161,6 @@ graphicsPorts GraphicsState {..} =
   , (OCPD, portOCPD)
   , (VBK , portVBK)
   ]
-
-switchMode :: GraphicsState -> EmulatorMode -> IO ()
-switchMode GraphicsState {..} = writeIORef modeRef
 
 -- | Make a new Graphics sync object.
 newGraphicsSync :: IO GraphicsSync

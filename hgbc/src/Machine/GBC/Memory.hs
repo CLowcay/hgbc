@@ -22,7 +22,9 @@ import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
 import           Data.Bifunctor
 import           Data.Bits
+import           Data.Functor
 import           Data.IORef
+import           Data.Maybe
 import           Data.Word
 import           Machine.GBC.Errors
 import           Machine.GBC.Graphics.VRAM
@@ -36,12 +38,12 @@ import qualified Data.ByteString               as B
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable          as VS
 import qualified Data.Vector.Storable.Mutable  as VSM
-import           Data.Functor
-import           Data.Maybe
 
 -- | The gameboy memory.
 data Memory = Memory {
     mbc            :: !MBC
+  , mode0          :: !EmulatorMode
+  , modeRef        :: !(IORef EmulatorMode)
   , header         :: !Header
   , rom0           :: !(IORef (VS.Vector Word8))  -- The first 8kb of ROM. Can be switched between cartridge ROM and boot ROM.
   , rom            :: !(VS.Vector Word8)          -- All of cartrige ROM.
@@ -53,6 +55,7 @@ data Memory = Memory {
   , portIE         :: !(Port Word8)
   , portSVBK       :: !(Port Word8)
   , portBLCK       :: !(Port Word8)
+  , portR4C        :: !(Port Word8)
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
@@ -76,6 +79,8 @@ resetAndBoot pseudoBootROM = do
   liftIO $ do
     writePort portSVBK 0
     directWritePort portBLCK 0
+    directWritePort portR4C  0
+    writeIORef modeRef mode0
   case bootROM of
     Nothing      -> pseudoBootROM
     Just content -> liftIO $ writeIORef rom0 content
@@ -111,6 +116,7 @@ initMemory
   -> IORef EmulatorMode
   -> IO Memory
 initMemory boot rom header mbc vram rawPorts portIE modeRef = do
+  mode0 <- readIORef modeRef
   let bootROM = boot <&> \content ->
         let boot1 = VS.take 0x100 content
             boot2 = VS.drop 0x200 content
@@ -133,7 +139,7 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
   -- R4C: An undocumented register that appears to control DMG compatibility in
   -- the LCD.
   bootROMLockout <- newIORef False
-  r4c            <- newPortWithReadAction
+  portR4C        <- newPortWithReadAction
     0x00
     0xFF
     (\a -> do
@@ -145,7 +151,7 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
   -- BLCK: BIOS lockout.
   portBLCK <- newPort 0xFE 0x01 $ \oldValue newValue -> do
     when (isFlagSet 1 newValue) $ do
-      lcdMode <- directReadPort r4c
+      lcdMode <- directReadPort portR4C
       when (lcdMode == 4) (writeIORef modeRef DMG)
       writeIORef rom0           rom
       writeIORef bootROMLockout True
@@ -164,7 +170,7 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
         (   first portOffset
         <$> ( (BLCK, portBLCK)
             : (SVBK, portSVBK)
-            : (R4C , r4c)
+            : (R4C , portR4C)
             : (R6C , r6c)
             : (R72 , r72)
             : (R73 , r73)

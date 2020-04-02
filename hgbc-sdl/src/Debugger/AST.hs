@@ -1,4 +1,4 @@
-module Debug.AST
+module Debugger.AST
   ( Value(..)
   , Address(..)
   , BinOp(..)

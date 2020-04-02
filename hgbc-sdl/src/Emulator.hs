@@ -19,6 +19,7 @@ data Notification
   | StepNotification
   | StepOverNotification
   | StepOutNotification
+  | RestartNotification
   deriving (Eq, Ord, Show)
 
 -- | A communication channel for the emulator thread.

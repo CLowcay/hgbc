@@ -20,7 +20,7 @@ import           Data.Word
 import           Foreign.Ptr
 import           GLUtils
 import           Graphics.GL.Core44
-import           Machine.GBC
+import           Machine.GBC                    ( GraphicsSync(..) )
 import           SDL.Extras
 import qualified Config
 import qualified Data.ByteString               as B

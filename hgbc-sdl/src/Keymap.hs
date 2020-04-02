@@ -14,12 +14,12 @@ where
 import           Control.Applicative
 import           Data.Either
 import           Data.Foldable
+import           Data.Functor
 import           Data.Maybe
 import qualified Data.HashMap.Strict           as HM
 import qualified Data.Map.Strict               as M
 import qualified Data.Text                     as T
-import           Data.Functor
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Keypad            as GBC
 import qualified SDL
 import qualified Text.Toml.Types               as Toml
 

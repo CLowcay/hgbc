@@ -24,7 +24,9 @@ import           Data.Maybe
 import           Data.Monoid
 import           Data.Word
 import           Keymap
-import           Machine.GBC
+import           Machine.GBC                    ( ColorCorrection(..)
+                                                , EmulatorMode(..)
+                                                )
 import           Machine.GBC.Util
 import           Options.Applicative
 import qualified Data.ByteString               as B

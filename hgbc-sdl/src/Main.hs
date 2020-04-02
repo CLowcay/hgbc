@@ -132,7 +132,7 @@ emulator rom allOptions@Config.Options {..} = do
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
   debuggerChannel <- if optionDebugMode
-    then Just <$> Debugger.start (takeBaseName optionFilename) config emulatorChannel
+    then Just <$> Debugger.start (takeBaseName optionFilename) config emulatorChannel emulatorState
     else pure Nothing
 
   let pauseAudio  = maybe (pure ()) Audio.pause audio
@@ -156,8 +156,9 @@ emulator rom allOptions@Config.Options {..} = do
         notification <- Emulator.getNotification emulatorChannel
         case notification of
           Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
-          Just Emulator.QuitNotification  -> onQuit
-          _                               -> emulatorLoop
+          Just Emulator.QuitNotification -> onQuit
+          Just Emulator.RestartNotification -> reset >> emulatorLoop
+          _ -> emulatorLoop
 
       pauseLoop = do
         notifyPaused
@@ -169,6 +170,7 @@ emulator rom allOptions@Config.Options {..} = do
           Emulator.StepNotification     -> step >> pauseLoop
           Emulator.StepOverNotification -> step >> pauseLoop
           Emulator.StepOutNotification  -> step >> pauseLoop
+          Emulator.RestartNotification  -> reset >> pauseLoop
 
   runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop)
              emulatorState
