@@ -6,11 +6,11 @@ module Main
   )
 where
 
+import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Identity
 import           Control.Monad.Reader
 import           Control.Monad.Writer.Lazy
-import           Control.Exception
 import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
@@ -21,6 +21,7 @@ import           System.FilePath
 import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
+import qualified Debugger
 import qualified Emulator
 import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
@@ -130,28 +131,44 @@ emulator rom allOptions@Config.Options {..} = do
   audio <- if optionNoSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
-  maybe (pure ()) Audio.resume audio
+  debuggerChannel <- if optionDebugMode
+    then Just <$> Debugger.start (takeBaseName optionFilename) config emulatorChannel
+    else pure Nothing
+
+  let pauseAudio  = maybe (pure ()) Audio.pause audio
+  let resumeAudio = maybe (pure ()) Audio.resume audio
+
+  let notifyPaused = do
+        Window.sendNotification window Window.PausedNotification
+        maybe (pure ()) (`Debugger.sendNotification` Debugger.EmulatorPaused) debuggerChannel
+
+  let notifyResumed = do
+        Window.sendNotification window Window.ResumedNotification
+        maybe (pure ()) (`Debugger.sendNotification` Debugger.EmulatorStarted) debuggerChannel
 
   let onQuit =
         -- Switch off audio so that the audio callback is not invoked
         -- after the Haskell RTS has shut down.
-        maybe (pure ()) Audio.pause audio
+        pauseAudio
 
   let emulatorLoop = do
         step
         notification <- Emulator.getNotification emulatorChannel
         case notification of
-          Nothing                         -> emulatorLoop
+          Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
           Just Emulator.QuitNotification  -> onQuit
-          Just Emulator.PauseNotification -> do
-            maybe (pure ()) Audio.pause audio
-            Window.sendNotification window Window.PausedNotification
-            notification1 <- Emulator.waitNotification emulatorChannel
-            case notification1 of
-              Emulator.PauseNotification -> do
-                maybe (pure ()) Audio.resume audio
-                Window.sendNotification window Window.ResumedNotification
-                emulatorLoop
-              Emulator.QuitNotification -> onQuit
+          _                               -> emulatorLoop
 
-  runReaderT (reset >> emulatorLoop) emulatorState
+      pauseLoop = do
+        notifyPaused
+        notification <- Emulator.waitNotification emulatorChannel
+        case notification of
+          Emulator.QuitNotification     -> onQuit
+          Emulator.PauseNotification    -> resumeAudio >> notifyResumed >> emulatorLoop
+          Emulator.RunNotification      -> resumeAudio >> notifyResumed >> emulatorLoop
+          Emulator.StepNotification     -> step >> pauseLoop
+          Emulator.StepOverNotification -> step >> pauseLoop
+          Emulator.StepOutNotification  -> step >> pauseLoop
+
+  runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop)
+             emulatorState

@@ -15,6 +15,10 @@ import           Control.Monad.IO.Class
 data Notification
   = PauseNotification
   | QuitNotification
+  | RunNotification
+  | StepNotification
+  | StepOverNotification
+  | StepOutNotification
   deriving (Eq, Ord, Show)
 
 -- | A communication channel for the emulator thread.

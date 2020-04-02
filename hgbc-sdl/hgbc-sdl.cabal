@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7df3e53e3fad96b7efca44174df1ce83760d29ba0fd908252207c373c5abd2eb
+-- hash: 0a388280977574beed3c29826ea785fa9fa5be7103c21ed626fe5ce47ff6e6e2
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -30,6 +30,7 @@ executable hgbc-sdl
       Config
       Debug.AST
       Debug.Parser
+      Debugger
       Emulator
       GLUtils
       Keymap
@@ -44,6 +45,7 @@ executable hgbc-sdl
   build-depends:
       OpenGLRaw
     , StateVar
+    , async
     , base >=4.7 && <5
     , bytestring
     , containers
@@ -52,6 +54,7 @@ executable hgbc-sdl
     , filepath
     , hgbc
     , htoml
+    , http-types
     , megaparsec
     , mtl
     , optparse-applicative
@@ -62,4 +65,6 @@ executable hgbc-sdl
     , text
     , unordered-containers
     , vector
+    , wai
+    , warp
   default-language: Haskell2010

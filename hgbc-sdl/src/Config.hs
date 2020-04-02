@@ -39,6 +39,7 @@ import qualified Text.Toml.Types               as Toml
 
 data Options = Options
   { optionDebugMode       :: Bool
+  , optionDebugPort       :: Maybe Int
   , optionNoSound         :: Bool
   , optionScale           :: Maybe Int
   , optionSpeed           :: Maybe Double
@@ -51,6 +52,7 @@ data Options = Options
 optionsToConfig :: Options -> Config.Config Maybe
 optionsToConfig Options {..} = mempty { Config.scale           = optionScale
                                       , Config.speed           = optionSpeed
+                                      , Config.debugPort       = optionDebugPort
                                       , Config.bootROM         = optionBootROM
                                       , Config.colorCorrection = optionColorCorrection
                                       , Config.mode            = optionMode
@@ -60,6 +62,11 @@ optionsP :: Parser Options
 optionsP =
   Options
     <$> switch (long "debug" <> help "Enable the debugger")
+    <*> option
+          (Just <$> auto)
+          (long "debug-port" <> value Nothing <> metavar "DEBUG_PORT" <> help
+            "Port to run the debug server on"
+          )
     <*> switch (long "no-sound" <> help "Disable audio output")
     <*> option
           (Just <$> auto)
@@ -99,6 +106,7 @@ type Palette = (Word32, Word32, Word32, Word32)
 data Config f = Config
   { speed :: HKD f Double
   , scale :: HKD f Int
+  , debugPort :: HKD f Int
   , bootROM :: HKD f (Maybe FilePath)
   , mode :: HKD f (Maybe EmulatorMode)
   , colorCorrection :: HKD f ColorCorrection
@@ -118,6 +126,7 @@ deriving instance Show (Config Maybe)
 instance Semigroup (Config Maybe) where
   left <> right = Config { speed             = lastOf speed
                          , scale             = lastOf scale
+                         , debugPort         = lastOf debugPort
                          , bootROM           = lastOf bootROM
                          , colorCorrection   = lastOf colorCorrection
                          , mode              = lastOf Config.mode
@@ -131,11 +140,12 @@ instance Semigroup (Config Maybe) where
     lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
 
 instance Monoid (Config Maybe) where
-  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 finalize :: Config Maybe -> Config Identity
 finalize Config {..} = Config { speed             = fromMaybe 1 speed
                               , scale             = fromMaybe 2 scale
+                              , debugPort         = fromMaybe 8080 debugPort
                               , bootROM           = bootROM
                               , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
                               , mode              = mode
@@ -159,9 +169,10 @@ parseConfig filename contents = case Toml.parseTomlDoc filename contents of
 decodeConfig :: Toml.Table -> Either [String] (Config Maybe)
 decodeConfig = decodeTable rootTable
  where
-  rootTable ("speed", Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
-  rootTable ("speed", Toml.VFloat f  ) = Right (mempty { speed = Just f })
-  rootTable ("scale", Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("speed"     , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
+  rootTable ("speed"     , Toml.VFloat f  ) = Right (mempty { speed = Just f })
+  rootTable ("scale"     , Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("debug-port", Toml.VInteger i) = Right (mempty { debugPort = Just (fromIntegral i) })
   rootTable ("boot-rom", Toml.VString filename) =
     Right (mempty { bootROM = Just (T.unpack filename) })
   rootTable ("mode", Toml.VString t) = do

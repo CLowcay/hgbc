@@ -2,15 +2,14 @@
 speed = 1
 # Video scale factor
 scale = 2
-
+# Port to serve the debugger from (only used when started in debug mode)
+debug-port = 8080
 # Emulation mode. Values are 'dmg' for original Gameboy, 'cgb' for Gameboy
 # Color, and 'auto' to choose automatically based on the cartridge header and
 # boot ROM. Note that a boot ROM, if used, may switch from cgb to dmg mode.
 mode = 'auto'
-
 # An optional boot ROM.
 # boot-rom = 'boot.bin'
-
 # Color correction for Gameboy Color games. Allowed values are 'none' or
 # 'default'.
 color-correction = 'default'

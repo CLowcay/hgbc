@@ -1,0 +1,75 @@
+body {
+	font-family: mono;
+}
+p {
+	margin-bottom:0;
+}
+h1, h2, h3, h4, h5, h6 {
+	margin-top:0;
+}
+iframe {
+  position: absolute;
+  display: none;
+  visibility: hidden;
+}
+nav {
+	background-color: lightgrey;
+}
+table {
+	table-layout:fixed;
+	background-color: lightblue;
+	border-collapse: collapse;
+	border: 2px solid black;
+}
+th, td {
+	padding: 2px 8px;
+}
+table.hardware td {
+	width: 6em;
+}
+table.hardware div.value {
+	float: left;
+}
+div.value {
+	float: right;
+	border-top: 1px solid gray;
+	border-bottom: 1px solid gray;
+	border-left: 1px solid gray;
+}
+div.info {
+	display: none;
+	position:absolute;
+	left: 50%;
+	top: 90%;
+	background: lightgreen;
+	padding: 8px;
+	border: 1px solid black;
+	width: 20em;
+	font-size:small;
+	opacity: 0.9;
+	z-index:1;
+}
+div.value span:hover div.info {
+	display:block;
+}
+div.value span {
+	position:relative;
+	padding: 1px;
+	border-right: 1px solid gray;
+}
+div.value span.l8 {
+	letter-spacing: 3px;
+}
+div.value span.l2 {
+	letter-spacing: 2px;
+}
+div.value span.group {
+	padding: 0;
+	border-right: 1px solid gray;
+}
+div.value span.u {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' version='1.1' preserveAspectRatio='none' viewBox='0 0 1 1'><line x1='0' y1='0' x2='1' y2='1' stroke='gray' vector-effect='non-scaling-stroke'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+}
