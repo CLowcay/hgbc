@@ -72,7 +72,7 @@ newNoiseChannel port52 frameSequencer = mdo
 
 disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
-  writeUnboxedRef output (-8)
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 flagChannel4Enable False
 
@@ -104,7 +104,7 @@ instance Channel NoiseChannel where
         then currentBit lfsr
         else nextBit lfsr (widthMask register3)
       sample <- envelopeVolume envelope
-      writeUnboxedRef output ((if registerOut .&. 1 == 0 then sample else 0) - 8)
+      writeUnboxedRef output (if registerOut .&. 1 == 0 then sample else 0)
       pure (timerPeriod register3)
 
 widthMask :: Word8 -> Word16

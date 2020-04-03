@@ -19,8 +19,9 @@ newUnboxedRef value = do
   pure (UnboxedRef array)
 
 {-# INLINE writeUnboxedRef #-}
+{-# ANN writeUnboxedRef ("HLint: ignore Eta reduce") #-}
 writeUnboxedRef :: Prim a => UnboxedRef a -> a -> IO ()
-writeUnboxedRef (UnboxedRef array) = writePrimArray array 0
+writeUnboxedRef (UnboxedRef array) v = writePrimArray array 0 v
 
 {-# INLINE readUnboxedRef #-}
 readUnboxedRef :: Prim a => UnboxedRef a -> IO a

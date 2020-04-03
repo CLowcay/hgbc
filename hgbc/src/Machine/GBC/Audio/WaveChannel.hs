@@ -98,7 +98,7 @@ newWaveChannel port52 frameSequencer = mdo
 
 disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
-  writeUnboxedRef output (-8)
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 flagChannel3Enable False
 
@@ -146,7 +146,7 @@ generateOutput WaveChannel {..} sampleByte i = do
   let volume         = getVolume register2
   let rawSampleValue = if i .&. 1 == 0 then sampleByte .>>. 4 else sampleByte .&. 0x0F
   let sampleValue = if volume == 0 then 0 else rawSampleValue .>>. (fromIntegral volume - 1)
-  writeUnboxedRef output (fromIntegral sampleValue - 8)
+  writeUnboxedRef output (fromIntegral sampleValue)
 
 flagMasterEnable :: Word8
 flagMasterEnable = 0x80

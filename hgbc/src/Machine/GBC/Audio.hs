@@ -94,11 +94,11 @@ samplePeriod = 94
 
 mixOutputChannel :: (Int, Int, Int, Int) -> Word8 -> Word8
 mixOutputChannel (v1, v2, v3, v4) channelFlags =
-  let out1 = if channelFlags `testBit` 0 then v1 else 0
-      out2 = if channelFlags `testBit` 1 then v2 else 0
-      out3 = if channelFlags `testBit` 2 then v3 else 0
-      out4 = if channelFlags `testBit` 3 then v4 else 0
-  in  fromIntegral (((out1 + out2 + out3 + out4) * 4) + 128)
+  let out1 = if channelFlags `testBit` 0 then v1 else 8
+      out2 = if channelFlags `testBit` 1 then v2 else 8
+      out3 = if channelFlags `testBit` 2 then v3 else 8
+      out4 = if channelFlags `testBit` 3 then v4 else 8
+  in  fromIntegral (((out1 + out2 + out3 + out4 - 32) * 4) + 128)
 
 clockFrameSequencer :: AudioState -> IO ()
 clockFrameSequencer AudioState {..} = do
@@ -126,8 +126,8 @@ audioStep AudioState {..} clockAdvance = do
       v2 <- getOutput channel2
       v3 <- getOutput channel3
       v4 <- getOutput channel4
-      directWritePort portPCM12 (fromIntegral (v1 + 8) .|. fromIntegral ((v2 + 8) .<<. 4))
-      directWritePort portPCM34 (fromIntegral (v3 + 8) .|. fromIntegral ((v4 + 8) .<<. 4))
+      directWritePort portPCM12 (fromIntegral v1 .|. fromIntegral (v2 .<<. 4))
+      directWritePort portPCM34 (fromIntegral v3 .|. fromIntegral (v4 .<<. 4))
 
       register50 <- directReadPort port50
       register51 <- directReadPort port51

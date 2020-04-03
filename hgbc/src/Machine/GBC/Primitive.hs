@@ -295,8 +295,9 @@ writePort Port {..} newValue = do
 -- | Write the value of the port directly without any checks or notifications.
 {-# INLINE directWritePort #-}
 {-# SPECIALIZE directWritePort :: Port Word8 -> Word8 ->IO () #-}
+{-# ANN directWritePort ("HLint: ignore Eta reduce") #-}
 directWritePort :: Prim a => Port a -> a -> IO ()
-directWritePort Port {..} = writeUnboxedRef portValue
+directWritePort Port {..} v = writeUnboxedRef portValue v
 
 -- | Set writable bits and notify all listeners.
 {-# INLINE setPortBits #-}

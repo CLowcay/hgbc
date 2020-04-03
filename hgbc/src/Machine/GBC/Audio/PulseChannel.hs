@@ -102,7 +102,7 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
 
 disableIO :: Port Word8 -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 channelEnabledFlag output enable = do
-  writeUnboxedRef output (-8)
+  writeUnboxedRef output 0
   writeIORef enable False
   updateStatus port52 channelEnabledFlag False
 
@@ -145,7 +145,7 @@ instance Channel PulseChannel where
 
       register1 <- directReadPort port1
       sample    <- envelopeVolume envelope
-      writeUnboxedRef output ((if dutyCycleOutput register1 i then sample else 0) - 8)
+      writeUnboxedRef output (if dutyCycleOutput register1 i then sample else 0)
 
 dutyCycleOutput :: Word8 -> Int -> Bool
 dutyCycleOutput register1 i = case register1 .>>. 6 of
