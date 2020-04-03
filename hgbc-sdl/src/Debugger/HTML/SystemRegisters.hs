@@ -92,7 +92,7 @@ systemRegisters = table
            , field "if3" (desc "0" "Serial IO Interrupt" [])
            , field "if2" (desc "0" "Timer Interrupt" [])
            , field "if1" (desc "0" "LCD STAT Interrupt" [])
-           , field "if0" (desc "0" "VBLANK Interrupt" [])
+           , field "if0" (desc "0" "VBlank Interrupt" [])
            ]
         )
       ]
@@ -105,7 +105,7 @@ systemRegisters = table
            , field "ie3" (desc "0" "Serial IO Interrupt" enableDisable)
            , field "ie2" (desc "0" "Timer Interrupt" enableDisable)
            , field "ie1" (desc "0" "LCD STAT Interrupt" enableDisable)
-           , field "ie0" (desc "0" "VBLANK Interrupt" enableDisable)
+           , field "ie0" (desc "0" "VBlank Interrupt" enableDisable)
            ]
         )
       ]

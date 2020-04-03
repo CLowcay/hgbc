@@ -72,20 +72,20 @@ initDMA = mdo
   portHDMA2 <- newPort 0x00 0xF0 alwaysUpdate
   portHDMA3 <- newPort 0x00 0x1F alwaysUpdate
   portHDMA4 <- newPort 0x00 0xF0 alwaysUpdate
-  portHDMA5 <- newPort 0x00 0xFF $ \_ hdma5 -> if hdma5 .&. 0x80 /= 0
+  portHDMA5 <- newPort 0x00 0xFF $ \_ hdma5' -> if hdma5' .&. 0x80 /= 0
     then do
       loadHDMATargets
       writeIORef hdmaActive True
-      pure (hdma5 .&. 0x7F)
+      pure (hdma5' .&. 0x7F)
     else do
       isActive <- readIORef hdmaActive
       if isActive
         then do
           writeIORef hdmaActive False
-          pure (hdma5 .|. 0x80)
+          pure (hdma5' .|. 0x80)
         else do
           loadHDMATargets
-          writeIORef pendingHDMA $! Pending hdma5
+          writeIORef pendingHDMA $! Pending hdma5'
           pure 0xFF
 
   pure DMAState { .. }

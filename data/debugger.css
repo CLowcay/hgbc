@@ -1,5 +1,6 @@
 body {
-	font-family: mono;
+  font-family: mono;
+  font-size: small;
 }
 p {
 	margin-bottom:0;
@@ -16,6 +17,7 @@ nav {
 	background-color: lightgrey;
 }
 table {
+  margin-top: 8px;
 	table-layout:fixed;
 	background-color: lightblue;
   border-collapse: collapse;
@@ -32,7 +34,7 @@ tbody>tr:last-child>td {
   padding-bottom: 8px;
 }
 table.hardware td {
-	width: 6em;
+	width: 7em;
 }
 table.hardware div.value {
 	float: left;
@@ -58,8 +60,8 @@ div.info {
 }
 div.info ul {
   list-style-type: none;
-  margin: 0;
   padding: 0;
+  margin: 8px 0 0;
 }
 div.value span:hover>div.info {
 	display:block;

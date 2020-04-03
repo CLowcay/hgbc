@@ -8,6 +8,8 @@ where
 import           Data.String
 import           Debugger.HTML.CPURegisters
 import           Debugger.HTML.Elements
+import           Debugger.HTML.LCDRegisters
+import           Debugger.HTML.SoundRegisters
 import           Debugger.HTML.SystemRegisters
 import           Prelude                 hiding ( head )
 import qualified Data.ByteString.Builder       as BB
@@ -40,6 +42,8 @@ debugHTML romFileName = html [header, main]
       ]
     , cpuRegisters
     , systemRegisters
+    , lcdRegisters
+    , soundRegisters
     ]
 
 
