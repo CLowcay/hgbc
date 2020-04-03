@@ -16,6 +16,7 @@ module Debugger.HTML.Elements
   , table
   , tr
   , td
+  , tdspan
   , th
   , ul
   , value
@@ -85,6 +86,9 @@ tr cells = "<tr>" <> mconcat cells <> "</tr>"
 
 td :: [BB.Builder] -> BB.Builder
 td contents = "<td>" <> mconcat contents <> "</td>"
+
+tdspan :: Int -> [BB.Builder] -> BB.Builder
+tdspan colspan contents = "<td colspan=" <> BB.intDec colspan <> ">" <> mconcat contents <> "</td>"
 
 th :: Int -> [BB.Builder] -> BB.Builder
 th colspan contents = "<th colspan=" <> BB.intDec colspan <> ">" <> mconcat contents <> "</th>"

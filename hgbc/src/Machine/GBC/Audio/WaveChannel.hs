@@ -4,6 +4,7 @@
 module Machine.GBC.Audio.WaveChannel
   ( WaveChannel
   , newWaveChannel
+  , portWaveTable
   )
 where
 

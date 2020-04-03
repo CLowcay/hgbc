@@ -8,6 +8,8 @@ import           Data.Aeson
 import           Data.Bits
 import           GHC.Generics
 import           Machine.GBC                    ( EmulatorState(..) )
+import           Machine.GBC.Audio
+import           Machine.GBC.Audio.WaveChannel
 import           Machine.GBC.CPU
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Graphics           ( GraphicsState(..) )
@@ -16,6 +18,7 @@ import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( div )
+import qualified Data.Vector                   as V
 
 data Status = Status {
   -- CPU registers
@@ -218,6 +221,23 @@ data Status = Status {
   , pcm123_0 :: Char
   , pcm347_4 :: Char
   , pcm343_0 :: Char
+
+  , wave0 :: String
+  , wave1 :: String
+  , wave2 :: String
+  , wave3 :: String
+  , wave4 :: String
+  , wave5 :: String
+  , wave6 :: String
+  , wave7 :: String
+  , wave8 :: String
+  , wave9 :: String
+  , waveA :: String
+  , waveB :: String
+  , waveC :: String
+  , waveD :: String
+  , waveE :: String
+  , waveF :: String
   } deriving (Eq, Show, Generic)
 
 instance ToJSON Status
@@ -431,39 +451,58 @@ getStatus emulatorState = runReaderT go emulatorState
     let nr437_4 = head (formatHex nr43)
     let nr433   = getBit 3 nr43
     let nr432_0 = formatHex (nr43 .&. 7) !! 1
-    let nr447 = getBit 7 nr44
-    let nr446 = getBit 6 nr44
+    let nr447   = getBit 7 nr44
+    let nr446   = getBit 6 nr44
 
-    nr50 <- readByte NR50
-    nr51 <- readByte NR51
-    nr52 <- readByte NR52
+    nr50  <- readByte NR50
+    nr51  <- readByte NR51
+    nr52  <- readByte NR52
     pcm12 <- readByte PCM12
     pcm34 <- readByte PCM34
 
-    let nr507 = getBit 7 nr50
-    let nr506_4 = head (formatHex (nr50 .&. 0x70))
-    let nr503 = getBit 3 nr50
-    let nr502_0 = formatHex (nr50 .&. 0x07) !! 1
+    let nr507     = getBit 7 nr50
+    let nr506_4   = head (formatHex (nr50 .&. 0x70))
+    let nr503     = getBit 3 nr50
+    let nr502_0   = formatHex (nr50 .&. 0x07) !! 1
 
-    let nr517 = getBit 7 nr51
-    let nr516 = getBit 6 nr51
-    let nr515 = getBit 5 nr51
-    let nr514 = getBit 4 nr51
-    let nr513 = getBit 3 nr51
-    let nr512 = getBit 2 nr51
-    let nr511 = getBit 1 nr51
-    let nr510 = getBit 0 nr51
+    let nr517     = getBit 7 nr51
+    let nr516     = getBit 6 nr51
+    let nr515     = getBit 5 nr51
+    let nr514     = getBit 4 nr51
+    let nr513     = getBit 3 nr51
+    let nr512     = getBit 2 nr51
+    let nr511     = getBit 1 nr51
+    let nr510     = getBit 0 nr51
 
-    let nr527 = getBit 7 nr52
-    let nr523 = getBit 3 nr52
-    let nr522 = getBit 2 nr52
-    let nr521 = getBit 1 nr52
-    let nr520 = getBit 0 nr52
+    let nr527     = getBit 7 nr52
+    let nr523     = getBit 3 nr52
+    let nr522     = getBit 2 nr52
+    let nr521     = getBit 1 nr52
+    let nr520     = getBit 0 nr52
 
-    let pcm127_4 = head (formatHex pcm12)
-    let pcm123_0 = formatHex pcm12 !! 1
+    let pcm127_4  = head (formatHex pcm12)
+    let pcm123_0  = formatHex pcm12 !! 1
 
-    let pcm347_4 = head (formatHex pcm34)
-    let pcm343_0 = formatHex pcm12 !! 1
+    let pcm347_4  = head (formatHex pcm34)
+    let pcm343_0  = formatHex pcm12 !! 1
+
+    let waveTable = portWaveTable . channel3 . audioState $ emulatorState
+
+    wave0 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x0))
+    wave1 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x1))
+    wave2 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x2))
+    wave3 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x3))
+    wave4 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x4))
+    wave5 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x5))
+    wave6 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x6))
+    wave7 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x7))
+    wave8 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x8))
+    wave9 <- liftIO (formatHex <$> directReadPort (waveTable V.! 0x9))
+    waveA <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xA))
+    waveB <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xB))
+    waveC <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xC))
+    waveD <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xD))
+    waveE <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xE))
+    waveF <- liftIO (formatHex <$> directReadPort (waveTable V.! 0xF))
 
     pure Status { .. }

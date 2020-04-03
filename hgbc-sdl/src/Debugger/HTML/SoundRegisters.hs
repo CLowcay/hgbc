@@ -142,6 +142,31 @@ soundRegisters = table
         ]
       ]
     ]
+  , tr
+    [ tdspan
+        5
+        [ "Wave Table"
+        , br
+        , value
+          [ field "wave0" (desc "00" "FF30" [p "Wave table samples 0 and 1."])
+          , field "wave1" (desc "00" "FF31" [p "Wave table samples 2 and 3."])
+          , field "wave2" (desc "00" "FF32" [p "Wave table samples 4 and 5."])
+          , field "wave3" (desc "00" "FF33" [p "Wave table samples 6 and 7."])
+          , field "wave4" (desc "00" "FF34" [p "Wave table samples 8 and 9."])
+          , field "wave5" (desc "00" "FF35" [p "Wave table samples 10 and 11."])
+          , field "wave6" (desc "00" "FF36" [p "Wave table samples 12 and 13."])
+          , field "wave7" (desc "00" "FF37" [p "Wave table samples 14 and 15."])
+          , field "wave8" (desc "00" "FF38" [p "Wave table samples 16 and 17."])
+          , field "wave9" (desc "00" "FF39" [p "Wave table samples 18 and 19."])
+          , field "waveA" (desc "00" "FF3A" [p "Wave table samples 20 and 21."])
+          , field "waveB" (desc "00" "FF3B" [p "Wave table samples 22 and 23."])
+          , field "waveC" (desc "00" "FF3C" [p "Wave table samples 24 and 25."])
+          , field "waveD" (desc "00" "FF3D" [p "Wave table samples 26 and 27."])
+          , field "waveE" (desc "00" "FF3E" [p "Wave table samples 28 and 29."])
+          , field "waveF" (desc "00" "FF3F" [p "Wave table samples 30 and 31."])
+          ]
+        ]
+    ]
   ]
  where
   isPlaying = [ul ["0: Not playing", "1: Playing"]]
