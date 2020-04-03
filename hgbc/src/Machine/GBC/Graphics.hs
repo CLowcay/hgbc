@@ -12,7 +12,6 @@ module Machine.GBC.Graphics
   , initGraphics
   , graphicsPorts
   , newGraphicsSync
-  , graphicsRegisters
   , graphicsStep
   )
 where
@@ -268,53 +267,6 @@ graphicsStep graphicsState@GraphicsState {..} graphicsSync clockAdvance = do
       pure $ case modeUpdate of
         HasChangedTo HBlank -> HBlankEvent
         _                   -> NoGraphicsEvent
-
--- | Prepare a status report on the graphics registers.
-graphicsRegisters :: GraphicsState -> IO [RegisterInfo]
-graphicsRegisters GraphicsState {..} = do
-  lcdc <- readPort portLCDC
-  stat <- readPort portSTAT
-  sequence
-    [ pure (RegisterInfo LCDC "LCDC" lcdc (decodeLCDC lcdc))
-    , pure (RegisterInfo STAT "STAT" stat (decodeSTAT stat))
-    , RegisterInfo SCY "SCY" <$> readPort portSCY <*> pure []
-    , RegisterInfo SCX "SCX" <$> readPort portSCX <*> pure []
-    , RegisterInfo LY "LY" <$> readPort portLY <*> pure []
-    , RegisterInfo LYC "LYC" <$> readPort portLYC <*> pure []
-    , RegisterInfo BGP "BGP" <$> readPort portBGP <*> pure []
-    , RegisterInfo OBP0 "OBP0" <$> readPort portOBP0 <*> pure []
-    , RegisterInfo OBP1 "OBP1" <$> readPort portOBP1 <*> pure []
-    , RegisterInfo WY "WY" <$> readPort portWY <*> pure []
-    , RegisterInfo WX "WX" <$> readPort portWX <*> pure []
-    , RegisterInfo VBK "VBK" <$> readPort portVBK <*> pure []
-    ]
- where
-  decodeLCDC lcdc =
-    [ ("LCD Enable"      , show $ isFlagSet flagLCDEnable lcdc)
-    , ("Window Code Area", if 0 == lcdc .&. flagWindowTileMap then "9800" else "9C00")
-    , ("Window Enable"   , show $ isFlagSet flagWindowEnable lcdc)
-    , ( "Background Character Data Base"
-      , if 0 == lcdc .&. flagTileDataSelect then "8800" else "8000"
-      )
-    , ("Background Code Area", if 0 == lcdc .&. flagBackgroundTileMap then "9800" else "9C00")
-    , ("OBJ Height"          , if 0 == lcdc .&. flagOBJSize then "8" else "16")
-    , ("OBJ Enable"          , show $ isFlagSet flagOBJEnable lcdc)
-    , ("Background Enable"   , show $ isFlagSet flagBackgroundEnable lcdc)
-    ]
-  decodeSTAT stat =
-    let gmode = case stat .&. 0x03 of
-          0 -> "HBlank"
-          1 -> "VBlank"
-          2 -> "Scanning OAM"
-          3 -> "Reading VRAM"
-          x -> error ("Impossible stat mode " <> show x)
-    in  [ ("Mode Flag"                , gmode)
-        , ("LYC = LY"                 , show $ stat `testBit` matchBit)
-        , ("Interrupt on HBlank", show $ stat `testBit` interruptHBlank)
-        , ("Interrupt on VBlank", show $ stat `testBit` interruptVBlank)
-        , ("Interrupt on Scanning OAM", show $ stat `testBit` interruptOAM)
-        , ("Interrupt on LYC = LY", show $ stat `testBit` interruptCoincidence)
-        ]
 
 dmgBackgroundTileAttrs :: Word8
 dmgBackgroundTileAttrs = 0

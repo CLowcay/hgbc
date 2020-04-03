@@ -10,7 +10,6 @@ module Machine.GBC.MBC.Interface
 where
 
 import           Data.Word
-import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
 
 type RAMAllocator = Int -> IO (VSM.IOVector Word8)
@@ -22,7 +21,6 @@ data MBC = MBC {
   , readRAM        :: !(Word16 -> IO Word8)
   , writeRAM       :: !(Word16 -> Word8 -> IO ())
   , sliceRAM       :: !(Word16 -> Int -> IO (VSM.IOVector Word8))
-  , mbcRegisters   :: !(IO [RegisterInfo])
 }
 
 data RTCRegister = Seconds | Minutes | Hours | DaysLow | DaysHigh deriving (Eq, Ord, Show)

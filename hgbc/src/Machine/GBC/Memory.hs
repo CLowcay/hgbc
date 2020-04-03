@@ -8,7 +8,6 @@ module Machine.GBC.Memory
   , initMemory
   , initMemoryForROM
   , getROMHeader
-  , getMbcRegisters
   , dmaToOAM
   , readByte
   , writeByte
@@ -190,12 +189,6 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = header
-
--- | Get the current state of the MBC registers.
-getMbcRegisters :: HasMemory env => ReaderT env IO [RegisterInfo]
-getMbcRegisters = do
-  Memory {..} <- asks forMemory
-  liftIO (mbcRegisters mbc)
 
 -- | Total number of bytes of OAM memory.
 oamSize :: Int

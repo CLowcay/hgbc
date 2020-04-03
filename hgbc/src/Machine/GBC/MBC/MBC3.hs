@@ -59,15 +59,6 @@ mbc3 bankMask ramMask ramAllocator rtc = do
           else do
             offset <- getRAMOffset <$> readIORef register2
             pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
-  let mbcRegisters = do
-        r1 <- readIORef romOffset
-        r2 <- readIORef register2
-        r0 <- readIORef enableRAM
-        pure
-          [ RegisterInfo 0      "R0" (if r0 then 0x0A else 0) [("RAM enabled ", show r0)]
-          , RegisterInfo 0x2000 "R1" (fromIntegral r1)        []
-          , RegisterInfo 0x4000 "R2" (fromIntegral r2)        []
-          ]
   pure MBC { .. }
 
 decodeRTCRegister :: Int -> Maybe RTCRegister

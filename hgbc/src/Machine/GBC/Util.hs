@@ -3,7 +3,6 @@ module Machine.GBC.Util
   ( (.<<.)
   , (.>>.)
   , isFlagSet
-  , RegisterInfo(..)
   , formatHex
   )
 where
@@ -14,19 +13,17 @@ import           Data.Word
 infixl 8 .<<.
 {-# INLINE (.<<.) #-}
 (.<<.) :: Bits a => a -> Int -> a
-(.<<.) = unsafeShiftL
+a .<<. b = unsafeShiftL a b
 
 infixl 8 .>>.
 {-# INLINE (.>>.) #-}
 (.>>.) :: Bits a => a -> Int -> a
-(.>>.) = unsafeShiftR
+a .>>. b = unsafeShiftR a b
 
 {-# INLINE isFlagSet #-}
 isFlagSet :: Word8 -> Word8 -> Bool
 isFlagSet flag v = v .&. flag /= 0
 
-data RegisterInfo = RegisterInfo Word16 String Word8 [(String, String)]
-{-# INLINABLE padLeft #-}
 padLeft :: Int -> Char -> String -> String
 padLeft width c s = reverse . take width $ reverse s ++ repeat c
 

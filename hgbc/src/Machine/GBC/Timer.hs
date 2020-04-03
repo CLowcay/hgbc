@@ -4,7 +4,6 @@ module Machine.GBC.Timer
   ( TimerState
   , initTimerState
   , timerPorts
-  , timerRegisters
   , updateTimer
   )
 where
@@ -162,23 +161,3 @@ updateTimer TimerState {..} advance = do
   when extraClock $ writeIORef extraClockRef False
 
   when (fallingEdge audioFrameMask systemDIV0 systemDIV1) clockAudio
-
--- | Prepare a status report on the timer registers.
-timerRegisters :: TimerState -> IO [RegisterInfo]
-timerRegisters TimerState {..} = do
-  tac <- readPort portTAC
-  sequence
-    [ RegisterInfo DIV "DIV" <$> readPort portDIV <*> pure []
-    , RegisterInfo TIMA "TIMA" <$> readPort portTIMA <*> pure []
-    , pure (RegisterInfo TAC "TAC" tac (decodeTAC tac))
-    ]
- where
-  decodeTAC tac =
-    let modulus = case tac .&. 3 of
-          0 -> 1024
-          1 -> 16
-          2 -> 64
-          3 -> 256
-          x -> error ("Invalid timer modulus " <> show x)
-        frequency = (4 * 1024 * 1024 :: Int) `div` modulus
-    in  [("Frequency", show frequency), ("Timer Started", show (timerStarted tac) ++ "Hz")]

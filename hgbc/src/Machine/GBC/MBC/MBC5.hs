@@ -61,15 +61,4 @@ mbc5 bankMask ramMask ramAllocator = do
           else do
             offset <- getRAMOffset
             pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
-  let mbcRegisters = do
-        g    <- readIORef ramG
-        b0   <- readIORef romB0
-        b1   <- readIORef romB1
-        ramb <- readIORef ramB
-        pure
-          [ RegisterInfo 0      "ROMG"  (if g then 0x0A else 0) [("RAM enabled ", show g)]
-          , RegisterInfo 0x2000 "ROMB0" (fromIntegral b0)       []
-          , RegisterInfo 0x3000 "ROMB1" (fromIntegral b1)       []
-          , RegisterInfo 0x4000 "RAMB"  (fromIntegral ramb)     []
-          ]
   pure MBC { .. }

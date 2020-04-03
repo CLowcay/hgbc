@@ -77,18 +77,4 @@ mbc1 bankMask ramMask ramAllocator = do
           else do
             offset <- readIORef cachedRAMOffset
             pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
-  let mbcRegisters = do
-        r1 <- readIORef romOffset
-        r2 <- readIORef ramOffset
-        r0 <- readIORef enableRAM
-        r3 <- readIORef ramSelect
-        pure
-          [ RegisterInfo 0      "R0" (if r0 then 0x0A else 0) [("RAM enabled ", show r0)]
-          , RegisterInfo 0x2000 "R1" (fromIntegral r1)        []
-          , RegisterInfo 0x4000 "R2" (fromIntegral r2)        []
-          , RegisterInfo 0x6000
-                         "R3"
-                         (if r3 then 1 else 0)
-                         [("R2 is", if r3 then "RAM bank" else "ROM bank high bits")]
-          ]
   pure MBC { .. }
