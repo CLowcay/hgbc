@@ -126,8 +126,8 @@ audioStep AudioState {..} clockAdvance = do
       v2 <- getOutput channel2
       v3 <- getOutput channel3
       v4 <- getOutput channel4
-      directWritePort portPCM12 (fromIntegral v1 .|. fromIntegral v2 .<<. 4)
-      directWritePort portPCM34 (fromIntegral v3 .|. fromIntegral v4 .<<. 4)
+      directWritePort portPCM12 (fromIntegral (v1 + 8) .|. fromIntegral ((v2 + 8) .<<. 4))
+      directWritePort portPCM34 (fromIntegral (v3 + 8) .|. fromIntegral ((v4 + 8) .<<. 4))
 
       register50 <- directReadPort port50
       register51 <- directReadPort port51

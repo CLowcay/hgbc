@@ -72,7 +72,7 @@ newNoiseChannel port52 frameSequencer = mdo
 
 disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
-  writeUnboxedRef output 0
+  writeUnboxedRef output (-8)
   writeIORef enable False
   updateStatus port52 flagChannel4Enable False
 

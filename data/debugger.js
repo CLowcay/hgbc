@@ -43,6 +43,7 @@ function handleStatusUpdate(event) {
   for (let key of Object.keys(data)) {
     const value = data[key];
     const element = document.getElementById(key);
+    if (!element) console.log("bad key " + key);
     if (previousData[key] !== value) {
       previousData[key] = value;
       element.classList.add('changed');

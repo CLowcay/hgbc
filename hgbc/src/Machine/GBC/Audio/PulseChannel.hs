@@ -102,7 +102,7 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
 
 disableIO :: Port Word8 -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 channelEnabledFlag output enable = do
-  writeUnboxedRef output 0
+  writeUnboxedRef output (-8)
   writeIORef enable False
   updateStatus port52 channelEnabledFlag False
 

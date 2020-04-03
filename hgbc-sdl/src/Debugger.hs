@@ -92,7 +92,7 @@ keepAliveTime :: Int
 keepAliveTime = 60 * 1000000
 
 updateDelay :: Int
-updateDelay = 500000
+updateDelay = 250000
 
 events :: DebuggerChannel -> EmulatorState -> Wai.Response
 events (DebuggerChannel channel) emulatorState = Wai.responseStream

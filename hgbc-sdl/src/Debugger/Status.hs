@@ -152,6 +152,72 @@ data Status = Status {
 
   , bcpd :: String
   , ocpd :: String
+
+  , nr106_4 :: Char
+  , nr103   :: Char
+  , nr102_0 :: Char
+  , nr117_6 :: Char
+  , nr115_0 :: String
+  , nr127_4 :: Char
+  , nr123   :: Char
+  , nr122_0 :: Char
+  , nr13    :: String
+  , nr147   :: Char
+  , nr146   :: Char
+  , nr142_0 :: Char
+
+  , nr217_6 :: Char
+  , nr215_0 :: String
+  , nr227_4 :: Char
+  , nr223   :: Char
+  , nr222_0 :: Char
+  , nr23    :: String
+  , nr247   :: Char
+  , nr246   :: Char
+  , nr242_0 :: Char
+
+  , nr307   :: Char
+  , nr31    :: String
+  , nr326_5 :: Char
+  , nr33    :: String
+  , nr347   :: Char
+  , nr346   :: Char
+  , nr342_0 :: Char
+
+  , nr415_0 :: String
+  , nr427_4 :: Char
+  , nr423   :: Char
+  , nr422_0 :: Char
+  , nr437_4 :: Char
+  , nr433   :: Char
+  , nr432_0 :: Char
+  , nr447   :: Char
+  , nr446   :: Char
+
+  , nr507   :: Char
+  , nr506_4 :: Char
+  , nr503   :: Char
+  , nr502_0 :: Char
+
+  , nr517   :: Char
+  , nr516   :: Char
+  , nr515   :: Char
+  , nr514   :: Char
+  , nr513   :: Char
+  , nr512   :: Char
+  , nr511   :: Char
+  , nr510   :: Char
+
+  , nr527   :: Char
+  , nr523   :: Char
+  , nr522   :: Char
+  , nr521   :: Char
+  , nr520   :: Char
+
+  , pcm127_4 :: Char
+  , pcm123_0 :: Char
+  , pcm347_4 :: Char
+  , pcm343_0 :: Char
   } deriving (Eq, Show, Generic)
 
 instance ToJSON Status
@@ -160,7 +226,7 @@ getStatus :: EmulatorState -> IO Status
 getStatus emulatorState = runReaderT go emulatorState
  where
   highlow x = let s = formatHex x in splitAt 2 s
-  toBit x = if x then '1' else '0'
+  getBit n x = if x `testBit` n then '1' else '0'
   go = do
     (rA, rF)     <- highlow <$> readR16pp PushPopAF
     rB           <- formatHex <$> readR8 RegB
@@ -178,48 +244,48 @@ getStatus emulatorState = runReaderT go emulatorState
     let c = if isFlagSet flagCY flags then 'C' else 'c'
 
     p1 <- readByte P1
-    let p15 = toBit (p1 `testBit` 5)
-    let p14 = toBit (p1 `testBit` 4)
-    let p13 = toBit (p1 `testBit` 3)
-    let p12 = toBit (p1 `testBit` 2)
-    let p11 = toBit (p1 `testBit` 1)
-    let p10 = toBit (p1 `testBit` 0)
+    let p15 = getBit 5 p1
+    let p14 = getBit 4 p1
+    let p13 = getBit 3 p1
+    let p12 = getBit 2 p1
+    let p11 = getBit 1 p1
+    let p10 = getBit 0 p1
 
     div  <- formatHex <$> readByte DIV
     tima <- formatHex <$> readByte TIMA
     tma  <- formatHex <$> readByte TMA
 
     tac  <- readByte TAC
-    let tac2   = toBit (tac `testBit` 2)
+    let tac2   = getBit 2 tac
     let tac1_0 = formatHex (tac .&. 3) !! 1
 
     key1 <- readByte KEY1
-    let key17 = toBit (key1 `testBit` 7)
-    let key10 = toBit (key1 `testBit` 0)
+    let key17 = getBit 7 key1
+    let key10 = getBit 0 key1
 
     vbk <- readByte VBK
-    let vbk0 = toBit (vbk `testBit` 0)
+    let vbk0 = getBit 0 vbk
 
     svbk <- readByte SVBK
-    let svbk7   = toBit (svbk `testBit` 7)
-    let svbk5   = toBit (svbk `testBit` 5)
-    let svbk4   = toBit (svbk `testBit` 4)
-    let svbk3   = toBit (svbk `testBit` 3)
+    let svbk7   = getBit 7 svbk
+    let svbk5   = getBit 5 svbk
+    let svbk4   = getBit 4 svbk
+    let svbk3   = getBit 3 svbk
     let svbk2_0 = formatHex (svbk .&. 7) !! 1
 
     ie <- readByte IE
-    let ie4 = toBit (ie `testBit` 4)
-    let ie3 = toBit (ie `testBit` 3)
-    let ie2 = toBit (ie `testBit` 2)
-    let ie1 = toBit (ie `testBit` 1)
-    let ie0 = toBit (ie `testBit` 0)
+    let ie4 = getBit 4 ie
+    let ie3 = getBit 3 ie
+    let ie2 = getBit 2 ie
+    let ie1 = getBit 1 ie
+    let ie0 = getBit 0 ie
 
     rif <- readByte IF
-    let if4 = toBit (rif `testBit` 4)
-    let if3 = toBit (rif `testBit` 3)
-    let if2 = toBit (rif `testBit` 2)
-    let if1 = toBit (rif `testBit` 1)
-    let if0 = toBit (rif `testBit` 0)
+    let if4 = getBit 4 rif
+    let if3 = getBit 3 rif
+    let if2 = getBit 2 rif
+    let if1 = getBit 1 rif
+    let if0 = getBit 0 rif
 
     sb  <- readByte SB
     sc  <- readByte SC
@@ -227,37 +293,37 @@ getStatus emulatorState = runReaderT go emulatorState
     r4c <- formatHex <$> readByte R4C
     r6c <- readByte R6C
 
-    let sb7   = toBit (sb `testBit` 7)
-    let sb6   = toBit (sb `testBit` 6)
-    let sb5   = toBit (sb `testBit` 5)
-    let sb4   = toBit (sb `testBit` 4)
-    let sb3   = toBit (sb `testBit` 3)
-    let sb2   = toBit (sb `testBit` 2)
-    let sb1   = toBit (sb `testBit` 1)
-    let sb0   = toBit (sb `testBit` 0)
+    let sb7   = getBit 7 sb
+    let sb6   = getBit 6 sb
+    let sb5   = getBit 5 sb
+    let sb4   = getBit 4 sb
+    let sb3   = getBit 3 sb
+    let sb2   = getBit 2 sb
+    let sb1   = getBit 1 sb
+    let sb0   = getBit 0 sb
 
-    let sc7   = toBit (sc `testBit` 7)
-    let sc1   = toBit (sc `testBit` 1)
-    let sc0   = toBit (sc `testBit` 0)
+    let sc7   = getBit 7 sc
+    let sc1   = getBit 1 sc
+    let sc0   = getBit 0 sc
 
     let rp7_6 = formatHex (rp .>>. 6) !! 1
-    let rp1   = toBit (rp `testBit` 1)
-    let rp0   = toBit (rp `testBit` 0)
+    let rp1   = getBit 1 rp
+    let rp0   = getBit 0 rp
 
-    let r6c0  = toBit (r6c `testBit` 0)
+    let r6c0  = getBit 0 r6c
 
     lcdc <- readByte LCDC
-    let lcdc7 = toBit (lcdc `testBit` 7)
-    let lcdc6 = toBit (lcdc `testBit` 6)
-    let lcdc5 = toBit (lcdc `testBit` 5)
-    let lcdc4 = toBit (lcdc `testBit` 4)
-    let lcdc3 = toBit (lcdc `testBit` 3)
-    let lcdc2 = toBit (lcdc `testBit` 2)
-    let lcdc1 = toBit (lcdc `testBit` 1)
-    let lcdc0 = toBit (lcdc `testBit` 0)
+    let lcdc7 = getBit 7 lcdc
+    let lcdc6 = getBit 6 lcdc
+    let lcdc5 = getBit 5 lcdc
+    let lcdc4 = getBit 4 lcdc
+    let lcdc3 = getBit 3 lcdc
+    let lcdc2 = getBit 2 lcdc
+    let lcdc1 = getBit 1 lcdc
+    let lcdc0 = getBit 0 lcdc
 
     hdma5 <- readByte HDMA5
-    let hdma57   = toBit (hdma5 `testBit` 7)
+    let hdma57   = getBit 7 hdma5
     let hdma56_0 = formatHex (hdma5 .&. 0x7F)
 
     hdma4 <- formatHex <$> readByte HDMA4
@@ -284,11 +350,11 @@ getStatus emulatorState = runReaderT go emulatorState
     let obp110 = formatHex (obp1 .&. 3) !! 1
 
     stat <- readByte STAT
-    let stat6   = toBit (stat `testBit` 6)
-    let stat5   = toBit (stat `testBit` 5)
-    let stat4   = toBit (stat `testBit` 4)
-    let stat3   = toBit (stat `testBit` 3)
-    let stat2   = toBit (stat `testBit` 2)
+    let stat6   = getBit 6 stat
+    let stat5   = getBit 5 stat
+    let stat4   = getBit 4 stat
+    let stat3   = getBit 3 stat
+    let stat2   = getBit 2 stat
     let stat1_0 = formatHex (stat .&. 3) !! 1
 
     scy  <- formatHex <$> readByte SCY
@@ -299,18 +365,105 @@ getStatus emulatorState = runReaderT go emulatorState
     lyc  <- formatHex <$> readByte LYC
 
     bcps <- readByte BCPS
-    let bcps7   = toBit (bcps `testBit` 7)
+    let bcps7   = getBit 7 bcps
     let bcps5_3 = formatHex ((bcps .>>. 3) .&. 7) !! 1
     let bcps2_1 = formatHex ((bcps .>>. 1) .&. 3) !! 1
-    let bcps0   = toBit (bcps `testBit` 0)
+    let bcps0   = getBit 0 bcps
 
     ocps <- readByte OCPS
-    let ocps7   = toBit (ocps `testBit` 7)
+    let ocps7   = getBit 7 ocps
     let ocps5_3 = formatHex ((ocps .>>. 3) .&. 7) !! 1
     let ocps2_1 = formatHex ((ocps .>>. 1) .&. 3) !! 1
-    let ocps0   = toBit (ocps `testBit` 0)
+    let ocps0   = getBit 0 ocps
 
     bcpd <- liftIO (formatHex <$> directReadPort (portBCPD (graphicsState emulatorState)))
     ocpd <- liftIO (formatHex <$> directReadPort (portBCPD (graphicsState emulatorState)))
+
+    nr10 <- readByte NR10
+    nr11 <- readByte NR11
+    nr12 <- readByte NR12
+    nr13 <- formatHex <$> readByte NR13
+    nr14 <- readByte NR14
+    let nr106_4 = formatHex ((nr10 .>>. 4) .&. 7) !! 1
+    let nr103   = getBit 3 nr10
+    let nr102_0 = formatHex (nr10 .&. 7) !! 1
+    let nr117_6 = formatHex (nr11 .>>. 6) !! 1
+    let nr115_0 = formatHex (nr11 .&. 0x3F)
+    let nr127_4 = head (formatHex nr12)
+    let nr123   = getBit 3 nr12
+    let nr122_0 = formatHex (nr12 .&. 7) !! 1
+    let nr147   = getBit 7 nr14
+    let nr146   = getBit 6 nr14
+    let nr142_0 = formatHex (nr14 .&. 7) !! 1
+
+    nr21 <- readByte NR21
+    nr22 <- readByte NR22
+    nr23 <- formatHex <$> readByte NR23
+    nr24 <- readByte NR24
+    let nr217_6 = formatHex (nr21 .>>. 6) !! 1
+    let nr215_0 = formatHex (nr21 .&. 0x3F)
+    let nr227_4 = head (formatHex nr22)
+    let nr223   = getBit 3 nr22
+    let nr222_0 = formatHex (nr22 .&. 7) !! 1
+    let nr247   = getBit 7 nr24
+    let nr246   = getBit 6 nr24
+    let nr242_0 = formatHex (nr24 .&. 7) !! 1
+
+    nr30 <- readByte NR30
+    nr31 <- formatHex <$> readByte NR31
+    nr32 <- readByte NR32
+    nr33 <- formatHex <$> readByte NR33
+    nr34 <- readByte NR34
+    let nr307   = getBit 7 nr30
+    let nr326_5 = formatHex ((nr32 .>>. 5) .&. 3) !! 1
+    let nr347   = getBit 7 nr34
+    let nr346   = getBit 6 nr34
+    let nr342_0 = formatHex (nr34 .&. 7) !! 1
+
+    nr41 <- readByte NR41
+    nr42 <- readByte NR42
+    nr43 <- readByte NR43
+    nr44 <- readByte NR44
+    let nr415_0 = formatHex (nr41 .&. 0x3F)
+    let nr427_4 = head (formatHex nr42)
+    let nr423   = getBit 3 nr42
+    let nr422_0 = formatHex (nr42 .&. 7) !! 1
+    let nr437_4 = head (formatHex nr43)
+    let nr433   = getBit 3 nr43
+    let nr432_0 = formatHex (nr43 .&. 7) !! 1
+    let nr447 = getBit 7 nr44
+    let nr446 = getBit 6 nr44
+
+    nr50 <- readByte NR50
+    nr51 <- readByte NR51
+    nr52 <- readByte NR52
+    pcm12 <- readByte PCM12
+    pcm34 <- readByte PCM34
+
+    let nr507 = getBit 7 nr50
+    let nr506_4 = head (formatHex (nr50 .&. 0x70))
+    let nr503 = getBit 3 nr50
+    let nr502_0 = formatHex (nr50 .&. 0x07) !! 1
+
+    let nr517 = getBit 7 nr51
+    let nr516 = getBit 6 nr51
+    let nr515 = getBit 5 nr51
+    let nr514 = getBit 4 nr51
+    let nr513 = getBit 3 nr51
+    let nr512 = getBit 2 nr51
+    let nr511 = getBit 1 nr51
+    let nr510 = getBit 0 nr51
+
+    let nr527 = getBit 7 nr52
+    let nr523 = getBit 3 nr52
+    let nr522 = getBit 2 nr52
+    let nr521 = getBit 1 nr52
+    let nr520 = getBit 0 nr52
+
+    let pcm127_4 = head (formatHex pcm12)
+    let pcm123_0 = formatHex pcm12 !! 1
+
+    let pcm347_4 = head (formatHex pcm34)
+    let pcm343_0 = formatHex pcm12 !! 1
 
     pure Status { .. }
