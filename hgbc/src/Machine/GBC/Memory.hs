@@ -48,6 +48,7 @@ data Memory = Memory {
   , rom0           :: !(IORef (VS.Vector Word8))  -- The first 8kb of ROM. Can be switched between cartridge ROM and boot ROM.
   , rom            :: !(VS.Vector Word8)          -- All of cartrige ROM.
   , bootROM        :: !(Maybe (VS.Vector Word8))
+  , bootROMLockout :: !(IORef Bool)
   , vram           :: !VRAM
   , memRam         :: !(VSM.IOVector Word8)
   , ramBankOffset  :: !(UnboxedRef Int)
@@ -56,6 +57,7 @@ data Memory = Memory {
   , portSVBK       :: !(Port Word8)
   , portBLCK       :: !(Port Word8)
   , portR4C        :: !(Port Word8)
+  , portR6C        :: !(Port Word8)
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
@@ -77,10 +79,12 @@ resetAndBoot :: HasMemory env => ReaderT env IO () -> ReaderT env IO ()
 resetAndBoot pseudoBootROM = do
   Memory {..} <- asks forMemory
   liftIO $ do
+    writeIORef modeRef        mode0
+    writeIORef bootROMLockout False
     writePort portSVBK 0
     directWritePort portBLCK 0
     directWritePort portR4C  0
-    writeIORef modeRef mode0
+    writePort portR6C 0
   case bootROM of
     Nothing      -> pseudoBootROM
     Just content -> liftIO $ writeIORef rom0 content
@@ -144,7 +148,7 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
     0xFF
     (\a -> do
       lockout <- readIORef bootROMLockout
-      pure (if lockout then a else 0xFF)
+      pure (if lockout then 0xFF else a)
     )
     alwaysUpdate
 
@@ -158,11 +162,11 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
     pure (newValue .|. oldValue)
 
   -- Undocumented registers
-  r6c <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
-  r72 <- newPort 0x00 0xFF alwaysUpdate
-  r73 <- newPort 0x00 0xFF alwaysUpdate
-  r74 <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
-  r75 <- newPort 0x8F 0x70 alwaysUpdate
+  portR6C <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
+  r72     <- newPort 0x00 0xFF alwaysUpdate
+  r73     <- newPort 0x00 0xFF alwaysUpdate
+  r74     <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
+  r75     <- newPort 0x8F 0x70 alwaysUpdate
 
   let ports = V.accum
         (flip const)
@@ -171,7 +175,7 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
         <$> ( (BLCK, portBLCK)
             : (SVBK, portSVBK)
             : (R4C , portR4C)
-            : (R6C , r6c)
+            : (R6C , portR6C)
             : (R72 , r72)
             : (R73 , r73)
             : (R74 , r74)

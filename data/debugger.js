@@ -36,9 +36,19 @@ function handleEmulatorPaused(event) {
 
 }
 
+let previousData = {};
+
 function handleStatusUpdate(event) {
   const data = JSON.parse(event.data);
   for (let key of Object.keys(data)) {
-    document.getElementById(key).innerText = data[key];
+    const value = data[key];
+    const element = document.getElementById(key);
+    if (previousData[key] !== value) {
+      previousData[key] = value;
+      element.classList.add('changed');
+      element.firstChild.nodeValue = value;
+    } else {
+      element.classList.remove('changed');
+    }
   }
 }

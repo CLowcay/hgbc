@@ -10,8 +10,6 @@ module Debugger
   )
 where
 
-import           Prelude                 hiding ( head )
-
 import           Control.Concurrent
 import           Control.Concurrent.STM
 import           Control.Monad
@@ -19,7 +17,7 @@ import           Control.Monad.IO.Class
 import           Data.Aeson
 import           Data.FileEmbed
 import           Data.Functor.Identity
-import           Data.String
+import           Debugger.HTML
 import           Debugger.Status
 import           Machine.GBC                    ( EmulatorState )
 import qualified Config
@@ -129,77 +127,6 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
         Right EmulatorPaused -> do
           pushPaused
           continue True
-
-debugHTML :: FilePath -> BB.Builder
-debugHTML romFileName = html [header, main]
- where
-  header = head
-    [ title (fromString romFileName <> " - hgbc debugger")
-    , charset "UTF-8"
-    , meta "application-name" "hgbc debugger"
-    , link "stylesheet" "css"
-    , script "js"
-    ]
-  main = body
-    [ iframe "invisible_frame"
-    , nav
-      [ form
-          HTTP.methodPost
-          "/"
-          "invisible_frame"
-          [ button "run"      "Run"
-          , button "step"     "Step"
-          , button "stepOver" "Step Over"
-          , button "stepOut"  "Step Out"
-          , button "restart"  "Restart"
-          ]
-      ]
-    , table
-      "cpu"
-      [tr [th 1 ["CPU Registers"]]]
-      [ tr [td ["AF ", value [field "rA" "00", field "rF" "00"]]]
-      , tr [td ["BC ", value [field "rB" "00", field "rC" "00"]]]
-      , tr [td ["DE ", value [field "rD" "00", field "rE" "00"]]]
-      , tr [td ["HL ", value [field "rH" "00", field "rL" "00"]]]
-      , tr [td ["SP ", value [field "rSPH" "00", field "rSPL" "00"]]]
-      , tr [td ["PC ", value [field "rPCH" "00", field "rPCL" "00"]]]
-      ]
-    ]
-
-  html contents = "<!DOCTYPE html><html>" <> mconcat contents <> "</html>"
-  head heads = "<head>" <> mconcat heads <> "</head>"
-  title t = "<title>" <> t <> "</title>"
-  charset c = "<meta charset='" <> c <> "'>"
-  meta name content = "<meta name='" <> name <> "' content='" <> content <> "'>"
-  link rel href = "<link rel='" <> rel <> "' href='" <> href <> "'>"
-  script src = "<script src='" <> src <> "'></script>"
-  body contents = "<body>" <> mconcat contents <> "</body>"
-  nav contents = "<nav>" <> mconcat contents <> "</nav>"
-  iframe name = "<iframe name='" <> name <> "'></iframe>"
-  table tid heads rows =
-    "<table id='"
-      <> tid
-      <> "'><thead>"
-      <> mconcat heads
-      <> "</thead><tbody>"
-      <> mconcat rows
-      <> "</tbody></table>"
-  tr cells = "<tr>" <> mconcat cells <> "</tr>"
-  td contents = "<td>" <> mconcat contents <> "</td>"
-  th colspan contents = "<th colspan=" <> BB.intDec colspan <> ">" <> mconcat contents <> "</th>"
-  value fields = "<div class=value>" <> mconcat fields <> "</div>"
-  field fid iv = "<span id=" <> fid <> ">" <> iv <> "</span>"
-  form method action target contents =
-    "<form method="
-      <> BB.byteString method
-      <> " action='"
-      <> action
-      <> "' target='"
-      <> target
-      <> "'>"
-      <> mconcat contents
-      <> "</form>"
-  button name content = "<button name='" <> name <> "'>" <> content <> "</button>"
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS

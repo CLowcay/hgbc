@@ -18,11 +18,18 @@ nav {
 table {
 	table-layout:fixed;
 	background-color: lightblue;
-	border-collapse: collapse;
-	border: 2px solid black;
+  border-collapse: collapse;
+  border: 2px solid black;
+  padding-bottom: 4px;
 }
 th, td {
 	padding: 2px 8px;
+}
+thead>tr:first-child>th {
+  padding-top: 4px;
+}
+tbody>tr:last-child>td {
+  padding-bottom: 8px;
 }
 table.hardware td {
 	width: 6em;
@@ -49,23 +56,33 @@ div.info {
 	opacity: 0.9;
 	z-index:1;
 }
-div.value span:hover div.info {
+div.info ul {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
+div.value span:hover>div.info {
 	display:block;
 }
 div.value span {
 	position:relative;
-	padding: 1px;
+  padding: 1px;
+}
+div.value span:not(.padding) {
 	border-right: 1px solid gray;
 }
-div.value span.l8 {
-	letter-spacing: 3px;
+div.value span.padding {
+  letter-spacing: 3px;
+  padding-left:0;
+  margin-left:-2px;
 }
-div.value span.l2 {
-	letter-spacing: 2px;
+div.value span.changed {
+  background-color: palevioletred;
 }
 div.value span.group {
 	padding: 0;
-	border-right: 1px solid gray;
+  border-right: 1px solid gray;
+  margin-right: -1px;
 }
 div.value span.u {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' version='1.1' preserveAspectRatio='none' viewBox='0 0 1 1'><line x1='0' y1='0' x2='1' y2='1' stroke='gray' vector-effect='non-scaling-stroke'/></svg>");
