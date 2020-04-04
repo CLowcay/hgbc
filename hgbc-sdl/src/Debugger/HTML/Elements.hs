@@ -37,6 +37,7 @@ module Debugger.HTML.Elements
   )
 where
 
+import           Data.List               hiding ( head )
 import           Prelude                 hiding ( head )
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
@@ -108,9 +109,12 @@ ul items = "<ul>" <> mconcat (("<li>" <>) <$> items) <> "</ul>"
 divclass :: BB.Builder -> [BB.Builder] -> BB.Builder
 divclass c contents = "<div class=" <> c <> ">" <> mconcat contents <> "</div>"
 
-divclassid :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
-divclassid did c contents =
-  "<div id=" <> did <> " class=" <> c <> ">" <> mconcat contents <> "</div>"
+divclassid :: BB.Builder -> [BB.Builder] -> [BB.Builder] -> BB.Builder
+divclassid did c contents = "<div id=" <> did <> classes c <> ">" <> mconcat contents <> "</div>"
+ where
+  classes []   = ""
+  classes [cl] = " class=" <> cl
+  classes cls  = " class='" <> mconcat (intersperse " " cls) <> "'"
 
 spanclass :: BB.Builder -> [BB.Builder] -> BB.Builder
 spanclass c contents = "<span class=" <> c <> ">" <> mconcat contents <> "</span>"

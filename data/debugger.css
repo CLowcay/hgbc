@@ -17,6 +17,16 @@ nav {
   background-color: lightgrey;
   padding: 2px;
 }
+
+#rootContainer {
+  display: grid;
+  grid-template-columns: 40em 1fr;
+  grid-gap: 8px;
+}
+div.sidebyside {
+  display:flex;
+}
+
 table {
   margin-top: 8px;
 	table-layout:fixed;
@@ -34,8 +44,8 @@ thead>tr:first-child>th {
 tbody>tr:last-child>td {
   padding-bottom: 8px;
 }
-table.hardware td {
-	width: 7em;
+table.hardware {
+    width: 100%;
 }
 table.hardware div.value {
 	float: left;
@@ -97,9 +107,6 @@ div.value span.u {
   background-size: 100% 100%;
 }
 
-div.sidebyside {
-  display:flex;
-}
 div.memory {
   flex-grow: 1;
   display: grid;

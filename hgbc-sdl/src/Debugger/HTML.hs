@@ -41,11 +41,16 @@ debugHTML romFileName = html [header, main]
           , button "restart"  "Restart"
           ]
       ]
-    , divclass "sidebyside" [cpuRegisters, memory]
-    , systemRegisters
-    , lcdRegisters
-    , soundRegisters
+    , divclassid
+      "rootContainer"
+      []
+      [ divclassid
+          "leftContainer"
+          []
+          [ divclass "sidebyside" [cpuRegisters, memory]
+          , systemRegisters
+          , lcdRegisters
+          , soundRegisters
+          ]
+      ]
     ]
-
-
-

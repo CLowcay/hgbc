@@ -13,7 +13,7 @@ memory = divclass
   "memory"
   [ divclass "addressContainer" [input "text" "address" 9 "0000"]
   , h 4 "Memory"
-  , divclassid "addressLabels" "addresses" ["0000"]
-  , divclassid "memoryHex"     "hex"       ["00 00 00 00 00 00 00 00"]
-  , divclassid "memoryASCII"   "ascii"     ["........"]
+  , divclassid "addressLabels" ["addresses"] ["0000"]
+  , divclassid "memoryHex"     ["hex"]       ["00 00 00 00 00 00 00 00"]
+  , divclassid "memoryASCII"   ["ascii"]     ["........"]
   ]

@@ -16,6 +16,14 @@ window.onload = () => {
     refreshMemory(address);
   });
   addressField.addEventListener('wheel', memoryScrollWheel);
+  addressField.addEventListener('keydown', event => {
+    switch(event.code) {
+      case 'ArrowUp': return scrollMemory(-8);
+      case 'ArrowDown': return scrollMemory(8);
+      case 'PageUp': return scrollMemory(-8 * MEM_LINES);
+      case 'PageDown': return scrollMemory(8 * MEM_LINES);
+    }
+  });
   document.getElementById('memoryHex').addEventListener('wheel', memoryScrollWheel);
   document.getElementById('memoryASCII').addEventListener('wheel', memoryScrollWheel);
   document.getElementById('addressLabels').addEventListener('wheel', memoryScrollWheel);
@@ -24,8 +32,11 @@ window.onload = () => {
 
 function memoryScrollWheel(event) {
   event.preventDefault();
-  const v = parseInt(address.value, 16) + (event.deltaY < 0 ? -8 : 8) & 0xFFFF;
+  scrollMemory(event.deltaY < 0 ? -8 : 8);
+}
 
+function scrollMemory(amount) {
+  const v = parseInt(address.value, 16) + amount & 0xFFFF;
   address.value = v.toString(16).toUpperCase();
   fillAddressLabels(v, MEM_LINES);
   refreshMemory(v);
