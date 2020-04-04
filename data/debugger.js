@@ -1,21 +1,30 @@
+const MEM_LINES = 8;
+
 window.onload = function () {
-  const eventSource = new EventSource("events");
+  const eventSource = new EventSource('events');
   window.onbeforeunload = () => eventSource.close();
 
-  eventSource.addEventListener("started", handleEmulatorStarted);
-  eventSource.addEventListener("paused", handleEmulatorPaused);
-  eventSource.addEventListener("status", handleStatusUpdate);
+  eventSource.addEventListener('started', handleEmulatorStarted);
+  eventSource.addEventListener('paused', handleEmulatorPaused);
+  eventSource.addEventListener('status', handleStatusUpdate);
+
+  fillAddressLabels(getAddress(), MEM_LINES);
+  document.getElementById('address').addEventListener('input', () => {
+    const address = getAddress();
+    fillAddressLabels(address, MEM_LINES);
+    refreshMemory(address);
+  });
 };
 
 let status = "";
 
 function handleEmulatorStarted(event) {
-  const disableButton = button => button.setAttribute("disabled", true);
+  const disableButton = button => button.setAttribute('disabled', true);
 
-  if (status !== "started") {
-    status = "started";
+  if (status !== 'started') {
+    status = 'started';
     document.getElementsByName('run')
-      .forEach(element => element.innerText = "Pause");
+      .forEach(element => element.innerText = 'Pause');
     document.getElementsByName('step').forEach(disableButton);
     document.getElementsByName('stepOver').forEach(disableButton);
     document.getElementsByName('stepOut').forEach(disableButton);
@@ -24,6 +33,8 @@ function handleEmulatorStarted(event) {
 
 function handleEmulatorPaused(event) {
   const enableButton = button => button.removeAttribute("disabled");
+
+  refreshMemory(getAddress());
 
   if (status !== "paused") {
     status = "paused";
@@ -39,6 +50,7 @@ function handleEmulatorPaused(event) {
 let previousData = {};
 
 function handleStatusUpdate(event) {
+  refreshMemory(getAddress());
   const data = JSON.parse(event.data);
   for (let key of Object.keys(data)) {
     const value = data[key];
@@ -52,4 +64,41 @@ function handleStatusUpdate(event) {
       element.classList.remove('changed');
     }
   }
+}
+
+function decodeASCII(c) {
+  return c <= 0x20 || c > 0x7E ? '.' : String.fromCodePoint(c);
+}
+
+function getAddress() {
+  const address = document.getElementById('address').value;
+  return !address ? 0 : parseInt(address, 16);
+}
+
+function fillAddressLabels(baseAddress, lines) {
+  const labels = [];
+  for (let i = 0; i < lines; i++) {
+    labels[i] = (baseAddress + (16 * i)).toString(16).padStart(4, '0');
+  }
+  document.getElementById('addressLabels').innerText = labels.join('\n');
+}
+
+function refreshMemory(baseAddress) {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
+      document.getElementById('memoryHex').innerText = xhr.responseText;
+      document.getElementById('memoryASCII').innerText =
+        xhr.responseText.split('\n')
+          .map(line => line.split(' ')
+            .map(c => decodeASCII(parseInt(c, 16)))
+            .join(''))
+          .join('\n');
+    }
+  };
+
+  xhr.open("GET",
+    "memory?address=" + baseAddress.toString(16) +
+    "&lines=" + MEM_LINES, true);
+  xhr.send();
 }

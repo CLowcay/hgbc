@@ -23,7 +23,9 @@ mbc1 bankMask ramMask ramAllocator = do
   cachedROMOffset <- newIORef 0x4000
   cachedRAMOffset <- newIORef 0
 
-  let bankOffset = readIORef cachedROMOffset
+  let bankOffset    = readIORef cachedROMOffset
+  let ramBankOffset = readIORef cachedRAMOffset
+  let ramGate       = readIORef enableRAM
 
   let updateROMOffset = do
         noHighROM <- readIORef ramSelect

@@ -23,11 +23,13 @@ import qualified Machine.GBC.MBC.RTC           as RTC
 nullMBC :: IO MBC
 nullMBC = do
   ram <- VSM.new 0x2000
-  pure MBC { bankOffset = pure 0x4000
-           , writeROM   = \_ _ -> pure ()
-           , readRAM    = VSM.unsafeRead ram . fromIntegral
-           , writeRAM   = \address value -> VSM.unsafeWrite ram (fromIntegral address) value
-           , sliceRAM   = \address size -> pure (VSM.slice (fromIntegral address) size ram)
+  pure MBC { bankOffset    = pure 0x4000
+           , ramBankOffset = pure 0
+           , ramGate       = pure False
+           , writeROM      = \_ _ -> pure ()
+           , readRAM       = VSM.unsafeRead ram . fromIntegral
+           , writeRAM      = \address value -> VSM.unsafeWrite ram (fromIntegral address) value
+           , sliceRAM      = \address size -> pure (VSM.slice (fromIntegral address) size ram)
            }
 
 nullRTC :: RTC

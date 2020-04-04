@@ -145,4 +145,4 @@ lcdRegisters = table
         , (name <> "10", "Color 0")
         ]
     )
-  color (label, name) = [padding 1, field label (desc "0" name [])]
+  color (fid, name) = [padding 1, field fid (desc "0" name [])]

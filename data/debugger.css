@@ -14,7 +14,8 @@ iframe {
   visibility: hidden;
 }
 nav {
-	background-color: lightgrey;
+  background-color: lightgrey;
+  padding: 2px;
 }
 table {
   margin-top: 8px;
@@ -91,4 +92,31 @@ div.value span.u {
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
+}
+
+div.sidebyside {
+  display:flex;
+}
+div.memory {
+  flex-grow: 1;
+  margin: 8px 0 0 8px;
+  border: 2px solid black;
+}
+div.memory div.dataArea {
+  display: grid;
+  grid-template-columns: 7em 30em 8em;
+}
+div.memory div.dataArea div {
+  padding: 4px;
+}
+div.memory div.dataArea div.addresses {
+  background-color: lightgray;
+  text-align: right;
+}
+div.memory div.dataArea div.ascii {
+  border-left: 2px solid lightgray;
+  white-space: nowrap;
+}
+div.memory nav label {
+  margin-left: 2em;
 }

@@ -19,6 +19,11 @@ module Debugger.HTML.Elements
   , tdspan
   , th
   , ul
+  , divclass
+  , divclassid
+  , spanclass
+  , label
+  , input
   , value
   , field
   , fieldGroup
@@ -95,6 +100,33 @@ th colspan contents = "<th colspan=" <> BB.intDec colspan <> ">" <> mconcat cont
 
 ul :: [BB.Builder] -> BB.Builder
 ul items = "<ul>" <> mconcat (("<li>" <>) <$> items) <> "</ul>"
+
+divclass :: BB.Builder -> [BB.Builder] -> BB.Builder
+divclass c contents = "<div class=" <> c <> ">" <> mconcat contents <> "</div>"
+
+divclassid :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
+divclassid did c contents =
+  "<div id=" <> did <> " class=" <> c <> ">" <> mconcat contents <> "</div>"
+
+spanclass :: BB.Builder -> [BB.Builder] -> BB.Builder
+spanclass c contents = "<span class=" <> c <> ">" <> mconcat contents <> "</span>"
+
+label :: [BB.Builder] -> BB.Builder
+label contents = "<label>" <> mconcat contents <> "</label>"
+
+input :: BB.Builder -> BB.Builder -> Int -> BB.Builder -> BB.Builder
+input inputType name size v =
+  "<input id="
+    <> name
+    <> " name= "
+    <> name
+    <> " type="
+    <> inputType
+    <> " size="
+    <> BB.intDec size
+    <> " value='"
+    <> v
+    <> "'>"
 
 value :: [BB.Builder] -> BB.Builder
 value fields = "<div class=value>" <> mconcat fields <> "</div>"

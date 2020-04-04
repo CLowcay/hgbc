@@ -28,9 +28,11 @@ mbc5 bankMask ramMask ramAllocator = do
 
   let bankOffset = readIORef cachedROMOffset
 
-  let getRAMOffset = do
+  let ramBankOffset = do
         bank <- readIORef ramB
         pure ((bank .&. ramMask) .<<. 13)
+
+  let ramGate = readIORef ramG
 
   let writeROM address value
         | address < 0x2000 = writeIORef ramG (value .&. 0x0F == 0x0A)
@@ -47,18 +49,18 @@ mbc5 bankMask ramMask ramAllocator = do
         if not enabled
           then pure 0xFF
           else do
-            offset <- getRAMOffset
+            offset <- ramBankOffset
             VSM.unsafeRead ram (offset + fromIntegral address)
   let writeRAM address value = do
         enabled <- readIORef ramG
         when enabled $ do
-          offset <- getRAMOffset
+          offset <- ramBankOffset
           VSM.unsafeWrite ram (offset + fromIntegral address) value
   let sliceRAM address size = do
         enabled <- readIORef ramG
         if not enabled
           then VSM.replicate size 0xFF
           else do
-            offset <- getRAMOffset
+            offset <- ramBankOffset
             pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   pure MBC { .. }

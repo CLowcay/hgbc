@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
 
@@ -19,6 +20,8 @@ import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( div )
 import qualified Data.Vector                   as V
+import           Data.Word
+import           Data.Functor
 
 data Status = Status {
   -- CPU registers
@@ -93,8 +96,9 @@ data Status = Status {
   , rp1     :: Char
   , rp0     :: Char
 
-  , r4c     :: String
-  , r6c0    :: Char
+  , romBank :: String
+  , ramGate :: Char
+  , ramBank :: String
 
   , lcdc7 :: Char
   , lcdc6 :: Char
@@ -307,11 +311,9 @@ getStatus emulatorState = runReaderT go emulatorState
     let if1 = getBit 1 rif
     let if0 = getBit 0 rif
 
-    sb  <- readByte SB
-    sc  <- readByte SC
-    rp  <- readByte RP
-    r4c <- formatHex <$> readByte R4C
-    r6c <- readByte R6C
+    sb <- readByte SB
+    sc <- readByte SC
+    rp <- readByte RP
 
     let sb7   = getBit 7 sb
     let sb6   = getBit 6 sb
@@ -330,9 +332,11 @@ getStatus emulatorState = runReaderT go emulatorState
     let rp1   = getBit 1 rp
     let rp0   = getBit 0 rp
 
-    let r6c0  = getBit 0 r6c
+    romBank <- formatHex @Word16 . fromIntegral . (.>>. 14) <$> getBankOffset
+    ramGate <- getRamGate <&> \g -> if g then 'O' else 'C'
+    ramBank <- formatHex @Word16 . fromIntegral . (.>>. 13) <$> getRamBankOffset
 
-    lcdc <- readByte LCDC
+    lcdc    <- readByte LCDC
     let lcdc7 = getBit 7 lcdc
     let lcdc6 = getBit 6 lcdc
     let lcdc5 = getBit 5 lcdc

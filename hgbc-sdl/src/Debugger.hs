@@ -14,16 +14,25 @@ import           Control.Concurrent
 import           Control.Concurrent.STM
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.FileEmbed
 import           Data.Functor.Identity
+import           Data.Traversable
+import           Data.Word
 import           Debugger.HTML
 import           Debugger.Status
 import           Machine.GBC                    ( EmulatorState )
+import           Machine.GBC.Memory             ( readChunk )
+import           Machine.GBC.Util               ( formatHex )
+import           Text.Read
 import qualified Config
 import qualified Control.Concurrent.Async      as Async
+import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
+import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
+import qualified Data.ByteString.Lazy.Char8    as LBC
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -79,14 +88,28 @@ debugger channel romFileName emulator emulatorState req respond =
       method -> pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /"))
     ["css"   ] -> pure debugCSS
     ["js"    ] -> pure debugJS
+    ["memory"] -> case Wai.queryString req of
+      [("address", Just addressText), ("lines", Just rawLines)] ->
+        case (,) <$> readMaybe ("0x" <> CB.unpack addressText) <*> readMaybe (CB.unpack rawLines) of
+          Nothing -> do
+            putStrLn ("Invalid Address for /memory: " <> show addressText)
+            pure (httpError HTTP.status422 "invalid address")
+          Just (address, memLines) ->
+            Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "text/plain")]
+              <$> getMemoryAt address memLines emulatorState
+      query -> do
+        putStrLn ("Address to specified for /memory: " <> show query)
+        pure (httpError HTTP.status422 "missing address")
     ["events"] -> pure (events channel emulatorState)
-    _          -> pure debug404
+    path       -> do
+      putStrLn ("No such resource  " <> show path)
+      pure (httpError HTTP.status404 ("No such resource " <> LB.fromStrict (Wai.rawPathInfo req)))
+
  where
   emptyResponse = Wai.responseLBS HTTP.status200
                                   [(HTTP.hContentType, "text/html")]
                                   "<html><head><meta charset=UTF-8></head></html>"
   httpError status = Wai.responseLBS status [(HTTP.hContentType, "text/plain")]
-  debug404 = httpError HTTP.status404 ("No such resource " <> LB.fromStrict (Wai.rawPathInfo req))
 
 keepAliveTime :: Int
 keepAliveTime = 60 * 1000000
@@ -139,3 +162,10 @@ debugJS = Wai.responseLBS
   HTTP.status200
   [(HTTP.hContentType, "application/javascript")]
   (LB.fromStrict $(embedOneFileOf ["data/debugger.js","../data/debugger.js"]))
+
+getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
+getMemoryAt address memLines emulatorState = do
+  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (16 * i)) 16)
+                       emulatorState
+  pure (LBC.intercalate "\n" (formatChunk <$> chunks))
+  where formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s

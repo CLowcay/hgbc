@@ -4,6 +4,9 @@
 module Machine.GBC.Memory
   ( Memory
   , HasMemory(..)
+  , getBankOffset
+  , getRamBankOffset
+  , getRamGate
   , resetAndBoot
   , initMemory
   , initMemoryForROM
@@ -50,7 +53,7 @@ data Memory = Memory {
   , bootROMLockout :: !(IORef Bool)
   , vram           :: !VRAM
   , memRam         :: !(VSM.IOVector Word8)
-  , ramBankOffset  :: !(UnboxedRef Int)
+  , internalRamBankOffset  :: !(UnboxedRef Int)
   , ports          :: !(V.Vector (Port Word8))
   , portIE         :: !(Port Word8)
   , portSVBK       :: !(Port Word8)
@@ -60,6 +63,15 @@ data Memory = Memory {
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
+
+getBankOffset :: HasMemory env => ReaderT env IO Int
+getBankOffset = liftIO . bankOffset . mbc =<< asks forMemory
+
+getRamBankOffset :: HasMemory env => ReaderT env IO Int
+getRamBankOffset = liftIO . ramBankOffset . mbc =<< asks forMemory
+
+getRamGate :: HasMemory env => ReaderT env IO Bool
+getRamGate = liftIO . ramGate . mbc =<< asks forMemory
 
 class HasMemory env where
   forMemory :: env -> Memory
@@ -127,17 +139,17 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
               then boot1 <> VS.drop (VS.length boot1) rom
               else boot1 <> VS.slice 0x100 0x100 rom <> boot2 <> VS.drop (VS.length content) rom
 
-  memRam        <- VSM.new 0x10000
-  memHigh       <- VSM.new 0x80
-  rom0          <- newIORef $ fromMaybe rom bootROM
+  memRam                <- VSM.new 0x10000
+  memHigh               <- VSM.new 0x80
+  rom0                  <- newIORef $ fromMaybe rom bootROM
 
-  emptyPort     <- newPort 0xFF 0x00 neverUpdate
-  ramBankOffset <- newUnboxedRef 0
+  emptyPort             <- newPort 0xFF 0x00 neverUpdate
+  internalRamBankOffset <- newUnboxedRef 0
 
   -- SVBK: RAM bank.
-  portSVBK      <- cgbOnlyPort modeRef 0xF8 0x07 $ \_ v' -> v' <$ do
+  portSVBK              <- cgbOnlyPort modeRef 0xF8 0x07 $ \_ v' -> v' <$ do
     let bank = fromIntegral (v' .&. 7)
-    writeUnboxedRef ramBankOffset (0 `max` ((bank - 1) * 0x1000))
+    writeUnboxedRef internalRamBankOffset (0 `max` ((bank - 1) * 0x1000))
 
   -- R4C: An undocumented register that appears to control DMG compatibility in
   -- the LCD.
@@ -214,7 +226,7 @@ dmaToOAM source = do
     6
       | source < 0xD000 -> copyToOAM vram (VSM.unsafeSlice (offset 0xC000) oamSize memRam)
       | otherwise -> do
-        bank <- readUnboxedRef ramBankOffset
+        bank <- readUnboxedRef internalRamBankOffset
         copyToOAM vram (VSM.unsafeSlice (bank + offset 0xC000) oamSize memRam)
     _ -> liftIO (throwIO (InvalidSourceForDMA source))
   where offset base = fromIntegral source - base
@@ -239,7 +251,7 @@ readByte addr = do
     6
       | addr < 0xD000 -> VSM.unsafeRead memRam (offset 0xC000)
       | otherwise -> do
-        bank <- readUnboxedRef ramBankOffset
+        bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeRead memRam (bank + offset 0xC000)
     7
       | addr < 0xFE00 -> VSM.unsafeRead memRam (offset 0xE000)
@@ -275,7 +287,7 @@ writeByte addr value = do
     6
       | addr < 0xD000 -> VSM.unsafeWrite memRam (offset 0xC000) value
       | otherwise -> do
-        bank <- readUnboxedRef ramBankOffset
+        bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeWrite memRam (bank + offset 0xC000) value
     7
       | addr < 0xFE00 -> VSM.unsafeWrite memRam (offset 0xE000) value

@@ -15,40 +15,6 @@ systemRegisters = table
   [tr [th 5 ["System Registers"]]]
   [ tr
     [ td
-      [ "P1"
-      , br
-      , value
-        [ fieldGroup [unused, unused]
-        , fieldGroup
-          [ field "p15" (desc "0" "P15" [p "Select Up, Down, Left, Right keys"])
-          , field "p14" (desc "0" "P14" [p "Select A, B, Select, Start keys"])
-          ]
-        , field "p13" (desc "0" "P13" [p "Down or Start pressed"])
-        , field "p12" (desc "0" "P12" [p "Up or Select pressed"])
-        , field "p11" (desc "0" "P11" [p "Left or B pressed"])
-        , field "p10" (desc "0" "P10" [p "Right or A pressed"])
-        ]
-      ]
-    , td ["DIV", br, value [padding 6, field "div" "00"]]
-    , td ["TIMA", br, value [padding 6, field "tima" "00"]]
-    , td ["TMA", br, value [padding 6, field "tma" "00"]]
-    , td
-      [ "TAC"
-      , br
-      , value
-        (  replicate 5 unused
-        <> [ field "tac2" (desc "0" "Timer Enable" enableDisable)
-           , padding 1
-           , field
-             "tac1_0"
-             (desc "0" "Timer Frequency" [ul ["0: 4KiHz", "1: 256KiHz", "2: 64KiHz", "3: 16KiHz"]]
-             )
-           ]
-        )
-      ]
-    ]
-  , tr
-    [ td
       [ "KEY1"
       , br
       , value
@@ -83,29 +49,46 @@ systemRegisters = table
         , field "svbk2_0" (desc "0" "RAM Bank" [p "Bank number for internal RAM"])
         ]
       ]
+    , td ["MBC ROM", br, value [field "romBank" (desc "0000" "Bank Number" [])]]
     , td
-      [ "IF"
+      [ "MBC RAM"
       , br
       , value
-        (  replicate 3 unused
-        <> [ field "if4" (desc "0" "Keypad Interrupt" [])
-           , field "if3" (desc "0" "Serial IO Interrupt" [])
-           , field "if2" (desc "0" "Timer Interrupt" [])
-           , field "if1" (desc "0" "LCD STAT Interrupt" [])
-           , field "if0" (desc "0" "VBlank Interrupt" [])
-           ]
-        )
+        [ field "ramGate" (desc "0" "RAM Gate" [ul ["O: RAM gate open.", "C: RAM gate closed."]])
+        , field "ramBank" (desc "0000" "Bank Number" [])
+        ]
       ]
-    , td
-      [ "IE"
+    ]
+  , tr
+    [ td
+      [ "P1"
       , br
       , value
-        (  replicate 3 unused
-        <> [ field "ie4" (desc "0" "Keypad Interrupt" enableDisable)
-           , field "ie3" (desc "0" "Serial IO Interrupt" enableDisable)
-           , field "ie2" (desc "0" "Timer Interrupt" enableDisable)
-           , field "ie1" (desc "0" "LCD STAT Interrupt" enableDisable)
-           , field "ie0" (desc "0" "VBlank Interrupt" enableDisable)
+        [ fieldGroup [unused, unused]
+        , fieldGroup
+          [ field "p15" (desc "0" "P15" [p "Select Up, Down, Left, Right keys"])
+          , field "p14" (desc "0" "P14" [p "Select A, B, Select, Start keys"])
+          ]
+        , field "p13" (desc "0" "P13" [p "Down or Start pressed"])
+        , field "p12" (desc "0" "P12" [p "Up or Select pressed"])
+        , field "p11" (desc "0" "P11" [p "Left or B pressed"])
+        , field "p10" (desc "0" "P10" [p "Right or A pressed"])
+        ]
+      ]
+    , td ["DIV", br, value [padding 6, field "div" "00"]]
+    , td ["TIMA", br, value [padding 6, field "tima" "00"]]
+    , td ["TMA", br, value [padding 6, field "tma" "00"]]
+    , td
+      [ "TAC"
+      , br
+      , value
+        (  replicate 5 unused
+        <> [ field "tac2" (desc "0" "Timer Enable" enableDisable)
+           , padding 1
+           , field
+             "tac1_0"
+             (desc "0" "Timer Frequency" [ul ["0: 4KiHz", "1: 256KiHz", "2: 64KiHz", "3: 16KiHz"]]
+             )
            ]
         )
       ]
@@ -147,19 +130,29 @@ systemRegisters = table
         )
       ]
     , td
-      [ "R4C"
+      [ "IF"
       , br
       , value
-        [ padding 6
-        , field "r4c" (desc "00" "?" [p "Has something to do with DMG compatibility mode."])
-        ]
+        (  replicate 3 unused
+        <> [ field "if4" (desc "0" "Keypad Interrupt" [])
+           , field "if3" (desc "0" "Serial IO Interrupt" [])
+           , field "if2" (desc "0" "Timer Interrupt" [])
+           , field "if1" (desc "0" "LCD STAT Interrupt" [])
+           , field "if0" (desc "0" "VBlank Interrupt" [])
+           ]
+        )
       ]
     , td
-      [ "R6C"
+      [ "IE"
       , br
       , value
-        (  replicate 7 unused
-        <> [field "r6c0" (desc "0" "?" [p "Has something to do with DMG compatibility mode."])]
+        (  replicate 3 unused
+        <> [ field "ie4" (desc "0" "Keypad Interrupt" enableDisable)
+           , field "ie3" (desc "0" "Serial IO Interrupt" enableDisable)
+           , field "ie2" (desc "0" "Timer Interrupt" enableDisable)
+           , field "ie1" (desc "0" "LCD STAT Interrupt" enableDisable)
+           , field "ie0" (desc "0" "VBlank Interrupt" enableDisable)
+           ]
         )
       ]
     ]
