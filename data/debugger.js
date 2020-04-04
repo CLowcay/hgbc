@@ -1,6 +1,6 @@
 const MEM_LINES = 8;
 
-window.onload = function () {
+window.onload = () => {
   const eventSource = new EventSource('events');
   window.onbeforeunload = () => eventSource.close();
 
@@ -9,12 +9,27 @@ window.onload = function () {
   eventSource.addEventListener('status', handleStatusUpdate);
 
   fillAddressLabels(getAddress(), MEM_LINES);
-  document.getElementById('address').addEventListener('input', () => {
+  const addressField = document.getElementById('address');
+  addressField.addEventListener('input', () => {
     const address = getAddress();
     fillAddressLabels(address, MEM_LINES);
     refreshMemory(address);
   });
+  addressField.addEventListener('wheel', memoryScrollWheel);
+  document.getElementById('memoryHex').addEventListener('wheel', memoryScrollWheel);
+  document.getElementById('memoryASCII').addEventListener('wheel', memoryScrollWheel);
+  document.getElementById('addressLabels').addEventListener('wheel', memoryScrollWheel);
+  addressField.addEventListener('wheel', memoryScrollWheel);
 };
+
+function memoryScrollWheel(event) {
+  event.preventDefault();
+  const v = parseInt(address.value, 16) + (event.deltaY < 0 ? -8 : 8) & 0xFFFF;
+
+  address.value = v.toString(16).toUpperCase();
+  fillAddressLabels(v, MEM_LINES);
+  refreshMemory(v);
+}
 
 let status = "";
 
@@ -78,7 +93,7 @@ function getAddress() {
 function fillAddressLabels(baseAddress, lines) {
   const labels = [];
   for (let i = 0; i < lines; i++) {
-    labels[i] = (baseAddress + (16 * i)).toString(16).padStart(4, '0');
+    labels[i] = (baseAddress + (8 * i) & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
   }
   document.getElementById('addressLabels').innerText = labels.join('\n');
 }

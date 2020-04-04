@@ -9,6 +9,7 @@ module Debugger.HTML.Elements
   , link
   , script
   , body
+  , h
   , nav
   , iframe
   , br
@@ -63,6 +64,9 @@ script src = "<script src='" <> src <> "'></script>"
 
 body :: [BB.Builder] -> BB.Builder
 body contents = "<body>" <> mconcat contents <> "</body>"
+
+h :: Int -> BB.Builder -> BB.Builder
+h n t = "<h" <> BB.intDec n <> ">" <> t <> "</h" <> BB.intDec n <> ">"
 
 nav :: [BB.Builder] -> BB.Builder
 nav contents = "<nav>" <> mconcat contents <> "</nav>"

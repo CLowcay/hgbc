@@ -165,7 +165,7 @@ debugJS = Wai.responseLBS
 
 getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
 getMemoryAt address memLines emulatorState = do
-  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (16 * i)) 16)
+  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (8 * i)) 8)
                        emulatorState
   pure (LBC.intercalate "\n" (formatChunk <$> chunks))
   where formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
