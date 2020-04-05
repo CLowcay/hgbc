@@ -1,3 +1,12 @@
+:root {
+  --panel-background: lightblue;
+  --active-background: white;
+  --value-background: lightgray;
+  --value-separator: gray;
+  --value-changed: palevioletred;
+  --tooltip-color: lightgreen;
+}
+
 body {
   font-family: mono;
   font-size: small;
@@ -14,8 +23,8 @@ iframe {
   visibility: hidden;
 }
 nav {
-  background-color: lightgrey;
   padding: 2px;
+  background-color: var(--value-background);
 }
 
 #rootContainer {
@@ -28,12 +37,12 @@ div.sidebyside {
 }
 
 table {
-  margin-top: 8px;
 	table-layout:fixed;
-	background-color: lightblue;
+  margin-top: 8px;
   border-collapse: collapse;
   border: 2px solid black;
   padding-bottom: 4px;
+	background-color: var(--panel-background);
 }
 th, td {
 	padding: 2px 8px;
@@ -45,34 +54,33 @@ tbody>tr:last-child>td {
   padding-bottom: 8px;
 }
 table.hardware {
-    width: 100%;
+  width: 100%;
 }
 table.hardware div.value {
 	float: left;
 }
 div.value {
 	float: right;
-  border: 1px solid gray;
+  border: 1px solid var(--value-separator);
   border-radius: 4px;
-  background-color: lightgray;
+  background-color:var(--value-background);
 }
 div.info {
 	display: none;
 	position:absolute;
-	left: 50%;
-	top: 90%;
-	background: lightgreen;
-	padding: 8px;
-	border: 1px solid black;
+	top: 90%; left: 50%;
 	width: 20em;
-	font-size:small;
+	border: 1px solid black;
+	padding: 8px;
+	background-color: var(--tooltip-color);
 	opacity: 0.9;
 	z-index:1;
+	font-size:small;
 }
 div.info ul {
-  list-style-type: none;
-  padding: 0;
   margin: 8px 0 0;
+  padding: 0;
+  list-style-type: none;
 }
 div.value span:hover>div.info {
 	display:block;
@@ -82,23 +90,23 @@ div.value span {
   padding: 1px;
 }
 div.value span:not(.padding) {
-	border-right: 1px solid gray;
+	border-right: 1px solid var(--value-separator);
 }
 div.value span:last-child {
   border-right: none;
 }
 div.value span.padding {
-  letter-spacing: 3px;
-  padding-left:0;
   margin-left:-2px;
+  padding-left:0;
+  letter-spacing: 3px;
 }
 div.value span.changed {
-  background-color: palevioletred;
+  background-color: var(--value-changed);
 }
 div.value span.group {
 	padding: 0;
-  border-right: 1px solid gray;
   margin-right: -1px;
+  border-right: 1px solid var(--value-separator);
 }
 div.value span.u {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' version='1.1' preserveAspectRatio='none' viewBox='0 0 1 1'><line x1='0' y1='0' x2='1' y2='1' stroke='gray' vector-effect='non-scaling-stroke'/></svg>");
@@ -114,39 +122,39 @@ div.memory {
   grid-auto-rows: 2.5em 1fr;
   margin: 8px 0 0 8px;
   border: 2px solid black;
-  background-color: lightblue;
+  background-color: var(--panel-background);
 }
 div.memory div.addressContainer {
   display: flex;
   justify-content: flex-end;
   align-items: flex-end;
-  background: lightgray;
+  background: var(--value-background);
 }
 #address {
-  text-align: right;
-  font-size: small;
   width: 3em;
+  font-size: small;
+  text-align: right;
 }
 div.memory h4 {
-  text-align: center;
   margin-top:4px;
+  text-align: center;
 }
 div.memory div.addresses {
   grid-row: 2;
-  text-align: right;
   padding: 4px;
-  background-color: lightgray;
+  background-color: var(--value-background);
+  text-align: right;
 }
 div.memory div.ascii {
   grid-row: 2;
-  white-space: nowrap;
-  border-left: 2px solid lightgray;
+  border-left: 2px solid var(--value-background);
   padding: 4px;
-  background-color: white;
+  background-color: var(--active-background);
+  white-space: nowrap;
 }
 div.memory div.hex {
   grid-row: 2;
-  white-space: nowrap;
   padding: 4px;
-  background-color: white;
+  background-color: var(--active-background);
+  white-space: nowrap;
 }

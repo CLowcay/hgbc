@@ -12,7 +12,9 @@ import           Debugger.HTML.LCDRegisters
 import           Debugger.HTML.Memory
 import           Debugger.HTML.SoundRegisters
 import           Debugger.HTML.SystemRegisters
-import           Prelude                 hiding ( head )
+import           Prelude                 hiding ( head
+                                                , div
+                                                )
 import qualified Data.ByteString.Builder       as BB
 import qualified Network.HTTP.Types            as HTTP
 
@@ -44,13 +46,11 @@ debugHTML romFileName = html [header, main]
     , divclassid
       "rootContainer"
       []
-      [ divclassid
-          "leftContainer"
-          []
+      [ div
           [ divclass "sidebyside" [cpuRegisters, memory]
           , systemRegisters
           , lcdRegisters
           , soundRegisters
-          ]
+          ], div []
       ]
     ]

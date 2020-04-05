@@ -20,6 +20,7 @@ module Debugger.HTML.Elements
   , tdspan
   , th
   , ul
+  , div
   , divclass
   , divclassid
   , spanclass
@@ -38,7 +39,9 @@ module Debugger.HTML.Elements
 where
 
 import           Data.List               hiding ( head )
-import           Prelude                 hiding ( head )
+import           Prelude                 hiding ( head
+                                                , div
+                                                )
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 
@@ -106,6 +109,9 @@ th colspan contents = "<th colspan=" <> BB.intDec colspan <> ">" <> mconcat cont
 ul :: [BB.Builder] -> BB.Builder
 ul items = "<ul>" <> mconcat (("<li>" <>) <$> items) <> "</ul>"
 
+div :: [BB.Builder] -> BB.Builder
+div contents = "<div>" <> mconcat contents <> "</div>"
+
 divclass :: BB.Builder -> [BB.Builder] -> BB.Builder
 divclass c contents = "<div class=" <> c <> ">" <> mconcat contents <> "</div>"
 
@@ -137,7 +143,7 @@ input inputType name size v =
     <> "'>"
 
 value :: [BB.Builder] -> BB.Builder
-value fields = "<div class=value>" <> mconcat fields <> "</div>"
+value = divclass "value"
 
 fieldGroup :: [BB.Builder] -> BB.Builder
 fieldGroup contents = "<span class=group>" <> mconcat contents <> "</span>"
@@ -146,8 +152,7 @@ field :: BB.Builder -> BB.Builder -> BB.Builder
 field fid iv = "<span id=" <> fid <> ">" <> iv <> "</span>"
 
 desc :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
-desc iv name description =
-  iv <> "<div class=info><h3>" <> name <> "</h3>" <> mconcat description <> "</div>"
+desc iv name description = iv <> divclass "info" (h 3 name : description)
 
 enableDisable :: [BB.Builder]
 enableDisable = [ul ["0: Disable", "1: Enable"]]
