@@ -61,6 +61,7 @@ class Channel channel where
   frameSequencerClock :: channel -> FrameSequencerOutput -> IO ()
   masterClock         :: channel -> Int -> IO ()
   getPorts            :: channel -> [(Int, Port Word8)]
+  directReadPorts     :: channel -> IO (Word8, Word8, Word8, Word8, Word8)
 
 {-# INLINE getFrequency #-}
 getFrequency :: Word8 -> Word8 -> Int

@@ -1,6 +1,7 @@
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Debugger.Status where
 
@@ -10,6 +11,7 @@ import           Data.Bits
 import           GHC.Generics
 import           Machine.GBC                    ( EmulatorState(..) )
 import           Machine.GBC.Audio
+import           Machine.GBC.Audio.Common
 import           Machine.GBC.Audio.WaveChannel
 import           Machine.GBC.CPU
 import           Machine.GBC.CPU.ISA
@@ -37,6 +39,8 @@ data Status = Status {
   , rSPH :: String
   , rPCL :: String
   , rPCH :: String
+  , cpuMode :: String
+  , i :: Char
   , z :: Char
   , n :: Char
   , h :: Char
@@ -262,10 +266,15 @@ getStatus emulatorState = runReaderT go emulatorState
     (rPCH, rPCL) <- highlow <$> readPC
     (rSPH, rSPL) <- highlow <$> readR16 RegSP
     flags        <- readF
+    i            <- testIME <&> \ime -> if ime then 'I' else 'i'
     let z = if isFlagSet flagZ flags then 'Z' else 'z'
     let n = if isFlagSet flagN flags then 'N' else 'n'
     let h = if isFlagSet flagH flags then 'H' else 'h'
     let c = if isFlagSet flagCY flags then 'C' else 'c'
+    cpuMode <- getMode <&> \case
+      ModeHalt   -> "HALT"
+      ModeStop   -> "STOP"
+      ModeNormal -> "\xA0RUN"
 
     p1 <- readByte P1
     let p15 = getBit 5 p1
@@ -403,11 +412,9 @@ getStatus emulatorState = runReaderT go emulatorState
     bcpd <- liftIO (formatHex <$> directReadPort (portBCPD (graphicsState emulatorState)))
     ocpd <- liftIO (formatHex <$> directReadPort (portBCPD (graphicsState emulatorState)))
 
-    nr10 <- readByte NR10
-    nr11 <- readByte NR11
-    nr12 <- readByte NR12
-    nr13 <- formatHex <$> readByte NR13
-    nr14 <- readByte NR14
+    (nr10, nr11, nr12, nr13raw, nr14) <- liftIO
+      (directReadPorts (channel1 . audioState $ emulatorState))
+    let nr13    = formatHex nr13raw
     let nr106_4 = formatHex ((nr10 .>>. 4) .&. 7) !! 1
     let nr103   = getBit 3 nr10
     let nr102_0 = formatHex (nr10 .&. 7) !! 1
@@ -420,10 +427,10 @@ getStatus emulatorState = runReaderT go emulatorState
     let nr146   = getBit 6 nr14
     let nr142_0 = formatHex (nr14 .&. 7) !! 1
 
-    nr21 <- readByte NR21
-    nr22 <- readByte NR22
-    nr23 <- formatHex <$> readByte NR23
-    nr24 <- readByte NR24
+    (_, nr21, nr22, nr23raw, nr24) <- liftIO
+      (directReadPorts (channel2 . audioState $ emulatorState))
+
+    let nr23    = formatHex nr23raw
     let nr217_6 = formatHex (nr21 .>>. 6) !! 1
     let nr215_0 = formatHex (nr21 .&. 0x3F)
     let nr227_4 = head (formatHex nr22)
@@ -433,21 +440,17 @@ getStatus emulatorState = runReaderT go emulatorState
     let nr246   = getBit 6 nr24
     let nr242_0 = formatHex (nr24 .&. 7) !! 1
 
-    nr30 <- readByte NR30
-    nr31 <- formatHex <$> readByte NR31
-    nr32 <- readByte NR32
-    nr33 <- formatHex <$> readByte NR33
-    nr34 <- readByte NR34
+    (nr30, nr31raw, nr32, nr33raw, nr34) <- liftIO
+      (directReadPorts (channel3 . audioState $ emulatorState))
+    let nr31    = formatHex nr31raw
+    let nr33    = formatHex nr33raw
     let nr307   = getBit 7 nr30
     let nr326_5 = formatHex ((nr32 .>>. 5) .&. 3) !! 1
     let nr347   = getBit 7 nr34
     let nr346   = getBit 6 nr34
     let nr342_0 = formatHex (nr34 .&. 7) !! 1
 
-    nr41 <- readByte NR41
-    nr42 <- readByte NR42
-    nr43 <- readByte NR43
-    nr44 <- readByte NR44
+    (_, nr41, nr42, nr43, nr44) <- liftIO (directReadPorts (channel4 . audioState $ emulatorState))
     let nr415_0 = formatHex (nr41 .&. 0x3F)
     let nr427_4 = head (formatHex nr42)
     let nr423   = getBit 3 nr42

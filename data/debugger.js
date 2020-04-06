@@ -1,4 +1,4 @@
-const MEM_LINES = 8;
+const MEM_LINES = 10;
 
 window.onload = () => {
   const eventSource = new EventSource('events');
@@ -70,7 +70,6 @@ function handleEmulatorPaused(event) {
     document.getElementsByName('stepOver').forEach(enableButton);
     document.getElementsByName('stepOut').forEach(enableButton);
   }
-
 }
 
 let previousData = {};

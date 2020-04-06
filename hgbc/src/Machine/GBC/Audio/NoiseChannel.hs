@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
 
@@ -106,6 +107,13 @@ instance Channel NoiseChannel where
       sample <- envelopeVolume envelope
       writeUnboxedRef output (if registerOut .&. 1 == 0 then sample else 0)
       pure (timerPeriod register3)
+
+  directReadPorts NoiseChannel {..} =
+    (0, , , , )
+      <$> directReadPort port1
+      <*> directReadPort port2
+      <*> directReadPort port3
+      <*> directReadPort port4
 
 widthMask :: Word8 -> Word16
 widthMask register3 = if register3 `testBit` 3 then 0x0040 else 0x4000

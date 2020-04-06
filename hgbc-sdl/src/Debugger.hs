@@ -135,8 +135,8 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
       write (BB.lazyByteString (encode status))
       write "\n\n" >> flush
     pushPaused = do
-      write "event: paused\ndata:\n\n" >> flush
       pushStatus
+      write "event: paused\ndata:\n\n" >> flush
     continue isPaused = do
       event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
                           (atomically (readTChan channel))

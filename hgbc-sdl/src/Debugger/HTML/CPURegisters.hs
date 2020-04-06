@@ -22,11 +22,13 @@ cpuRegisters = table
     [ td
         [ "Flags"
         , value
-          [ field "z" (desc "0" "Zero Flag" [])
+          [ field "i" (desc "i" "Master Interrupt Enable" [])
+          , field "z" (desc "z" "Zero Flag" [])
           , field "n" (desc "n" "Negative Flag" [])
           , field "h" (desc "h" "Half Carry Flag" [])
           , field "c" (desc "c" "Carry Flag" [])
           ]
         ]
     ]
+  , tr [td ["Mode", value [field "cpuMode" "Paused"]]]
   ]

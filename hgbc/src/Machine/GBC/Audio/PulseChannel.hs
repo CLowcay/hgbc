@@ -147,6 +147,14 @@ instance Channel PulseChannel where
       sample    <- envelopeVolume envelope
       writeUnboxedRef output (if dutyCycleOutput register1 i then sample else 0)
 
+  directReadPorts PulseChannel {..} =
+    (,,,,)
+      <$> directReadPort port0
+      <*> directReadPort port1
+      <*> directReadPort port2
+      <*> directReadPort port3
+      <*> directReadPort port4
+
 dutyCycleOutput :: Word8 -> Int -> Bool
 dutyCycleOutput register1 i = case register1 .>>. 6 of
   0 -> i == 0

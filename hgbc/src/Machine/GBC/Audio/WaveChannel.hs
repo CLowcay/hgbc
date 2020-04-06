@@ -141,6 +141,14 @@ instance Channel WaveChannel where
         writeUnboxedRef sampleBuffer sampleByte
         generateOutput channel sampleByte i
 
+  directReadPorts WaveChannel {..} =
+    (,,,,)
+      <$> directReadPort port0
+      <*> directReadPort port1
+      <*> directReadPort port2
+      <*> directReadPort port3
+      <*> directReadPort port4
+
 generateOutput :: WaveChannel -> Word8 -> Int -> IO ()
 generateOutput WaveChannel {..} sampleByte i = do
   register2 <- directReadPort port2
