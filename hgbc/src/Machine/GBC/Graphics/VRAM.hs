@@ -4,6 +4,7 @@ module Machine.GBC.Graphics.VRAM
   , ColorCorrection(..)
   , initVRAM
   , setVRAMAccessible
+  , getVRAMBank
   , setVRAMBank
   , writePalette
   , readPalette
@@ -18,6 +19,7 @@ module Machine.GBC.Graphics.VRAM
   , readOAM
   , writeOAM
   , readVRAM
+  , readVRAMBankOffset
   , writeVRAM
   , copyToOAM
   , copyVRAMToOAM
@@ -69,6 +71,10 @@ initVRAM colorCorrection = do
 {-# INLINE setVRAMAccessible #-}
 setVRAMAccessible :: VRAM -> Bool -> IO ()
 setVRAMAccessible VRAM {..} = writeIORef vramAccessible
+
+{-# INLINE getVRAMBank #-}
+getVRAMBank :: VRAM -> IO Int
+getVRAMBank VRAM {..} = readUnboxedRef vramBank
 
 {-# INLINE setVRAMBank #-}
 setVRAMBank :: VRAM -> Int -> IO ()
@@ -176,6 +182,13 @@ readVRAM VRAM {..} addr = do
     else do
       bankOffset <- readUnboxedRef vramBank
       VSM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
+
+readVRAMBankOffset :: VRAM -> Int -> Word16 -> IO Word8
+readVRAMBankOffset VRAM {..} bankOffset addr = do
+  isAccessible <- readIORef vramAccessible
+  if not isAccessible
+    then pure 0xFF
+    else VSM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
 
 {-# INLINE writeVRAM #-}
 writeVRAM :: VRAM -> Word16 -> Word8 -> IO ()

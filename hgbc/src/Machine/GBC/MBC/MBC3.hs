@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC.MBC.MBC3
   ( mbc3
@@ -47,6 +48,7 @@ mbc3 bankMask ramMask ramAllocator rtc = do
             case decodeRTCRegister r2 of
               Nothing          -> VSM.unsafeRead ram (getRAMOffset r2 + fromIntegral address)
               Just rtcRegister -> readRTC rtc rtcRegister
+  let readRAMBankOffset offset address = VSM.unsafeRead ram (offset + fromIntegral address)
   let writeRAM address value = do
         enabled <- readIORef enableRAM
         when enabled $ do

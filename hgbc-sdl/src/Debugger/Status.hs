@@ -1,13 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeApplications #-}
 
 module Debugger.Status where
 
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.Bits
+import           Data.Functor
 import           GHC.Generics
 import           Machine.GBC                    ( EmulatorState(..) )
 import           Machine.GBC.Audio
@@ -22,8 +22,6 @@ import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( div )
 import qualified Data.Vector                   as V
-import           Data.Word
-import           Data.Functor
 
 data Status = Status {
   -- CPU registers
@@ -341,9 +339,9 @@ getStatus emulatorState = runReaderT go emulatorState
     let rp1   = getBit 1 rp
     let rp0   = getBit 0 rp
 
-    romBank <- formatHex @Word16 . fromIntegral . (.>>. 14) <$> getBankOffset
+    romBank <- formatHex <$> getBank 0x4000
     ramGate <- getRamGate <&> \g -> if g then 'O' else 'C'
-    ramBank <- formatHex @Word16 . fromIntegral . (.>>. 13) <$> getRamBankOffset
+    ramBank <- formatHex <$> getBank 0xA000
 
     lcdc    <- readByte LCDC
     let lcdc7 = getBit 7 lcdc

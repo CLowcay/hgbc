@@ -4,12 +4,12 @@
 module Machine.GBC.Memory
   ( Memory
   , HasMemory(..)
-  , getBankOffset
-  , getRamBankOffset
-  , getRamGate
   , resetAndBoot
   , initMemory
   , initMemoryForROM
+  , getBank
+  , getRamGate
+  , readByteLong
   , getROMHeader
   , dmaToOAM
   , readByte
@@ -63,16 +63,6 @@ data Memory = Memory {
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
-
-getBankOffset :: HasMemory env => ReaderT env IO Int
-getBankOffset = liftIO . bankOffset . mbc =<< asks forMemory
-
-getRamBankOffset :: HasMemory env => ReaderT env IO Int
-getRamBankOffset = liftIO . ramBankOffset . mbc =<< asks forMemory
-
-getRamGate :: HasMemory env => ReaderT env IO Bool
-getRamGate = liftIO . ramGate . mbc =<< asks forMemory
-
 class HasMemory env where
   forMemory :: env -> Memory
 
@@ -202,6 +192,68 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = header
 
+-- | Get the current bank loaded at the specified address
+getBank :: HasMemory env => Word16 -> ReaderT env IO Word16
+getBank address = do
+  Memory {..} <- asks forMemory
+  liftIO $ case address .>>. 13 of
+    0 ->
+      if (address < 0x100 || address >= 0x200)
+           && maybe False ((address <) . fromIntegral . VS.length) bootROM
+        then do
+          lockout <- readIORef bootROMLockout
+          pure (if lockout then 0 else 0xFFFF)
+        else pure 0
+    1 -> pure 0
+    2 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    3 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    4 -> getVRAMBank vram <&> \o -> fromIntegral (o .>>. 13)
+    5 -> ramBankOffset mbc <&> \o -> fromIntegral (o .>>. 13)
+    6 -> if address < 0xD000
+      then pure 0
+      else readUnboxedRef internalRamBankOffset <&> \o -> fromIntegral (o .>>. 12)
+    7 -> if address >= 0xF000 && address < 0xFE00
+      then readUnboxedRef internalRamBankOffset <&> \o -> fromIntegral (o .>>. 12)
+      else pure 0
+    x -> error ("Impossible coarse address " ++ show x)
+
+-- | Get the status of the cartridge RAM gate (True for enabled, False for
+-- disabled).
+getRamGate :: HasMemory env => ReaderT env IO Bool
+getRamGate = liftIO . ramGate . mbc =<< asks forMemory
+
+-- | Read a byte from a specific memory bank.
+readByteLong :: HasMemory env => Word16 -> Word16 -> ReaderT env IO Word8
+readByteLong bank addr = do
+  Memory {..} <- asks forMemory
+  liftIO $ case addr .>>. 13 of
+    0 -> pure
+      (if bank == 0xFFFF
+        then maybe 0xFF (VS.! fromIntegral addr) bootROM
+        else rom VS.! fromIntegral addr
+      )
+    1 -> pure (rom VS.! fromIntegral addr)
+    2 -> pure (rom VS.! offsetWithBank 14 0x4000)
+    3 -> pure (rom VS.! offsetWithBank 14 0x4000)
+    4 -> readVRAMBankOffset vram (fromIntegral bank .<<. 13) addr
+    5 -> readRAMBankOffset mbc (fromIntegral bank .<<. 13) (addr - 0xA000)
+    6 | addr < 0xD000 -> VSM.read memRam (offset 0xC000)
+      | otherwise     -> VSM.read memRam (offsetWithBank 12 0xC000)
+    7
+      | addr < 0xF000 -> VSM.read memRam (offset 0xE000)
+      | addr < 0xFE00 -> VSM.unsafeRead memRam (offsetWithBank 12 0xE000)
+      | addr < 0xFEA0 -> do
+        value <- readOAM vram addr
+        pure (fromIntegral value)
+      | addr < 0xFF00 -> pure 0xFF
+      | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
+      | addr == IE -> liftIO $ readPort portIE
+      | otherwise -> VSM.read memHigh (offset 0xFF80)
+    x -> error ("Impossible coarse read address " ++ show x)
+ where
+  offset base = fromIntegral addr - base
+  offsetWithBank s base = fromIntegral addr - base + (fromIntegral bank .<<. s)
+
 -- | Total number of bytes of OAM memory.
 oamSize :: Int
 oamSize = 160
@@ -254,7 +306,10 @@ readByte addr = do
         bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeRead memRam (bank + offset 0xC000)
     7
-      | addr < 0xFE00 -> VSM.unsafeRead memRam (offset 0xE000)
+      | addr < 0xF000 -> VSM.unsafeRead memRam (offset 0xE000)
+      | addr < 0xFE00 -> do
+        bank <- readUnboxedRef internalRamBankOffset
+        VSM.unsafeRead memRam (bank + offset 0xE000)
       | addr < 0xFEA0 -> do
         value <- readOAM vram addr
         pure (fromIntegral value)
@@ -290,7 +345,10 @@ writeByte addr value = do
         bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeWrite memRam (bank + offset 0xC000) value
     7
-      | addr < 0xFE00 -> VSM.unsafeWrite memRam (offset 0xE000) value
+      | addr < 0xF000 -> VSM.unsafeWrite memRam (offset 0xE000) value
+      | addr < 0xFE00 -> do
+        bank <- readUnboxedRef internalRamBankOffset
+        VSM.unsafeWrite memRam (bank + offset 0xE000) value
       | addr < 0xFEA0 -> writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess

@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC.MBC.MBC1
@@ -67,6 +68,7 @@ mbc1 bankMask ramMask ramAllocator = do
           else do
             offset <- readIORef cachedRAMOffset
             VSM.unsafeRead ram (offset + fromIntegral address)
+  let readRAMBankOffset offset address = VSM.unsafeRead ram (offset + fromIntegral address)
   let writeRAM address value = do
         enabled <- readIORef enableRAM
         when enabled $ do

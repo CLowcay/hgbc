@@ -21,6 +21,7 @@ data MBC = MBC {
   , ramGate        :: !(IO Bool)
   , writeROM       :: !(Word16 -> Word8 -> IO ())
   , readRAM        :: !(Word16 -> IO Word8)
+  , readRAMBankOffset :: !(Int -> Word16 -> IO Word8)
   , writeRAM       :: !(Word16 -> Word8 -> IO ())
   , sliceRAM       :: !(Word16 -> Int -> IO (VSM.IOVector Word8))
 }
