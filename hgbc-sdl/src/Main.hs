@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -21,6 +22,7 @@ import           System.FilePath
 import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
+import           Data.Bits
 import qualified Debugger
 import qualified Emulator
 import qualified SDL
@@ -151,26 +153,56 @@ emulator rom allOptions@Config.Options {..} = do
         -- after the Haskell RTS has shut down.
         pauseAudio
 
-  let emulatorLoop = do
-        step
-        notification <- Emulator.getNotification emulatorChannel
-        case notification of
-          Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
-          Just Emulator.QuitNotification -> onQuit
-          Just Emulator.RestartNotification -> reset >> emulatorLoop
-          _ -> emulatorLoop
+  let
+    emulatorLoop = do
+      emulatorClock <- getEmulatorClock
+      now           <- liftIO SDL.time
+      let
+        innerEmulatorLoop !steps = do
+          step
+          if steps .&. 0x1FFFFF == 0
+            then do
+              when optionStats $ printPerformanceStats emulatorClock now
+              emulatorLoop
+            else if steps .&. 0xFFFF == 0
+              then do
+                notification <- Emulator.getNotification emulatorChannel
+                case notification of
+                  Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
+                  Just Emulator.QuitNotification -> onQuit
+                  Just Emulator.RestartNotification -> reset >> innerEmulatorLoop (steps + 1)
+                  _ -> innerEmulatorLoop (steps + 1)
+              else innerEmulatorLoop (steps + 1)
+      innerEmulatorLoop (1 :: Int)
 
-      pauseLoop = do
-        notifyPaused
-        notification <- Emulator.waitNotification emulatorChannel
-        case notification of
-          Emulator.QuitNotification     -> onQuit
-          Emulator.PauseNotification    -> resumeAudio >> notifyResumed >> emulatorLoop
-          Emulator.RunNotification      -> resumeAudio >> notifyResumed >> emulatorLoop
-          Emulator.StepNotification     -> step >> pauseLoop
-          Emulator.StepOverNotification -> step >> pauseLoop
-          Emulator.StepOutNotification  -> step >> pauseLoop
-          Emulator.RestartNotification  -> reset >> pauseLoop
+    pauseLoop = do
+      notifyPaused
+      notification <- Emulator.waitNotification emulatorChannel
+      case notification of
+        Emulator.QuitNotification     -> onQuit
+        Emulator.PauseNotification    -> resumeAudio >> notifyResumed >> emulatorLoop
+        Emulator.RunNotification      -> resumeAudio >> notifyResumed >> emulatorLoop
+        Emulator.StepNotification     -> step >> pauseLoop
+        Emulator.StepOverNotification -> step >> pauseLoop
+        Emulator.StepOutNotification  -> step >> pauseLoop
+        Emulator.RestartNotification  -> reset >> pauseLoop
 
   runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop)
              emulatorState
+
+ where
+  printPerformanceStats :: Int -> Double -> ReaderT EmulatorState IO ()
+  printPerformanceStats emulatorClock now = do
+    now'           <- liftIO SDL.time
+    emulatorClock' <- getEmulatorClock
+    let clocks          = emulatorClock' - emulatorClock
+    let time            = now' - now
+    let percentageSpeed = (fromIntegral clocks / (time * 4 * 1024 * 1024)) * 100
+    liftIO $ putStrLn
+      (  take 5 (show percentageSpeed)
+      <> "% ("
+      <> show clocks
+      <> " clocks in "
+      <> show time
+      <> " seconds)"
+      )

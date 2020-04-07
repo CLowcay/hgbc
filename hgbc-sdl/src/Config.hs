@@ -74,7 +74,7 @@ optionsP =
           )
     <*> switch (long "no-sound" <> help "Disable audio output")
     <*> switch (long "no-vsync" <> help "Disable vertical retrace syncrhonization")
-    <*> switch (long "show-stats" <> help "Show performance information on stdout")
+    <*> switch (long "stats" <> help "Show performance information on stdout")
     <*> option
           (Just <$> auto)
           (long "scale" <> value Nothing <> metavar "SCALE" <> help
