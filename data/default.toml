@@ -2,6 +2,8 @@
 speed = 1
 # Video scale factor
 scale = 2
+# Disable vertical retrace synchronization.  Not recommended.
+no-vsync = false
 # Port to serve the debugger from (only used when started in debug mode)
 debug-port = 8080
 # Emulation mode. Values are 'dmg' for original Gameboy, 'cgb' for Gameboy
@@ -15,7 +17,7 @@ mode = 'auto'
 color-correction = 'default'
 
 # Keybindings. Key names are the same as the unshifted symbol on the key. For
-# example puctuation keys are '`', '[', ']', etc. Special keys are 'Esc',
+# example punctuation keys are '`', '[', ']', etc. Special keys are 'Esc',
 # 'Tab', 'LShift', 'RShift', 'LControl', 'RControl', 'LAlt', 'RAlt', 'Enter',
 # 'Backspace', 'PrintScreen', 'Pause', 'Up', 'Down', 'Left', 'Right', 'Insert',
 # 'Home', 'End', 'PageUp', 'F1', etc. Keypad keys are 'KP1', 'KP2', 'KPEnter',

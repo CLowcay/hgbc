@@ -43,6 +43,8 @@ data Options = Options
   { optionDebugMode       :: Bool
   , optionDebugPort       :: Maybe Int
   , optionNoSound         :: Bool
+  , optionNoVsync         :: Bool
+  , optionStats           :: Bool
   , optionScale           :: Maybe Int
   , optionSpeed           :: Maybe Double
   , optionColorCorrection :: Maybe ColorCorrection
@@ -54,6 +56,7 @@ data Options = Options
 optionsToConfig :: Options -> Config.Config Maybe
 optionsToConfig Options {..} = mempty { Config.scale           = optionScale
                                       , Config.speed           = optionSpeed
+                                      , Config.noVsync         = Just optionNoVsync
                                       , Config.debugPort       = optionDebugPort
                                       , Config.bootROM         = optionBootROM
                                       , Config.colorCorrection = optionColorCorrection
@@ -70,6 +73,8 @@ optionsP =
             "Port to run the debug server on"
           )
     <*> switch (long "no-sound" <> help "Disable audio output")
+    <*> switch (long "no-vsync" <> help "Disable vertical retrace syncrhonization")
+    <*> switch (long "show-stats" <> help "Show performance information on stdout")
     <*> option
           (Just <$> auto)
           (long "scale" <> value Nothing <> metavar "SCALE" <> help
@@ -95,7 +100,6 @@ optionsP =
           (long "mode" <> value Nothing <> metavar "MODE" <> help
             "Graphics mode at startup. Can be 'dmg', 'cgb', or 'auto' (default)."
           )
-
     <*> strArgument (metavar "ROM_FILE" <> help "The ROM file to run")
 
 type family HKD f a where
@@ -108,6 +112,7 @@ type Palette = (Word32, Word32, Word32, Word32)
 data Config f = Config
   { speed :: HKD f Double
   , scale :: HKD f Int
+  , noVsync :: HKD f Bool
   , debugPort :: HKD f Int
   , bootROM :: HKD f (Maybe FilePath)
   , mode :: HKD f (Maybe EmulatorMode)
@@ -128,6 +133,7 @@ deriving instance Show (Config Maybe)
 instance Semigroup (Config Maybe) where
   left <> right = Config { speed             = lastOf speed
                          , scale             = lastOf scale
+                         , noVsync           = lastOf noVsync
                          , debugPort         = lastOf debugPort
                          , bootROM           = lastOf bootROM
                          , colorCorrection   = lastOf colorCorrection
@@ -142,11 +148,13 @@ instance Semigroup (Config Maybe) where
     lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
 
 instance Monoid (Config Maybe) where
-  mempty = Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+  mempty =
+    Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 finalize :: Config Maybe -> Config Identity
 finalize Config {..} = Config { speed             = fromMaybe 1 speed
                               , scale             = fromMaybe 2 scale
+                              , noVsync           = fromMaybe False noVsync
                               , debugPort         = fromMaybe 8080 debugPort
                               , bootROM           = bootROM
                               , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
@@ -174,6 +182,7 @@ decodeConfig = decodeTable rootTable
   rootTable ("speed"     , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
   rootTable ("speed"     , Toml.VFloat f  ) = Right (mempty { speed = Just f })
   rootTable ("scale"     , Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
+  rootTable ("no-vsync"  , Toml.VBoolean v) = Right (mempty { noVsync = Just v })
   rootTable ("debug-port", Toml.VInteger i) = Right (mempty { debugPort = Just (fromIntegral i) })
   rootTable ("boot-rom", Toml.VString filename) =
     Right (mempty { bootROM = Just (T.unpack filename) })

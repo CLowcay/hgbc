@@ -77,7 +77,7 @@ start romFileName Config.Config {..} sync = do
   frameBufferPointerRef <- newEmptyMVar
   threadId              <- forkOS $ do
     void (SDL.glCreateContext sdlWindow)
-    SDL.swapInterval $= SDL.SynchronizedUpdates
+    SDL.swapInterval $= if noVsync then SDL.ImmediateUpdates else SDL.SynchronizedUpdates
     glState <- setUpOpenGL
     putMVar frameBufferPointerRef (frameTextureBufferBytes glState)
 
