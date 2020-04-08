@@ -12,27 +12,31 @@ import           Control.Monad.Except
 import           Control.Monad.Identity
 import           Control.Monad.Reader
 import           Control.Monad.Writer.Lazy
+import           Data.Bits
 import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
 import           Machine.GBC
-import           Options.Applicative
+import           Machine.GBC.ROM
+import           Machine.GBC.Util
+import           Options.Applicative            ( (<**>) )
 import           System.Directory
 import           System.FilePath
 import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
-import           Data.Bits
+import qualified Data.ByteString.Char8         as BC
 import qualified Debugger
 import qualified Emulator
+import qualified Options.Applicative           as Opt
 import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
 import qualified Window
 
-description :: ParserInfo Config.Options
-description =
-  info (Config.optionsP <**> helper) (fullDesc <> header "hgbc-sdl - a Gameboy Color emulator")
+description :: Opt.ParserInfo Config.Options
+description = Opt.info (Config.optionsP <**> Opt.helper)
+                       (Opt.fullDesc <> Opt.header "hgbc-sdl - a Gameboy Color emulator")
 
 hgbcBaseDir :: IO FilePath
 hgbcBaseDir = getAppUserDataDirectory "hgbc"
@@ -93,7 +97,7 @@ readBootROMFile (Just bootROMFile) = do
 main :: IO ()
 main = do
   SDL.initializeAll
-  allOptions@Config.Options {..} <- execParser description
+  allOptions@Config.Options {..} <- Opt.execParser description
   fileContent                    <- B.readFile optionFilename
   romPaths                       <- getROMPaths optionFilename
   let (eROM, warnings) = runWriter (runExceptT (parseROM romPaths fileContent))
@@ -113,6 +117,7 @@ main = do
 
 emulator :: ROM -> Config.Options -> IO ()
 emulator rom allOptions@Config.Options {..} = do
+  dumpROMHeader (romHeader rom)
   config                <- getEffectiveConfig rom allOptions
   graphicsSync          <- newGraphicsSync
   emulatorChannel       <- Emulator.new
@@ -206,3 +211,49 @@ emulator rom allOptions@Config.Options {..} = do
       <> show time
       <> " seconds)"
       )
+
+  dumpROMHeader :: Header -> IO ()
+  dumpROMHeader Header {..} = do
+    putStrLn
+      $  take 11 (BC.unpack gameTitle ++ repeat ' ')
+      ++ BC.unpack gameCode
+      ++ " "
+      ++ case destination of
+           Japan    -> " (JAPAN)"
+           Overseas -> " (INTERNATIONAL)"
+
+    putStrLn ("Version: " ++ show maskROMVersion)
+    putStrLn ("Maker: " ++ formatHex oldLicenseCode ++ " " ++ BC.unpack makerCode)
+
+    putStr $ "Console support: " ++ case cgbSupport of
+      CGBIncompatible -> "GB"
+      CGBCompatible   -> "GB+CGB"
+      CGBExclusive    -> "CGB"
+    putStrLn $ case sgbSupport of
+      GBOnly  -> ""
+      UsesSGB -> "+SGB"
+
+    let cartridge = "Cartridge: " ++ case mbcType cartridgeType of
+          Nothing      -> "No MBC"
+          Just MBC1    -> "MBC1"
+          Just MBC2    -> "MBC2"
+          Just MBC3    -> "MBC3"
+          Just MBC3RTC -> "MBC3+RTC"
+          Just MBC5    -> "MBC5"
+    putStrLn
+      (  cartridge
+      ++ (if hasSRAM cartridgeType then "+SRAM" else "")
+      ++ (if hasBackupBattery cartridgeType then "+Battery" else "")
+      ++ " ("
+      ++ formatByteCount romSize
+      ++ " ROM"
+      ++ (if externalRAM > 0 then " + " ++ formatByteCount externalRAM ++ " RAM)" else ")")
+      )
+
+    putStrLn ("Start address: " ++ formatHex startAddress)
+    putStrLn ""
+
+  formatByteCount :: Int -> String
+  formatByteCount b | b < 1024        = show b
+                    | b < 1024 * 1024 = show (b `div` 1024) ++ "KiB"
+                    | otherwise       = show (b `div` (1024 * 1024)) ++ "MiB"
