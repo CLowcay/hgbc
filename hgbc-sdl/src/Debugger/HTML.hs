@@ -47,10 +47,28 @@ debugHTML romFileName = html [header, main]
       "rootContainer"
       []
       [ div
-          [ divclass "sidebyside" [cpuRegisters, memory]
-          , systemRegisters
-          , lcdRegisters
-          , soundRegisters
-          ], div []
+        [ divclass "sidebyside" [cpuRegisters, memory]
+        , systemRegisters
+        , lcdRegisters
+        , soundRegisters
+        ]
+      , div [disassembly]
       ]
     ]
+
+disassembly :: BB.Builder
+disassembly = divclass
+  "disassembly"
+  [ h 4 "Disassembly"
+  , nav [input "text" "disassemblyAddress" 9 "0000:0000"]
+  , divclass
+    "window"
+    [ ulid "disassemblyList"
+        [ spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["LD A"]
+        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["LD B"]
+        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["CALL something"]
+        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["RET"]
+        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["JNE 0040"]
+        ]
+    ]
+  ]

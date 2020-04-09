@@ -25,7 +25,10 @@ import           Debugger.Disassemble
 import           Debugger.HTML
 import           Debugger.Status
 import           Machine.GBC                    ( EmulatorState )
-import           Machine.GBC.Memory             ( readChunk )
+import           Machine.GBC.CPU                ( readPC )
+import           Machine.GBC.Memory             ( readChunk
+                                                , getBank
+                                                )
 import           Machine.GBC.Util               ( formatHex )
 import           Text.Read
 import qualified Config
@@ -35,6 +38,7 @@ import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Lazy.Char8    as LBC
+import           Data.String
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -174,7 +178,21 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
       write "\n\n" >> flush
     pushPaused = do
       pushStatus
-      write "event: paused\ndata:\n\n" >> flush
+      (bank, pc) <- runReaderT
+        (do
+          pc'   <- readPC
+          bank' <- getBank pc'
+          pure (bank', pc')
+        )
+        emulatorState
+      write
+          (  "event: paused\ndata:{\"bank\":"
+          <> fromString (show bank)
+          <> ",\"pc\":"
+          <> fromString (show pc)
+          <> "}\n\n"
+          )
+        >> flush
     continue isPaused = do
       event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
                           (atomically (readTChan channel))

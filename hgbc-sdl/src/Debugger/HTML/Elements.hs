@@ -20,6 +20,7 @@ module Debugger.HTML.Elements
   , tdspan
   , th
   , ul
+  , ulid
   , div
   , divclass
   , divclassid
@@ -108,6 +109,9 @@ th colspan contents = "<th colspan=" <> BB.intDec colspan <> ">" <> mconcat cont
 
 ul :: [BB.Builder] -> BB.Builder
 ul items = "<ul>" <> mconcat (("<li>" <>) <$> items) <> "</ul>"
+
+ulid :: BB.Builder -> [BB.Builder] -> BB.Builder
+ulid uid items = "<ul id=" <> uid <> ">" <> mconcat (("<li>" <>) <$> items) <> "</ul>"
 
 div :: [BB.Builder] -> BB.Builder
 div contents = "<div>" <> mconcat contents <> "</div>"

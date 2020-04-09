@@ -3,8 +3,10 @@
   --active-background: white;
   --value-background: lightgray;
   --value-separator: gray;
+  --value-less-important: gray;
   --value-changed: palevioletred;
   --tooltip-color: lightgreen;
+  --padding: 8px;
 }
 
 body {
@@ -16,6 +18,12 @@ p {
 }
 h1, h2, h3, h4, h5, h6 {
 	margin-top:0;
+}
+h4 {
+  margin-top:0.25em;
+  margin-bottom: 0;
+  height: 2.25em;
+  text-align: center;
 }
 iframe {
   position: absolute;
@@ -30,28 +38,27 @@ nav {
 #rootContainer {
   display: grid;
   grid-template-columns: 40em 1fr;
-  grid-gap: 8px;
+  grid-gap: var(--padding);
 }
 div.sidebyside {
   display:flex;
 }
 
 table {
-	table-layout:fixed;
-  margin-top: 8px;
+	table-layout: fixed;
+  margin-top: var(--padding);
   border-collapse: collapse;
   border: 2px solid black;
-  padding-bottom: 4px;
 	background-color: var(--panel-background);
 }
 th, td {
-	padding: 2px 8px;
+	padding: 2px var(--padding);
 }
 thead>tr:first-child>th {
   padding-top: 4px;
 }
 tbody>tr:last-child>td {
-  padding-bottom: 8px;
+  padding-bottom: var(--padding);
 }
 table.hardware {
   width: 100%;
@@ -71,14 +78,14 @@ div.info {
 	top: 90%; left: 50%;
 	width: 20em;
 	border: 1px solid black;
-	padding: 8px;
+	padding: var(--padding);
 	background-color: var(--tooltip-color);
 	opacity: 0.9;
 	z-index:1;
 	font-size:small;
 }
 div.info ul {
-  margin: 8px 0 0;
+  margin: var(--padding) 0 0;
   padding: 0;
   list-style-type: none;
 }
@@ -120,7 +127,7 @@ div.memory {
   display: grid;
   grid-template-columns: 5em 15em 6em;
   grid-auto-rows: 2.5em 1fr;
-  margin: 8px 0 0 8px;
+  margin: var(--padding) 0 0 var(--padding);
   border: 2px solid black;
   background-color: var(--panel-background);
 }
@@ -134,10 +141,6 @@ div.memory div.addressContainer {
   width: 3em;
   font-size: small;
   text-align: right;
-}
-div.memory h4 {
-  margin-top:4px;
-  text-align: center;
 }
 div.memory div.addresses {
   grid-row: 2;
@@ -157,4 +160,37 @@ div.memory div.hex {
   padding: 4px;
   background-color: var(--active-background);
   white-space: nowrap;
+}
+
+div.disassembly {
+  margin-top: var(--padding);
+  border: 2px solid black;
+  background-color: var(--panel-background);
+}
+div.disassembly div.window {
+  overflow: hidden;
+  padding: 0 var(--padding) var(--padding) 0;
+  white-space: nowrap;
+}
+div.disassembly span.instruction {
+  display: inline-block;
+  width: 16ch;
+}
+div.disassembly span.bytes {
+  color: var(--value-less-important);
+}
+div.disassembly ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background-color: var(--value-background);
+}
+div.disassembly li {
+  background-color: var(--active-background);
+}
+div.disassembly li::before {
+  margin-right: var(--padding);
+  padding: 0 var(--padding);
+  content: attr(data-address);
+  background-color: var(--value-background);
 }

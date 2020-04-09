@@ -1,16 +1,13 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Machine.GBC.Memory
   ( Memory
-  , MemoryMap(..)
   , HasMemory(..)
   , resetAndBoot
   , initMemory
   , initMemoryForROM
   , hasBootROM
-  , getMemoryMap
   , getBank
   , getRamGate
   , readByteLong
@@ -32,7 +29,6 @@ import           Data.Functor
 import           Data.IORef
 import           Data.Maybe
 import           Data.Word
-import           GHC.Generics
 import           Machine.GBC.Errors
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Mode
@@ -54,6 +50,7 @@ data Memory = Memory {
   , header         :: !Header
   , rom0           :: !(IORef (VS.Vector Word8))  -- The first 8kb of ROM. Can be switched between cartridge ROM and boot ROM.
   , rom            :: !(VS.Vector Word8)          -- All of cartrige ROM.
+  , bootROMLength  :: Int
   , bootROM        :: !(Maybe (VS.Vector Word8))
   , bootROMLockout :: !(IORef Bool)
   , vram           :: !VRAM
@@ -68,12 +65,6 @@ data Memory = Memory {
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
-
-data MemoryMap = MemoryMap {
-    bootROMSize :: Int
-  , romBanks    :: Int
-  , ramBanks    :: Int
-} deriving (Eq, Ord, Show, Generic)
 
 class HasMemory env where
   forMemory :: env -> Memory
@@ -134,6 +125,7 @@ initMemory
   -> IO Memory
 initMemory boot rom header mbc vram rawPorts portIE modeRef = do
   mode0 <- readIORef modeRef
+  let bootROMLength = maybe 0 VS.length boot
   let bootROM = boot <&> \content ->
         let boot1 = VS.take 0x100 content
             boot2 = VS.drop 0x200 content
@@ -207,24 +199,16 @@ getROMHeader Memory {..} = header
 hasBootROM :: Memory -> Bool
 hasBootROM Memory {..} = isJust bootROM
 
-getMemoryMap :: Memory -> MemoryMap
-getMemoryMap Memory {..} = MemoryMap { bootROMSize = maybe 0 VS.length bootROM
-                                     , romBanks    = (romSize header - 1) `div` (16 * 1024)
-                                     , ramBanks    = (externalRAM header - 8) `div` (8 * 1024)
-                                     }
-
 -- | Get the current bank loaded at the specified address
 getBank :: HasMemory env => Word16 -> ReaderT env IO Word16
 getBank address = do
   Memory {..} <- asks forMemory
   liftIO $ case address .>>. 13 of
-    0 ->
-      if (address < 0x100 || address >= 0x200)
-           && maybe False ((address <) . fromIntegral . VS.length) bootROM
-        then do
-          lockout <- readIORef bootROMLockout
-          pure (if lockout then 0 else 0xFFFF)
-        else pure 0
+    0 -> if (address < 0x100 || address >= 0x200) && address < fromIntegral bootROMLength
+      then do
+        lockout <- readIORef bootROMLockout
+        pure (if lockout then 0 else 0xFFFF)
+      else pure 0
     1 -> pure 0
     2 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
     3 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)

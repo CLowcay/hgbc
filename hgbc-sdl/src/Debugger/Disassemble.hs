@@ -51,7 +51,7 @@ instance ToJSON LongAddress where
 instance ToJSON Field where
   toJSON field = object
     [ "address" .= fieldAddress field
-    , "bytes" .= SB.unpack (fieldBytes field)
+    , "bytes" .= unwords (formatHex <$> SB.unpack (fieldBytes field))
     , "text" .= fieldText field
     ]
 
@@ -155,9 +155,12 @@ disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
 
 currentAddressLong :: StateT DisassemblyState IO LongAddress
 currentAddressLong = do
-  s    <- get
-  bank <- liftIO (runReaderT (getBank (disassemblyPC s)) (disassemblyMemory s))
-  pure (LongAddress bank (disassemblyPC s))
+  s <- get
+  let pc = disassemblyPC s
+  bank <- if disassemblyBootLockout s && pc < 0x1000
+    then pure 0
+    else liftIO (runReaderT (getBank pc) (disassemblyMemory s))
+  pure (LongAddress bank pc)
 
 currentInstructionBytes :: StateT DisassemblyState IO SB.ShortByteString
 currentInstructionBytes = do

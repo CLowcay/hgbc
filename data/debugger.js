@@ -17,7 +17,7 @@ window.onload = () => {
   });
   addressField.addEventListener('wheel', memoryScrollWheel);
   addressField.addEventListener('keydown', event => {
-    switch(event.code) {
+    switch (event.code) {
       case 'ArrowUp': return scrollMemory(-8);
       case 'ArrowDown': return scrollMemory(8);
       case 'PageUp': return scrollMemory(-8 * MEM_LINES);
@@ -61,6 +61,7 @@ function handleEmulatorPaused(event) {
   const enableButton = button => button.removeAttribute("disabled");
 
   refreshMemory(getAddress());
+  refreshDisassembly(JSON.parse(event.data));
 
   if (status !== "paused") {
     status = "paused";
@@ -125,5 +126,44 @@ function refreshMemory(baseAddress) {
   xhr.open("GET",
     "memory?address=" + baseAddress.toString(16) +
     "&lines=" + MEM_LINES, true);
+  xhr.send();
+}
+
+// TODO: remove this
+const DLINES = 20;
+
+function refreshDisassembly(pc) {
+  const xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
+      const disassembly = JSON.parse(xhr.responseText);
+
+      const ul = document.getElementById('disassemblyList');
+      ul.innerHTML = '';
+      for (const field of disassembly) {
+        const li = document.createElement('li');
+
+        const instruction = document.createElement('span');
+        instruction.setAttribute('class', 'instruction');
+        instruction.innerText = field.text + "\t";
+
+        const bytes = document.createElement('span');
+        bytes.setAttribute('class', 'bytes');
+        bytes.innerText = "; " + field.bytes
+
+        li.setAttribute('data-address',
+          field.address.bank.toString(16).padStart(4, '0') + ":" +
+          field.address.offset.toString(16).padStart(4, '0'));
+        li.appendChild(instruction);
+        li.appendChild(bytes);
+        ul.appendChild(li);
+      }
+    }
+  };
+
+  xhr.open("GET",
+    "disassembly?bank=" + pc.bank.toString(16) +
+    "&offset=" + pc.pc.toString(16) +
+    "&n=" + DLINES, true);
   xhr.send();
 }
