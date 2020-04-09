@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -6,13 +7,21 @@
 
 module Debugger.Disassemble
   ( Field(..)
+  , Disassembly
   , LongAddress(..)
+  , DisassemblyState(..)
+  , lookupN
+  , disassemblyRequired
+  , disassembleROM
+  , disassembleFromPC
   , disassembleFrom
   )
 where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
+import           Data.Aeson
+import           Data.Bits
 import           Data.ByteString.Short
 import           Data.Int
 import           Data.String
@@ -21,12 +30,30 @@ import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
 import           Machine.GBC.Util
+import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
-import qualified Data.Map                      as M
+import qualified Data.IntMap.Strict            as IM
 import qualified Data.Text                     as T
 
-data Field = Field !ShortByteString !T.Text
+data LongAddress
+  = LongAddress !Word16 !Word16
   deriving (Eq, Ord, Show)
+
+data Field = Field {
+    fieldAddress :: !LongAddress
+  , fieldBytes   :: !ShortByteString
+  , fieldText    :: !T.Text
+  } deriving (Eq, Ord, Show)
+
+instance ToJSON LongAddress where
+  toJSON (LongAddress bank address) = object ["offset" .= address, "bank" .= bank]
+
+instance ToJSON Field where
+  toJSON field = object
+    [ "address" .= fieldAddress field
+    , "bytes" .= SB.unpack (fieldBytes field)
+    , "text" .= fieldText field
+    ]
 
 data NextAction
   = Continue
@@ -37,56 +64,111 @@ data NextAction
   | Stop
   deriving (Eq, Ord, Show)
 
-data LongAddress
-  = LongAddress {-# UNPACK #-} !Word16 {-# UNPACK #-} !Word16
-  deriving (Eq, Ord, Show)
+newtype Disassembly = Disassembly (IM.IntMap Field)
+  deriving (Eq, Ord, Show, Semigroup, Monoid)
+
+insert :: Disassembly -> LongAddress -> Field -> Disassembly
+insert (Disassembly m) longAddress field =
+  Disassembly (IM.insert (encodeAddress longAddress) field m)
+
+encodeAddress :: LongAddress -> Int
+encodeAddress (LongAddress bank longAddress) =
+  ((fromIntegral longAddress .&. 0x2000) .<<. 19)
+    .|. (fromIntegral bank .<<. 16)
+    .|. fromIntegral longAddress
+
+lookup :: Disassembly -> LongAddress -> Maybe Field
+lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
+
+lookupN :: Disassembly -> Int -> LongAddress -> [Field]
+lookupN (Disassembly m) n startAddress | n == 0 = []
+                                       | n < 0 = reverse (take (-n) (maybe leftList (: leftList) v))
+                                       | otherwise = take n (maybe rightList (: rightList) v)
+ where
+  key       = encodeAddress startAddress
+  (l, v, r) = IM.splitLookup key m
+  leftList  = snd <$> IM.toDescList l
+  rightList = snd <$> IM.toAscList r
 
 data DisassemblyState = DisassemblyState {
-    address :: {-# UNPACK #-} !Word16
-  , bytes   :: ![Word8]
-  , memory  :: !Memory
+    disassemblyPC          :: !Word16
+  , disassemblyBootLockout :: !Bool
+  , disassemblyBytes       :: ![Word8]
+  , disassemblyMemory      :: !Memory
 }
 
-currentAddressLong :: StateT DisassemblyState IO LongAddress
-currentAddressLong = do
-  s    <- get
-  bank <- liftIO (runReaderT (getBank (address s)) (memory s))
-  pure (LongAddress bank (address s))
+disassemblyRequired :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Bool
+disassemblyRequired pc disassembly = do
+  bank <- getBank pc
+  case lookup disassembly (LongAddress bank pc) of
+    Nothing                -> pure True
+    Just (Field _ bytes _) -> do
+      actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
+      pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
-currentInstructionBytes :: StateT DisassemblyState IO SB.ShortByteString
-currentInstructionBytes = do
-  s <- get
-  put (s { bytes = [] })
-  pure (SB.pack (reverse (bytes s)))
+disassembleROM :: Memory -> IO Disassembly
+disassembleROM memory0 =
+  disassembleFrom (romFrom (if hasBootROM memory0 then 0 else 0x100)) mempty
+    >>= disassembleFrom (romFrom 0x00)
+    >>= disassembleFrom (romFrom 0x08)
+    >>= disassembleFrom (romFrom 0x10)
+    >>= disassembleFrom (romFrom 0x18)
+    >>= disassembleFrom (romFrom 0x20)
+    >>= disassembleFrom (romFrom 0x28)
+    >>= disassembleFrom (romFrom 0x30)
+    >>= disassembleFrom (romFrom 0x38)
+    >>= disassembleFrom (romFrom 0x40)
+    >>= disassembleFrom (romFrom 0x48)
+    >>= disassembleFrom (romFrom 0x50)
+    >>= disassembleFrom (romFrom 0x58)
+    >>= disassembleFrom (romFrom 0x60)
+  where romFrom origin = DisassemblyState origin True [] memory0
 
-modifyAddress :: (Word16 -> Word16) -> StateT DisassemblyState IO ()
-modifyAddress f = do
-  s <- get
-  put (s { address = f (address s) })
+disassembleFromPC :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
+disassembleFromPC pc disassembly = do
+  memory <- asks forMemory
+  liftIO (disassembleFrom (DisassemblyState pc False [] memory) disassembly)
 
-disassembleFrom :: Memory -> Word16 -> IO (M.Map LongAddress Field)
-disassembleFrom memory0 = innerDisassemble mempty
+disassembleFrom :: DisassemblyState -> Disassembly -> IO Disassembly
+disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
  where
-  innerDisassemble disassembly startAddress =
-    evalStateT (go disassembly) (DisassemblyState startAddress [] memory0)
-
   go !accum = do
-    addrLong <- currentAddressLong
-    if addrLong `M.member` accum
+    addressLong <- currentAddressLong
+    (action, r) <- fetchAndExecute
+    bs          <- currentInstructionBytes
+    if (fieldBytes <$> lookup accum addressLong) == Just bs
       then pure accum
       else do
-        (action, r) <- fetchAndExecute
-        bs          <- currentInstructionBytes
-        let accum' = M.insert addrLong (Field bs r) accum
+        let accum' = insert accum addressLong (Field addressLong bs r)
         case action of
           Continue   -> go accum'
           Jump    nn -> modifyAddress (const nn) >> go accum'
           JumpRel i  -> modifyAddress (+ fromIntegral i) >> go accum'
-          Fork    nn -> liftIO (innerDisassemble accum' nn) >>= go
-          ForkRel i  -> do
-            currentAddress <- gets address
-            go =<< liftIO (innerDisassemble accum' (currentAddress + fromIntegral i))
+          Fork    nn -> do
+            s <- get
+            liftIO (disassembleFrom (s { disassemblyPC = nn }) accum') >>= go
+          ForkRel i -> do
+            s <- get
+            go =<< liftIO
+              (disassembleFrom (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
           Stop -> pure accum'
+
+currentAddressLong :: StateT DisassemblyState IO LongAddress
+currentAddressLong = do
+  s    <- get
+  bank <- liftIO (runReaderT (getBank (disassemblyPC s)) (disassemblyMemory s))
+  pure (LongAddress bank (disassemblyPC s))
+
+currentInstructionBytes :: StateT DisassemblyState IO SB.ShortByteString
+currentInstructionBytes = do
+  s <- get
+  put (s { disassemblyBytes = [] })
+  pure (SB.pack (reverse (disassemblyBytes s)))
+
+modifyAddress :: (Word16 -> Word16) -> StateT DisassemblyState IO ()
+modifyAddress f = do
+  s <- get
+  put (s { disassemblyPC = f (disassemblyPC s) })
 
 formatR8 :: Register8 -> T.Text
 formatR8 RegA = "A"
@@ -117,9 +199,20 @@ formatCC CondNZ = "NZ"
 
 instance MonadFetch (StateT DisassemblyState IO) where
   nextByte = do
-    s    <- get
-    byte <- liftIO (runReaderT (readByte (address s)) (memory s))
-    put (s { address = address s + 1, bytes = byte : bytes s })
+    s <- get
+    let pc  = disassemblyPC s
+    let pc' = disassemblyPC s + 1
+    byte <- liftIO
+      (runReaderT
+        (if pc < 0x1000 && disassemblyBootLockout s then readByteLong 0 pc else readByte pc)
+        (disassemblyMemory s)
+      )
+    put
+      (s { disassemblyPC          = pc'
+         , disassemblyBootLockout = pc' == 0x100
+         , disassemblyBytes       = byte : disassemblyBytes s
+         }
+      )
     pure byte
 
 instance MonadGMBZ80 (StateT DisassemblyState IO) where

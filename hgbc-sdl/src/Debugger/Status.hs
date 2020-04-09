@@ -246,7 +246,8 @@ data Status = Status {
   , waveF :: String
   } deriving (Eq, Show, Generic)
 
-instance ToJSON Status
+instance ToJSON Status where
+  toEncoding = genericToEncoding defaultOptions
 
 getStatus :: EmulatorState -> IO Status
 getStatus emulatorState = runReaderT go emulatorState

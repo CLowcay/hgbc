@@ -1,12 +1,16 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Machine.GBC.Memory
   ( Memory
+  , MemoryMap(..)
   , HasMemory(..)
   , resetAndBoot
   , initMemory
   , initMemoryForROM
+  , hasBootROM
+  , getMemoryMap
   , getBank
   , getRamGate
   , readByteLong
@@ -28,6 +32,7 @@ import           Data.Functor
 import           Data.IORef
 import           Data.Maybe
 import           Data.Word
+import           GHC.Generics
 import           Machine.GBC.Errors
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Mode
@@ -63,6 +68,13 @@ data Memory = Memory {
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
+
+data MemoryMap = MemoryMap {
+    bootROMSize :: Int
+  , romBanks    :: Int
+  , ramBanks    :: Int
+} deriving (Eq, Ord, Show, Generic)
+
 class HasMemory env where
   forMemory :: env -> Memory
 
@@ -191,6 +203,15 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
 -- | Get the ROM header.
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = header
+
+hasBootROM :: Memory -> Bool
+hasBootROM Memory {..} = isJust bootROM
+
+getMemoryMap :: Memory -> MemoryMap
+getMemoryMap Memory {..} = MemoryMap { bootROMSize = maybe 0 VS.length bootROM
+                                     , romBanks    = (romSize header - 1) `div` (16 * 1024)
+                                     , ramBanks    = (externalRAM header - 8) `div` (8 * 1024)
+                                     }
 
 -- | Get the current bank loaded at the specified address
 getBank :: HasMemory env => Word16 -> ReaderT env IO Word16

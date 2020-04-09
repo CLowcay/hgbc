@@ -18,8 +18,10 @@ import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.FileEmbed
 import           Data.Functor.Identity
+import           Data.IORef
 import           Data.Traversable
 import           Data.Word
+import           Debugger.Disassemble
 import           Debugger.HTML
 import           Debugger.Status
 import           Machine.GBC                    ( EmulatorState )
@@ -49,14 +51,26 @@ sendNotification :: MonadIO m => DebuggerChannel -> Notification -> m ()
 sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan channel
 
 start
-  :: FilePath -> Config.Config Identity -> Emulator.Emulator -> EmulatorState -> IO DebuggerChannel
-start romFileName Config.Config {..} emulator emulatorState = do
+  :: FilePath
+  -> Config.Config Identity
+  -> Emulator.Emulator
+  -> EmulatorState
+  -> IORef Disassembly
+  -> IO DebuggerChannel
+start romFileName Config.Config {..} emulator emulatorState disassemblyRef = do
   channel <- DebuggerChannel <$> newTChanIO
-  void $ forkIO $ Warp.run debugPort (debugger channel romFileName emulator emulatorState)
+  void $ forkIO $ Warp.run debugPort
+                           (debugger channel romFileName emulator emulatorState disassemblyRef)
   pure channel
 
-debugger :: DebuggerChannel -> FilePath -> Emulator.Emulator -> EmulatorState -> Wai.Application
-debugger channel romFileName emulator emulatorState req respond =
+debugger
+  :: DebuggerChannel
+  -> FilePath
+  -> Emulator.Emulator
+  -> EmulatorState
+  -> IORef Disassembly
+  -> Wai.Application
+debugger channel romFileName emulator emulatorState disassemblyRef req respond =
   respond =<< case Wai.pathInfo req of
     [] -> case Wai.requestMethod req of
       "GET" -> pure
@@ -92,14 +106,36 @@ debugger channel romFileName emulator emulatorState req respond =
       [("address", Just addressText), ("lines", Just rawLines)] ->
         case (,) <$> readMaybe ("0x" <> CB.unpack addressText) <*> readMaybe (CB.unpack rawLines) of
           Nothing -> do
-            putStrLn ("Invalid Address for /memory: " <> show addressText)
-            pure (httpError HTTP.status422 "invalid address")
+            putStrLn ("Invalid parameters for /memory: " <> show (Wai.queryString req))
+            pure (httpError HTTP.status422 "invalid parameters")
           Just (address, memLines) ->
             Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "text/plain")]
               <$> getMemoryAt address memLines emulatorState
       query -> do
-        putStrLn ("Address to specified for /memory: " <> show query)
-        pure (httpError HTTP.status422 "missing address")
+        putStrLn ("Invalid query string for /memory: " <> show query)
+        pure (httpError HTTP.status422 "invalid query string")
+    ["disassembly"] -> case Wai.queryString req of
+      [("bank", Just bankText), ("offset", Just offsetText), ("n", Just linesText)] ->
+        case
+            (,,)
+            <$> readMaybeHexText bankText
+            <*> readMaybeHexText offsetText
+            <*> readMaybeText linesText
+          of
+            Nothing -> do
+              putStrLn ("Invalid parameters for /disassembly: " <> show (Wai.queryString req))
+              pure (httpError HTTP.status422 "invalid parameters")
+            Just (bank, offset, n) -> do
+              disassembly <- readIORef disassemblyRef
+              let fields = lookupN disassembly n (LongAddress bank offset)
+              pure
+                (Wai.responseLBS HTTP.status200
+                                 [(HTTP.hContentType, "application/json")]
+                                 (encode fields)
+                )
+      query -> do
+        putStrLn ("Invalid query string for /disassembly: " <> show query)
+        pure (httpError HTTP.status422 "invalid query string")
     ["events"] -> pure (events channel emulatorState)
     path       -> do
       putStrLn ("No such resource  " <> show path)
@@ -110,6 +146,8 @@ debugger channel romFileName emulator emulatorState req respond =
                                   [(HTTP.hContentType, "text/html")]
                                   "<html><head><meta charset=UTF-8></head></html>"
   httpError status = Wai.responseLBS status [(HTTP.hContentType, "text/plain")]
+  readMaybeHexText t = readMaybe ("0x" <> CB.unpack t)
+  readMaybeText t = readMaybe (CB.unpack t)
 
 keepAliveTime :: Int
 keepAliveTime = 60 * 1000000

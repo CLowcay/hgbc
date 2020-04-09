@@ -16,7 +16,10 @@ import           Data.Bits
 import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
+import           Data.IORef
+import           Debugger.Disassemble
 import           Machine.GBC
+import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.ROM
 import           Machine.GBC.Util
 import           Options.Applicative            ( (<**>) )
@@ -138,8 +141,17 @@ emulator rom allOptions@Config.Options {..} = do
   audio <- if optionNoSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
+  disassemblyRef <- newIORef mempty
+  when optionDebugMode $ writeIORef disassemblyRef =<< disassembleROM (memory emulatorState)
+
   debuggerChannel <- if optionDebugMode
-    then Just <$> Debugger.start (takeBaseName optionFilename) config emulatorChannel emulatorState
+    then
+      Just
+        <$> Debugger.start (takeBaseName optionFilename)
+                           config
+                           emulatorChannel
+                           emulatorState
+                           disassemblyRef
     else pure Nothing
 
   let pauseAudio  = maybe (pure ()) Audio.pause audio
@@ -164,6 +176,11 @@ emulator rom allOptions@Config.Options {..} = do
       now           <- liftIO SDL.time
       let
         innerEmulatorLoop !steps = do
+          when optionDebugMode $ do
+            pc          <- readPC
+            disassembly <- liftIO (readIORef disassemblyRef)
+            r           <- disassemblyRequired pc disassembly
+            when r $ liftIO . writeIORef disassemblyRef =<< disassembleFromPC pc disassembly
           step
           if steps .&. 0x1FFFFF == 0
             then do
