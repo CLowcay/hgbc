@@ -188,7 +188,7 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
       write
           (  "event: paused\ndata:{\"bank\":"
           <> fromString (show bank)
-          <> ",\"pc\":"
+          <> ",\"offset\":"
           <> fromString (show pc)
           <> "}\n\n"
           )

@@ -1,11 +1,12 @@
 :root {
   --panel-background: lightblue;
   --active-background: white;
+  --highlight-background: yellow;
   --value-background: lightgray;
   --value-separator: gray;
-  --value-less-important: gray;
   --value-changed: palevioletred;
   --tooltip-color: lightgreen;
+  --text-unimportant: gray;
   --padding: 8px;
 }
 
@@ -177,7 +178,7 @@ div.disassembly span.instruction {
   width: 16ch;
 }
 div.disassembly span.bytes {
-  color: var(--value-less-important);
+  color: var(--text-unimportant);
 }
 div.disassembly ul {
   list-style: none;
@@ -187,6 +188,9 @@ div.disassembly ul {
 }
 div.disassembly li {
   background-color: var(--active-background);
+}
+div.disassembly li.pc {
+  background-color: var(--highlight-background);
 }
 div.disassembly li::before {
   margin-right: var(--padding);

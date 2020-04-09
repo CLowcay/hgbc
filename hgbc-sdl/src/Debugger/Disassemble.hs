@@ -81,14 +81,17 @@ lookup :: Disassembly -> LongAddress -> Maybe Field
 lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
 
 lookupN :: Disassembly -> Int -> LongAddress -> [Field]
-lookupN (Disassembly m) n startAddress | n == 0 = []
-                                       | n < 0 = reverse (take (-n) (maybe leftList (: leftList) v))
-                                       | otherwise = take n (maybe rightList (: rightList) v)
+lookupN (Disassembly m) n startAddress | n == 0    = []
+                                       | n < 0     = reverse (consV (take (-n) leftList))
+                                       | otherwise = consV (take n rightList)
  where
-  key       = encodeAddress startAddress
-  (l, v, r) = IM.splitLookup key m
-  leftList  = snd <$> IM.toDescList l
-  rightList = snd <$> IM.toAscList r
+  key        = encodeAddress startAddress
+  (l, mv, r) = IM.splitLookup key m
+  leftList   = snd <$> IM.toDescList l
+  rightList  = snd <$> IM.toAscList r
+  consV ls = case mv of
+    Nothing -> ls
+    Just v  -> v : ls
 
 data DisassemblyState = DisassemblyState {
     disassemblyPC          :: !Word16
