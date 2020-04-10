@@ -73,7 +73,7 @@ insert (Disassembly m) longAddress field =
 
 encodeAddress :: LongAddress -> Int
 encodeAddress (LongAddress bank longAddress) =
-  ((fromIntegral longAddress .&. 0x2000) .<<. 19)
+  ((fromIntegral longAddress .&. 0xE000) .<<. 19)
     .|. (fromIntegral bank .<<. 16)
     .|. fromIntegral longAddress
 
@@ -82,7 +82,7 @@ lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
 
 lookupN :: Disassembly -> Int -> LongAddress -> [Field]
 lookupN (Disassembly m) n startAddress | n == 0    = []
-                                       | n < 0     = reverse (consV (take (-n) leftList))
+                                       | n < 0     = consV (take (-n) leftList)
                                        | otherwise = consV (take n rightList)
  where
   key        = encodeAddress startAddress

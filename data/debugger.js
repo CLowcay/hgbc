@@ -84,7 +84,6 @@ function initMemoryPanel() {
   document.getElementById('memoryHex').addEventListener('wheel', memoryScrollWheel);
   document.getElementById('memoryASCII').addEventListener('wheel', memoryScrollWheel);
   document.getElementById('addressLabels').addEventListener('wheel', memoryScrollWheel);
-  addressField.addEventListener('wheel', memoryScrollWheel);
 }
 
 function memoryScrollWheel(event) {
@@ -166,6 +165,23 @@ function initDisassemblyPanel() {
       disassemblyState.lines[0].field.address,
       disassemblyAddress.value));
   });
+
+  disassemblyAddress.addEventListener('wheel', disassemblerScrollWheel);
+  disassemblyAddress.addEventListener('keydown', event => {
+    switch (event.code) {
+      case 'ArrowUp': return scrollDisassembly(-1);
+      case 'ArrowDown': return scrollDisassembly(1);
+      case 'PageUp': return scrollDisassembly(-DLINES);
+      case 'PageDown': return scrollDisassembly(DLINES);
+    }
+  });
+  document.getElementById('disassemblyList')
+    .addEventListener('wheel', disassemblerScrollWheel);
+}
+
+function disassemblerScrollWheel(event) {
+  event.preventDefault();
+  scrollDisassembly(event.deltaY < 0 ? -1 : 1);
 }
 
 function sameAddress(a, b) {
@@ -208,17 +224,75 @@ function setDisassemblyPC(pc) {
   }
 
   const pcLine = getVisibleLineAt(pc);
-  pcLine.li.classList.add('pc');
-  disassemblyState.pc = pc;
+  if (pcLine) {
+    pcLine.li.classList.add('pc');
+    disassemblyState.pc = pc;
+  }
+}
+
+const scrollQueue = [];
+
+function scrollDisassembly(amount) {
+  scrollQueue.push(amount);
+  if (scrollQueue.length === 1) {
+    actuallyScrollDisassembly(amount);
+  }
+
+  function actuallyScrollDisassembly(amount) {
+    const xhr = new XMLHttpRequest();
+    xhr.onerror = () => {
+      scrollQueue.slice(0, 0);
+    };
+
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
+        const disassembly = JSON.parse(xhr.responseText).slice(1)
+          .map(field => { return { field: field, li: formatField(field) } });
+
+        if (amount < 0) {
+          disassembly.reverse();
+          disassemblyState.lines = disassembly.concat(disassemblyState.lines).slice(0, DLINES);
+        } else {
+          disassemblyState.lines = disassemblyState.lines.concat(disassembly).slice(disassembly.length);
+        }
+
+        document.getElementById('disassemblyAddress').value =
+          formatAddress(disassemblyState.lines[0].field.address);
+
+        const ul = document.getElementById('disassemblyList');
+        ul.innerHTML = '';
+        for (const line of disassemblyState.lines) {
+          ul.appendChild(line.li);
+        }
+
+        setDisassemblyPC(disassemblyState.pc);
+
+        scrollQueue.shift();
+        if (scrollQueue.length > 0) {
+          actuallyScrollDisassembly(scrollQueue[0]);
+        }
+      }
+    };
+
+    const baseAddress = (amount < 0
+      ? disassemblyState.lines[0]
+      : disassemblyState.lines[disassemblyState.lines.length - 1]).field.address;
+
+    xhr.open("GET",
+      "disassembly?bank=" + baseAddress.bank.toString(16) +
+      "&offset=" + baseAddress.offset.toString(16) +
+      "&n=" + amount, true);
+    xhr.send();
+  }
 }
 
 function setDisassemblyTop(address) {
   const xhr = new XMLHttpRequest();
   xhr.onreadystatechange = () => {
     if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-      const disassembly = JSON.parse(xhr.responseText);
+      const disassembly = JSON.parse(xhr.responseText).slice(0, DLINES);
 
-      const ul = document.getElementById('disassemblyList').slice(0, DLINES);
+      const ul = document.getElementById('disassemblyList');
       ul.innerHTML = '';
       disassemblyState.lines = [];
       for (const field of disassembly) {
