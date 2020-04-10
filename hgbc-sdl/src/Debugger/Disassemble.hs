@@ -326,4 +326,4 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   ei   = pure (Continue, "EI")
   halt = pure (Continue, "HALT")
   stop = pure (Continue, "STOP")
-  invalid b = pure (Stop, "INVALID " <> fromString (formatHex b))
+  invalid b = pure (Stop, "db " <> fromString (formatHex b))

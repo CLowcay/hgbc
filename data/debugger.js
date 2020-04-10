@@ -181,7 +181,14 @@ function initDisassemblyPanel() {
 
 function disassemblerScrollWheel(event) {
   event.preventDefault();
-  scrollDisassembly(event.deltaY < 0 ? -1 : 1);
+  switch (event.deltaMode) {
+    case 0: // DOM_DELTA_PIXEL
+      return scrollDisassembly(Math.round(event.deltaY / 16));
+    case 1: // DOM_DELTA_LINE
+      return scrollDisassembly(Math.round(event.deltaY));
+    case 2: // DOM_DELTA_PAGE
+      return scrollDisassembly(Math.round(event.deltaY * DLINES));
+  }
 }
 
 function sameAddress(a, b) {
@@ -249,21 +256,24 @@ function scrollDisassembly(amount) {
         const disassembly = JSON.parse(xhr.responseText).slice(1)
           .map(field => { return { field: field, li: formatField(field) } });
 
+        const ul = document.getElementById('disassemblyList');
         if (amount < 0) {
           disassembly.reverse();
           disassemblyState.lines = disassembly.concat(disassemblyState.lines).slice(0, DLINES);
+          ul.prepend(...disassembly.map(line => line.li));
+          while (ul.childNodes.length > DLINES) {
+            ul.removeChild(ul.lastChild);
+          }
         } else {
           disassemblyState.lines = disassemblyState.lines.concat(disassembly).slice(disassembly.length);
+          ul.append(...disassembly.map(line => line.li));
+          while (ul.childNodes.length > DLINES) {
+            ul.removeChild(ul.firstChild);
+          }
         }
 
         document.getElementById('disassemblyAddress').value =
           formatAddress(disassemblyState.lines[0].field.address);
-
-        const ul = document.getElementById('disassemblyList');
-        ul.innerHTML = '';
-        for (const line of disassemblyState.lines) {
-          ul.appendChild(line.li);
-        }
 
         setDisassemblyPC(disassemblyState.pc);
 
