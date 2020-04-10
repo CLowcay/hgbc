@@ -72,10 +72,12 @@ insert (Disassembly m) longAddress field =
   Disassembly (IM.insert (encodeAddress longAddress) field m)
 
 encodeAddress :: LongAddress -> Int
-encodeAddress (LongAddress bank longAddress) =
-  ((fromIntegral longAddress .&. 0xE000) .<<. 19)
-    .|. (fromIntegral bank .<<. 16)
-    .|. fromIntegral longAddress
+encodeAddress (LongAddress bank offset) =
+  section .|. (fromIntegral bank .<<. 16) .|. fromIntegral offset
+ where
+  section = if offset < 0x8000
+    then if bank == 0xFFFF then 0 else 0x100000000
+    else (fromIntegral offset .&. 0xE000) .<<. 19
 
 lookup :: Disassembly -> LongAddress -> Maybe Field
 lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
@@ -111,7 +113,7 @@ disassemblyRequired pc disassembly = do
 
 disassembleROM :: Memory -> IO Disassembly
 disassembleROM memory0 =
-  disassembleFrom (romFrom (if hasBootROM memory0 then 0 else 0x100)) mempty
+  disassembleFrom entryPoint mempty
     >>= disassembleFrom (romFrom 0x00)
     >>= disassembleFrom (romFrom 0x08)
     >>= disassembleFrom (romFrom 0x10)
@@ -125,7 +127,9 @@ disassembleROM memory0 =
     >>= disassembleFrom (romFrom 0x50)
     >>= disassembleFrom (romFrom 0x58)
     >>= disassembleFrom (romFrom 0x60)
-  where romFrom origin = DisassemblyState origin True [] memory0
+ where
+  romFrom origin = DisassemblyState origin True [] memory0
+  entryPoint = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
 
 disassembleFromPC :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
 disassembleFromPC pc disassembly = do
@@ -215,7 +219,7 @@ instance MonadFetch (StateT DisassemblyState IO) where
       )
     put
       (s { disassemblyPC          = pc'
-         , disassemblyBootLockout = pc' == 0x100
+         , disassemblyBootLockout = disassemblyBootLockout s || pc' == 0x100
          , disassemblyBytes       = byte : disassemblyBytes s
          }
       )
