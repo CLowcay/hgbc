@@ -7,6 +7,7 @@ module Debugger
   , sendNotification
   , Notification(..)
   , DebuggerChannel
+  , DebugState(..)
   )
 where
 
@@ -19,6 +20,7 @@ import           Data.Aeson
 import           Data.FileEmbed
 import           Data.Functor.Identity
 import           Data.IORef
+import           Data.String
 import           Data.Traversable
 import           Data.Word
 import           Debugger.Disassemble
@@ -38,7 +40,7 @@ import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Lazy.Char8    as LBC
-import           Data.String
+import qualified Data.HashTable.IO             as H
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -54,17 +56,22 @@ newtype DebuggerChannel = DebuggerChannel (TChan Notification)
 sendNotification :: MonadIO m => DebuggerChannel -> Notification -> m ()
 sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan channel
 
+data DebugState = DebugState {
+    disassemblyRef :: IORef Disassembly
+  , breakPoints    :: H.BasicHashTable LongAddress ()
+}
+
 start
   :: FilePath
   -> Config.Config Identity
   -> Emulator.Emulator
   -> EmulatorState
-  -> IORef Disassembly
+  -> DebugState
   -> IO DebuggerChannel
-start romFileName Config.Config {..} emulator emulatorState disassemblyRef = do
+start romFileName Config.Config {..} emulator emulatorState debugState = do
   channel <- DebuggerChannel <$> newTChanIO
   void $ forkIO $ Warp.run debugPort
-                           (debugger channel romFileName emulator emulatorState disassemblyRef)
+                           (debugger channel romFileName emulator emulatorState debugState)
   pure channel
 
 debugger
@@ -72,9 +79,9 @@ debugger
   -> FilePath
   -> Emulator.Emulator
   -> EmulatorState
-  -> IORef Disassembly
+  -> DebugState
   -> Wai.Application
-debugger channel romFileName emulator emulatorState disassemblyRef req respond =
+debugger channel romFileName emulator emulatorState debugState req respond =
   respond =<< case Wai.pathInfo req of
     [] -> case Wai.requestMethod req of
       "GET" -> pure
@@ -130,7 +137,7 @@ debugger channel romFileName emulator emulatorState disassemblyRef req respond =
               putStrLn ("Invalid parameters for /disassembly: " <> show (Wai.queryString req))
               pure (httpError HTTP.status422 "invalid parameters")
             Just (bank, offset, n) -> do
-              disassembly <- readIORef disassemblyRef
+              disassembly <- readIORef (disassemblyRef debugState)
               let fields = lookupN disassembly n (LongAddress bank offset)
               pure
                 (Wai.responseLBS HTTP.status200

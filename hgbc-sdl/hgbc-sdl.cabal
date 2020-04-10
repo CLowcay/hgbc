@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 5d904f2fff1384906b8a3bcbc103e68b00f3418ccc19cf2ed48833b5c82ba185
+-- hash: a02de7f8b11985b381579afbc64acacf683eb5e79e325209abb32da7666b014a
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -63,6 +63,7 @@ executable hgbc-sdl
     , directory
     , file-embed
     , filepath
+    , hashtables
     , hgbc
     , htoml
     , http-types

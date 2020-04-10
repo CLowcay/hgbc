@@ -116,23 +116,18 @@ function fillAddressLabels(baseAddress, lines) {
 }
 
 function refreshMemory(baseAddress) {
-  const xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = () => {
-    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-      document.getElementById('memoryHex').innerText = xhr.responseText;
+  ajax("GET",
+    "memory?address=" + baseAddress.toString(16) +
+    "&lines=" + MEM_LINES,
+    text => {
+      document.getElementById('memoryHex').innerText = text;
       document.getElementById('memoryASCII').innerText =
-        xhr.responseText.split('\n')
+        text.split('\n')
           .map(line => line.split(' ')
             .map(c => decodeASCII(parseInt(c, 16)))
             .join(''))
           .join('\n');
-    }
-  };
-
-  xhr.open("GET",
-    "memory?address=" + baseAddress.toString(16) +
-    "&lines=" + MEM_LINES, true);
-  xhr.send();
+    });
 }
 
 // TODO: remove this
@@ -246,14 +241,16 @@ function scrollDisassembly(amount) {
   }
 
   function actuallyScrollDisassembly(amount) {
-    const xhr = new XMLHttpRequest();
-    xhr.onerror = () => {
-      scrollQueue.slice(0, 0);
-    };
+    const baseAddress = (amount < 0
+      ? disassemblyState.lines[0]
+      : disassemblyState.lines[disassemblyState.lines.length - 1]).field.address;
 
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-        const disassembly = JSON.parse(xhr.responseText).slice(1)
+    ajax("GET",
+      "disassembly?bank=" + baseAddress.bank.toString(16) +
+      "&offset=" + baseAddress.offset.toString(16) +
+      "&n=" + amount,
+      text => {
+        const disassembly = JSON.parse(text).slice(1)
           .map(field => { return { field: field, li: formatField(field) } });
 
         const ul = document.getElementById('disassemblyList');
@@ -281,26 +278,21 @@ function scrollDisassembly(amount) {
         if (scrollQueue.length > 0) {
           actuallyScrollDisassembly(scrollQueue[0]);
         }
+      },
+      error => {
+        scrollQueue.slice(0, 0);
       }
-    };
-
-    const baseAddress = (amount < 0
-      ? disassemblyState.lines[0]
-      : disassemblyState.lines[disassemblyState.lines.length - 1]).field.address;
-
-    xhr.open("GET",
-      "disassembly?bank=" + baseAddress.bank.toString(16) +
-      "&offset=" + baseAddress.offset.toString(16) +
-      "&n=" + amount, true);
-    xhr.send();
+    );
   }
 }
 
 function setDisassemblyTop(address) {
-  const xhr = new XMLHttpRequest();
-  xhr.onreadystatechange = () => {
-    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-      const disassembly = JSON.parse(xhr.responseText).slice(0, DLINES);
+  ajax("GET",
+    "disassembly?bank=" + address.bank.toString(16) +
+    "&offset=" + address.offset.toString(16) +
+    "&n=" + DLINES,
+    text => {
+      const disassembly = JSON.parse(text).slice(0, DLINES);
 
       const ul = document.getElementById('disassemblyList');
       ul.innerHTML = '';
@@ -312,26 +304,20 @@ function setDisassemblyTop(address) {
       }
 
       setDisassemblyPC(disassemblyState.pc);
-    }
-  };
-
-  xhr.open("GET",
-    "disassembly?bank=" + address.bank.toString(16) +
-    "&offset=" + address.offset.toString(16) +
-    "&n=" + DLINES, true);
-  xhr.send();
+    });
 }
 
 function refreshDisassembly(pc) {
   const newPCLine = getVisibleLineAt(pc);
   if (newPCLine) {
     setDisassemblyPC(pc);
-
   } else {
-    const xhr = new XMLHttpRequest();
-    xhr.onreadystatechange = () => {
-      if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-        const disassembly = JSON.parse(xhr.responseText).slice(0, DLINES);
+    ajax("GET",
+      "disassembly?bank=" + pc.bank.toString(16) +
+      "&offset=" + pc.offset.toString(16) +
+      "&n=" + DLINES,
+      text => {
+        const disassembly = JSON.parse(text).slice(0, DLINES);
 
         const ul = document.getElementById('disassemblyList');
         ul.innerHTML = '';
@@ -343,13 +329,19 @@ function refreshDisassembly(pc) {
         }
 
         setDisassemblyPC(pc);
-      }
-    };
-
-    xhr.open("GET",
-      "disassembly?bank=" + pc.bank.toString(16) +
-      "&offset=" + pc.offset.toString(16) +
-      "&n=" + DLINES, true);
-    xhr.send();
+      });
   }
+}
+
+function ajax(method, uri, responseHandler, errorHandler) {
+  const xhr = new XMLHttpRequest();
+  if (errorHandler) xhr.onerror = errorHandler;
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
+      responseHandler(xhr.responseText);
+    }
+  };
+
+  xhr.open(method, uri, true);
+  xhr.send();
 }

@@ -29,6 +29,7 @@ import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
+import qualified Data.HashTable.IO             as H
 import qualified Debugger
 import qualified Emulator
 import qualified Options.Applicative           as Opt
@@ -144,6 +145,9 @@ emulator rom allOptions@Config.Options {..} = do
   disassemblyRef <- newIORef mempty
   when optionDebugMode $ writeIORef disassemblyRef =<< disassembleROM (memory emulatorState)
 
+  breakPoints <- H.new
+  let debugState = Debugger.DebugState { .. }
+
   debuggerChannel <- if optionDebugMode
     then
       Just
@@ -151,7 +155,7 @@ emulator rom allOptions@Config.Options {..} = do
                            config
                            emulatorChannel
                            emulatorState
-                           disassemblyRef
+                           debugState
     else pure Nothing
 
   let pauseAudio  = maybe (pure ()) Audio.pause audio
