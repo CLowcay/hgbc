@@ -171,10 +171,9 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
 
    where
     pushStatus = do
-      status <- getStatus emulatorState
       write "event: status\n"
       write "data: "
-      write (BB.lazyByteString (encode status))
+      write . BB.lazyByteString =<< getStatus emulatorState
       write "\n\n" >> flush
     pushPaused = do
       pushStatus
