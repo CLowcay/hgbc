@@ -1,5 +1,3 @@
-const MEM_LINES = 10;
-
 window.onload = () => {
   const eventSource = new EventSource('events');
   window.onbeforeunload = () => eventSource.close();
@@ -14,13 +12,18 @@ window.onload = () => {
   initDisassemblyPanel();
 };
 
-let status = "";
+/*****************************************************************************
+ * STATUS
+ *****************************************************************************/
+
+let currentStatus = "";
+let currentStatusData = {};
 
 function handleEmulatorStarted(event) {
   const disableButton = button => button.setAttribute('disabled', true);
 
-  if (status !== 'started') {
-    status = 'started';
+  if (currentStatus !== 'started') {
+    currentStatus = 'started';
     document.getElementsByName('run')
       .forEach(element => element.innerText = 'Pause');
     document.getElementsByName('step').forEach(disableButton);
@@ -35,10 +38,10 @@ function handleEmulatorPaused(event) {
 
   refreshMemory(getAddress());
   refreshDisassembly(data);
-  document.getElementById('disassemblyAddress').value = formatAddress(data);
+  document.getElementById('disassemblyAddress').value = formatLongAddress(data);
 
-  if (status !== "paused") {
-    status = "paused";
+  if (currentStatus !== "paused") {
+    currentStatus = "paused";
     document.getElementsByName('run')
       .forEach(element => element.innerText = "Run");
     document.getElementsByName('step').forEach(enableButton);
@@ -47,8 +50,6 @@ function handleEmulatorPaused(event) {
   }
 }
 
-let previousData = {};
-
 function handleStatusUpdate(event) {
   refreshMemory(getAddress());
   const data = JSON.parse(event.data);
@@ -56,8 +57,8 @@ function handleStatusUpdate(event) {
     const value = data[key];
     const element = document.getElementById(key);
     if (!element) console.log("bad key " + key);
-    if (previousData[key] !== value) {
-      previousData[key] = value;
+    if (currentStatusData[key] !== value) {
+      currentStatusData[key] = value;
       element.classList.add('changed');
       element.firstChild.nodeValue = value;
     } else {
@@ -65,6 +66,12 @@ function handleStatusUpdate(event) {
     }
   }
 }
+
+/*****************************************************************************
+ * MEMORY
+ *****************************************************************************/
+
+const MEM_LINES = 10;
 
 function initMemoryPanel() {
   fillAddressLabels(getAddress(), MEM_LINES);
@@ -130,6 +137,10 @@ function refreshMemory(baseAddress) {
     });
 }
 
+/*****************************************************************************
+ * Disassembly
+ *****************************************************************************/
+
 // TODO: remove this
 const DLINES = 20;
 
@@ -138,39 +149,10 @@ const disassemblyState = {
   pc: { bank: 0, offset: 0 },
 };
 
-function handleBreakPointAdded(event) {
-  const line = getVisibleLineAt(JSON.parse(event.data));
-  if (line) {
-    line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.add('set'));
-  }
-}
-
-function handleBreakPointRemoved(event) {
-  const line = getVisibleLineAt(JSON.parse(event.data));
-  if (line) {
-    line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.remove('set'));
-  }
-}
-
-function parseAddress(defaultAddress, address) {
-  const parts = address.split(':');
-  if (parts.length === 1) {
-    return { bank: defaultAddress.bank, offset: parseInt('0' + parts[0], 16) };
-  } else if (parts.length === 2) {
-    if (parts[0].toUpperCase() === 'BOOT') {
-      return { bank: 0xFFFF, offset: parseInt('0' + parts[1], 16) };
-    } else {
-      return { bank: parseInt('0' + parts[0], 16), offset: parseInt('0' + parts[1], 16) };
-    }
-  } else {
-    return defaultAddress;
-  }
-}
-
 function initDisassemblyPanel() {
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('input', event => {
-    setDisassemblyTop(parseAddress(
+    setDisassemblyTop(parseLongAddress(
       disassemblyState.lines[0].field.address,
       disassemblyAddress.value));
   });
@@ -188,6 +170,38 @@ function initDisassemblyPanel() {
     .addEventListener('wheel', disassemblerScrollWheel);
 }
 
+function getVisibleLineAt(address) {
+  for (const line of disassemblyState.lines) {
+    if (sameAddress(line.field.address, address)) return line;
+  }
+  return null;
+}
+
+function handleBreakPointAdded(event) {
+  const line = getVisibleLineAt(JSON.parse(event.data));
+  if (line) {
+    line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.add('set'));
+  }
+}
+
+function handleBreakPointRemoved(event) {
+  const line = getVisibleLineAt(JSON.parse(event.data));
+  if (line) {
+    line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.remove('set'));
+  }
+}
+
+function toggleBreakpoint() {
+  const address = parseLongAddress(undefined, this.parentNode.getAttribute('data-address'));
+  const uri = '/breakpoint?bank=' + address.bank.toString(16) +
+    '&offset=' + address.offset.toString(16);
+  if (this.classList.contains('set')) {
+    httpPOST(uri, 'unset');
+  } else {
+    httpPOST(uri, 'set');
+  }
+}
+
 function disassemblerScrollWheel(event) {
   event.preventDefault();
   switch (event.deltaMode) {
@@ -200,23 +214,7 @@ function disassemblerScrollWheel(event) {
   }
 }
 
-function sameAddress(a, b) {
-  return a.offset === b.offset && a.bank === b.bank;
-}
-
-function containsAddress(a, array) {
-  for (const b of array) {
-    if (sameAddress(a, b)) return true;
-  }
-  return false;
-}
-
-function formatAddress(a) {
-  return (a.bank === 0xFFFF ? "BOOT" : a.bank.toString(16).padStart(4, '0').toUpperCase()) +
-    ":" + a.offset.toString(16).padStart(4, '0').toUpperCase();
-}
-
-function formatField(field, breakpoints) {
+function formatDisassemblyField(field, breakpoints) {
   const li = document.createElement('li');
 
   const breakpoint = document.createElement('input');
@@ -237,29 +235,11 @@ function formatField(field, breakpoints) {
   bytes.setAttribute('class', 'bytes');
   bytes.innerText = "; " + field.bytes
 
-  li.setAttribute('data-address', formatAddress(field.address));
+  li.setAttribute('data-address', formatLongAddress(field.address));
   li.appendChild(breakpoint);
   li.appendChild(instruction);
   li.appendChild(bytes);
   return li;
-}
-
-function toggleBreakpoint() {
-  const address = parseAddress(undefined, this.parentNode.getAttribute('data-address'));
-  const uri = '/breakpoint?bank=' + address.bank.toString(16) +
-    '&offset=' + address.offset.toString(16);
-  if (this.classList.contains('set')) {
-    httpPOST(uri, 'unset');
-  } else {
-    httpPOST(uri, 'set');
-  }
-}
-
-function getVisibleLineAt(address) {
-  for (const line of disassemblyState.lines) {
-    if (sameAddress(line.field.address, address)) return line;
-  }
-  return null;
 }
 
 function setDisassemblyPC(pc) {
@@ -296,7 +276,7 @@ function scrollDisassembly(amount) {
         const disassembly = JSON.parse(text);
         const newFields = disassembly.fields.slice(1)
           .map(field => {
-            return { field: field, li: formatField(field, disassembly.breakpoints) }
+            return { field: field, li: formatDisassemblyField(field, disassembly.breakpoints) }
           });
 
         const ul = document.getElementById('disassemblyList');
@@ -316,7 +296,7 @@ function scrollDisassembly(amount) {
         }
 
         document.getElementById('disassemblyAddress').value =
-          formatAddress(disassemblyState.lines[0].field.address);
+          formatLongAddress(disassemblyState.lines[0].field.address);
 
         setDisassemblyPC(disassemblyState.pc);
 
@@ -344,7 +324,7 @@ function setDisassemblyTop(address) {
       ul.innerHTML = '';
       disassemblyState.lines = [];
       for (const field of disassembly.fields.slice(0, DLINES)) {
-        const li = formatField(field, disassembly.breakpoints);
+        const li = formatDisassemblyField(field, disassembly.breakpoints);
         ul.appendChild(li);
         disassemblyState.lines.push({ field: field, li: li });
       }
@@ -369,13 +349,48 @@ function refreshDisassembly(pc) {
         ul.innerHTML = '';
         disassemblyState.lines = [];
         for (const field of disassembly.fields.slice(0, DLINES)) {
-          const li = formatField(field, disassembly.breakpoints);
+          const li = formatDisassemblyField(field, disassembly.breakpoints);
           ul.appendChild(li);
           disassemblyState.lines.push({ field: field, li: li });
         }
 
         setDisassemblyPC(pc);
       });
+  }
+}
+
+/*****************************************************************************
+ * Utility
+ *****************************************************************************/
+
+function sameAddress(a, b) {
+  return a.offset === b.offset && a.bank === b.bank;
+}
+
+function containsAddress(a, array) {
+  for (const b of array) {
+    if (sameAddress(a, b)) return true;
+  }
+  return false;
+}
+
+function formatLongAddress(a) {
+  return (a.bank === 0xFFFF ? "BOOT" : a.bank.toString(16).padStart(4, '0').toUpperCase()) +
+    ":" + a.offset.toString(16).padStart(4, '0').toUpperCase();
+}
+
+function parseLongAddress(defaultAddress, address) {
+  const parts = address.split(':');
+  if (parts.length === 1) {
+    return { bank: defaultAddress.bank, offset: parseInt('0' + parts[0], 16) };
+  } else if (parts.length === 2) {
+    if (parts[0].toUpperCase() === 'BOOT') {
+      return { bank: 0xFFFF, offset: parseInt('0' + parts[1], 16) };
+    } else {
+      return { bank: parseInt('0' + parts[0], 16), offset: parseInt('0' + parts[1], 16) };
+    }
+  } else {
+    return defaultAddress;
   }
 }
 
