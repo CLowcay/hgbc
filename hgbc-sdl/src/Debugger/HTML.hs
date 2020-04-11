@@ -61,14 +61,5 @@ disassembly = divclass
   "disassembly"
   [ h 4 "Disassembly"
   , nav [input "text" "disassemblyAddress" 9 "0000:0000"]
-  , divclass
-    "window"
-    [ ulid "disassemblyList"
-        [ spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["LD A"]
-        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["LD B"]
-        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["CALL something"]
-        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["RET"]
-        , spanclass "bytes" ["12 34 ab"] <> spanclass "instruction" ["JNE 0040"]
-        ]
-    ]
+  , divclass "window" [ulid "disassemblyList" []]
   ]

@@ -30,6 +30,7 @@ import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
 import           Machine.GBC.Util
+import           Data.Hashable
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
 import qualified Data.IntMap.Strict            as IM
@@ -38,6 +39,10 @@ import qualified Data.Text                     as T
 data LongAddress
   = LongAddress !Word16 !Word16
   deriving (Eq, Ord, Show)
+
+instance Hashable LongAddress where
+  hashWithSalt salt (LongAddress bank offset) =
+    hashWithSalt salt ((fromIntegral bank .<<. 16) .|. fromIntegral offset :: Int)
 
 data Field = Field {
     fieldAddress :: !LongAddress
@@ -102,14 +107,12 @@ data DisassemblyState = DisassemblyState {
   , disassemblyMemory      :: !Memory
 }
 
-disassemblyRequired :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Bool
-disassemblyRequired pc disassembly = do
-  bank <- getBank pc
-  case lookup disassembly (LongAddress bank pc) of
-    Nothing                -> pure True
-    Just (Field _ bytes _) -> do
-      actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
-      pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
+disassemblyRequired :: HasMemory env => LongAddress -> Disassembly -> ReaderT env IO Bool
+disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disassembly address of
+  Nothing                -> pure True
+  Just (Field _ bytes _) -> do
+    actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
+    pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
 disassembleROM :: Memory -> IO Disassembly
 disassembleROM memory0 =

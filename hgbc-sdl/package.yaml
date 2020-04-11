@@ -30,6 +30,7 @@ dependencies:
 - directory
 - file-embed
 - filepath
+- hashable
 - hashtables
 - hgbc
 - htoml

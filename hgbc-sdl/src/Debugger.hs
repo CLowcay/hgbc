@@ -20,6 +20,7 @@ import           Data.Aeson
 import           Data.FileEmbed
 import           Data.Functor.Identity
 import           Data.IORef
+import           Data.Maybe
 import           Data.String
 import           Data.Traversable
 import           Data.Word
@@ -35,6 +36,7 @@ import           Machine.GBC.Util               ( formatHex )
 import           Text.Read
 import qualified Config
 import qualified Control.Concurrent.Async      as Async
+import qualified Data.Binary.Builder           as BNB
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
@@ -49,6 +51,8 @@ import qualified Network.Wai.Handler.Warp      as Warp
 data Notification
   = EmulatorStarted
   | EmulatorPaused
+  | BreakPointAdded LongAddress
+  | BreakPointRemoved LongAddress
   deriving (Eq, Ord, Show)
 
 newtype DebuggerChannel = DebuggerChannel (TChan Notification)
@@ -139,13 +143,48 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             Just (bank, offset, n) -> do
               disassembly <- readIORef (disassemblyRef debugState)
               let fields = lookupN disassembly n (LongAddress bank offset)
+              breakpoints <- filterM (fmap isJust . H.lookup (breakPoints debugState))
+                                     (fieldAddress <$> fields)
               pure
-                (Wai.responseLBS HTTP.status200
-                                 [(HTTP.hContentType, "application/json")]
-                                 (encode fields)
+                (Wai.responseLBS
+                  HTTP.status200
+                  [(HTTP.hContentType, "application/json")]
+                  ( BNB.toLazyByteString
+                  . fromEncoding
+                  . pairs
+                  . mconcat
+                  $ ["fields" .= fields, "breakpoints" .= breakpoints]
+                  )
                 )
       query -> do
         putStrLn ("Invalid query string for /disassembly: " <> show query)
+        pure (httpError HTTP.status422 "invalid query string")
+    ["breakpoint"] -> case Wai.queryString req of
+      [("bank", Just bankText), ("offset", Just offsetText)] ->
+        case LongAddress <$> readMaybeHexText bankText <*> readMaybeHexText offsetText of
+          Nothing -> do
+            putStrLn ("Invalid parameters for /breakpoint: " <> show (Wai.queryString req))
+            pure (httpError HTTP.status422 "invalid parameters")
+          Just address -> case Wai.requestMethod req of
+            "POST" -> do
+              body <- Wai.lazyRequestBody req
+              case HTTP.parseQuery (LB.toStrict body) of
+                [("set", _)] -> do
+                  H.insert (breakPoints debugState) address ()
+                  sendNotification channel (BreakPointAdded address)
+                  pure emptyResponse
+                [("unset", _)] -> do
+                  H.delete (breakPoints debugState) address
+                  sendNotification channel (BreakPointRemoved address)
+                  pure emptyResponse
+                query -> do
+                  putStrLn ("Invalid breakpoint command: " <> show query)
+                  pure (httpError HTTP.status422 "Invalid breakpoint command")
+            method ->
+              pure
+                (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoint"))
+      query -> do
+        putStrLn ("Invalid query string for /breakpoint: " <> show query)
         pure (httpError HTTP.status422 "invalid query string")
     ["events"] -> pure (events channel emulatorState)
     path       -> do
@@ -178,8 +217,7 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
 
    where
     pushStatus = do
-      write "event: status\n"
-      write "data: "
+      write "event: status\ndata:"
       write . BB.lazyByteString =<< getStatus emulatorState
       write "\n\n" >> flush
     pushPaused = do
@@ -199,6 +237,9 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
           <> "}\n\n"
           )
         >> flush
+    pushAddress address = do
+      write (BB.lazyByteString (encode address))
+      write "\n\n" >> flush
     continue isPaused = do
       event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
                           (atomically (readTChan channel))
@@ -212,6 +253,14 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
         Right EmulatorPaused -> do
           pushPaused
           continue True
+        Right (BreakPointAdded address) -> do
+          write "event: breakpoint-added\ndata:"
+          pushAddress address
+          continue isPaused
+        Right (BreakPointRemoved address) -> do
+          write "event: breakpoint-removed\ndata:"
+          pushAddress address
+          continue isPaused
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS

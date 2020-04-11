@@ -17,9 +17,11 @@ import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
+import           Data.Maybe
 import           Debugger.Disassemble
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
+import           Machine.GBC.Memory             ( getBank )
 import           Machine.GBC.ROM
 import           Machine.GBC.Util
 import           Options.Applicative            ( (<**>) )
@@ -180,25 +182,34 @@ emulator rom allOptions@Config.Options {..} = do
       now           <- liftIO SDL.time
       let
         innerEmulatorLoop !steps = do
-          when optionDebugMode $ do
-            pc          <- readPC
-            disassembly <- liftIO (readIORef disassemblyRef)
-            r           <- disassemblyRequired pc disassembly
-            when r $ liftIO . writeIORef disassemblyRef =<< disassembleFromPC pc disassembly
           step
-          if steps .&. 0x1FFFFF == 0
+          breakRequired <- if optionDebugMode
             then do
-              when optionStats $ printPerformanceStats emulatorClock now
-              emulatorLoop
-            else if steps .&. 0xFFFF == 0
+              pc   <- readPC
+              bank <- getBank pc
+              let address = LongAddress bank pc
+              disassembly <- liftIO (readIORef disassemblyRef)
+              r           <- disassemblyRequired address disassembly
+              when r $ liftIO . writeIORef disassemblyRef =<< disassembleFromPC pc disassembly
+              breakpoint <- liftIO $ H.lookup breakPoints address
+              pure (isJust breakpoint)
+            else pure True
+
+          if breakRequired
+            then pauseAudio >> pauseLoop
+            else if steps .&. 0x1FFFFF == 0
               then do
-                notification <- Emulator.getNotification emulatorChannel
-                case notification of
-                  Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
-                  Just Emulator.QuitNotification -> onQuit
-                  Just Emulator.RestartNotification -> reset >> innerEmulatorLoop (steps + 1)
-                  _ -> innerEmulatorLoop (steps + 1)
-              else innerEmulatorLoop (steps + 1)
+                when optionStats $ printPerformanceStats emulatorClock now
+                emulatorLoop
+              else if steps .&. 0xFFFF == 0
+                then do
+                  notification <- Emulator.getNotification emulatorChannel
+                  case notification of
+                    Just Emulator.PauseNotification -> pauseAudio >> pauseLoop
+                    Just Emulator.QuitNotification -> onQuit
+                    Just Emulator.RestartNotification -> reset >> innerEmulatorLoop (steps + 1)
+                    _ -> innerEmulatorLoop (steps + 1)
+                else innerEmulatorLoop (steps + 1)
       innerEmulatorLoop (1 :: Int)
 
     pauseLoop = do

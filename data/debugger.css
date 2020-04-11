@@ -198,3 +198,34 @@ div.disassembly li::before {
   content: attr(data-address);
   background-color: var(--value-background);
 }
+input.disassemblyButton {
+  cursor: pointer;
+  width: 1ch;
+  height: 1ch;
+  visibility: hidden;
+  vertical-align: middle;
+  margin: 0 var(--padding) 0 0;
+  border: none;
+  padding: 0.5em;
+}
+div.disassembly li:hover input.disassemblyButton {
+  visibility: visible;
+}
+input.disassemblyButton:focus {
+  outline: none;
+}
+input.disassemblyButton::-moz-focus-inner {
+  border: 0;
+}
+input.breakpoint {
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' version='1.1' preserveAspectRatio='none' viewBox='0 0 1 1'><polygon fill='red' points='0.29,0 0.71,0 1,0.29 1,0.71 0.71,1 0.29,1 0,0.71 0,0.29'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;  
+  background-size: 100% 100%;
+  opacity: 0.5;
+}
+input.breakpoint.set {
+  visibility: visible;
+  opacity: 1;
+}
