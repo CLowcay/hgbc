@@ -38,6 +38,7 @@ import qualified Config
 import qualified Control.Concurrent.Async      as Async
 import qualified Data.Binary.Builder           as BNB
 import qualified Data.ByteString               as B
+import           Debugger.Types
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
@@ -111,12 +112,22 @@ debugger channel romFileName emulator emulatorState debugState req respond =
           [("restart", _)] -> do
             Emulator.sendNotification emulator Emulator.RestartNotification
             pure emptyResponse
+          [("runTo", _), ("bank", Just bank), ("offset", Just offset)] ->
+            case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
+              Nothing -> do
+                putStrLn ("Invalid parameters for runTo command: " <> show body)
+                pure (httpError HTTP.status422 "invalid parameters")
+              Just address -> do
+                Emulator.sendNotification emulator (Emulator.RunToNotification address)
+                pure emptyResponse
           query -> do
             putStrLn ("Invalid command: " <> show query)
             pure (httpError HTTP.status422 "Invalid command")
       method -> pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /"))
+
     ["css"   ] -> pure debugCSS
     ["js"    ] -> pure debugJS
+
     ["memory"] -> case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->
         case (,) <$> readMaybe ("0x" <> CB.unpack addressText) <*> readMaybe (CB.unpack rawLines) of
@@ -129,20 +140,20 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       query -> do
         putStrLn ("Invalid query string for /memory: " <> show query)
         pure (httpError HTTP.status422 "invalid query string")
+
     ["disassembly"] -> case Wai.queryString req of
-      [("bank", Just bankText), ("offset", Just offsetText), ("n", Just linesText)] ->
+      [("bank", Just bank), ("offset", Just offset), ("n", Just linesText)] ->
         case
-            (,,)
-            <$> readMaybeHexText bankText
-            <*> readMaybeHexText offsetText
+            (,)
+            <$> (LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset)
             <*> readMaybeText linesText
           of
             Nothing -> do
               putStrLn ("Invalid parameters for /disassembly: " <> show (Wai.queryString req))
               pure (httpError HTTP.status422 "invalid parameters")
-            Just (bank, offset, n) -> do
+            Just (address, n) -> do
               disassembly <- readIORef (disassemblyRef debugState)
-              let fields = lookupN disassembly n (LongAddress bank offset)
+              let fields = lookupN disassembly n address
               breakpoints <- filterM (fmap isJust . H.lookup (breakPoints debugState))
                                      (fieldAddress <$> fields)
               pure
@@ -159,11 +170,12 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       query -> do
         putStrLn ("Invalid query string for /disassembly: " <> show query)
         pure (httpError HTTP.status422 "invalid query string")
-    ["breakpoint"] -> case Wai.queryString req of
-      [("bank", Just bankText), ("offset", Just offsetText)] ->
-        case LongAddress <$> readMaybeHexText bankText <*> readMaybeHexText offsetText of
+
+    ["breakpoints"] -> case Wai.queryString req of
+      [("bank", Just bank), ("offset", Just offset)] ->
+        case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
           Nothing -> do
-            putStrLn ("Invalid parameters for /breakpoint: " <> show (Wai.queryString req))
+            putStrLn ("Invalid parameters for /breakpoints: " <> show (Wai.queryString req))
             pure (httpError HTTP.status422 "invalid parameters")
           Just address -> case Wai.requestMethod req of
             "POST" -> do
@@ -182,11 +194,13 @@ debugger channel romFileName emulator emulatorState debugState req respond =
                   pure (httpError HTTP.status422 "Invalid breakpoint command")
             method ->
               pure
-                (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoint"))
+                (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
       query -> do
-        putStrLn ("Invalid query string for /breakpoint: " <> show query)
+        putStrLn ("Invalid query string for /breakpoints: " <> show query)
         pure (httpError HTTP.status422 "invalid query string")
+
     ["events"] -> pure (events channel emulatorState)
+
     path       -> do
       putStrLn ("No such resource  " <> show path)
       pure (httpError HTTP.status404 ("No such resource " <> LB.fromStrict (Wai.rawPathInfo req)))

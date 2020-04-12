@@ -8,7 +8,6 @@
 module Debugger.Disassemble
   ( Field(..)
   , Disassembly
-  , LongAddress(..)
   , DisassemblyState(..)
   , lookupN
   , disassemblyRequired
@@ -26,32 +25,21 @@ import           Data.ByteString.Short
 import           Data.Int
 import           Data.String
 import           Data.Word
+import           Debugger.Types
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
 import           Machine.GBC.Util
-import           Data.Hashable
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
 import qualified Data.IntMap.Strict            as IM
 import qualified Data.Text                     as T
-
-data LongAddress
-  = LongAddress !Word16 !Word16
-  deriving (Eq, Ord, Show)
-
-instance Hashable LongAddress where
-  hashWithSalt salt (LongAddress bank offset) =
-    hashWithSalt salt ((fromIntegral bank .<<. 16) .|. fromIntegral offset :: Int)
 
 data Field = Field {
     fieldAddress :: !LongAddress
   , fieldBytes   :: !ShortByteString
   , fieldText    :: !T.Text
   } deriving (Eq, Ord, Show)
-
-instance ToJSON LongAddress where
-  toJSON (LongAddress bank address) = object ["offset" .= address, "bank" .= bank]
 
 instance ToJSON Field where
   toJSON field = object

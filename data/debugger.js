@@ -191,8 +191,7 @@ function handleBreakPointRemoved(event) {
   }
 }
 
-function toggleBreakpoint() {
-  const address = parseLongAddress(undefined, this.parentNode.getAttribute('data-address'));
+function toggleBreakpointAt(address) {
   const uri = '/breakpoint?bank=' + address.bank.toString(16) +
     '&offset=' + address.offset.toString(16);
   if (this.classList.contains('set')) {
@@ -200,6 +199,11 @@ function toggleBreakpoint() {
   } else {
     httpPOST(uri, 'set');
   }
+}
+
+function runToAddress(address) {
+  httpPOST('/', 'runTo=&bank=' +
+    address.bank.toString(16) + '&offset=' + address.offset.toString(16));
 }
 
 function disassemblerScrollWheel(event) {
@@ -219,17 +223,22 @@ function formatDisassemblyField(field, breakpoints) {
 
   const breakpoint = document.createElement('input');
   breakpoint.type = 'button';
-  breakpoint.title = 'breakpoint';
+  breakpoint.title = 'Toggle break point';
   breakpoint.classList.add('disassemblyButton', 'breakpoint');
-  breakpoint.onclick = toggleBreakpoint;
-  breakpoint.innerText = "\xA0";
+  breakpoint.onclick = () => toggleBreakpointAt(field.address);
   if (containsAddress(field.address, breakpoints)) {
     breakpoint.classList.add('set');
   }
 
+  const runTo = document.createElement('input');
+  runTo.type = 'button';
+  runTo.title = 'Run to here';
+  runTo.classList.add('disassemblyButton', 'runTo');
+  runTo.onclick = () => runToAddress(field.address);
+
   const instruction = document.createElement('span');
   instruction.setAttribute('class', 'instruction');
-  instruction.innerText = field.text + "\t";
+  instruction.innerHTML = field.text + "\t";
 
   const bytes = document.createElement('span');
   bytes.setAttribute('class', 'bytes');
@@ -237,6 +246,7 @@ function formatDisassemblyField(field, breakpoints) {
 
   li.setAttribute('data-address', formatLongAddress(field.address));
   li.appendChild(breakpoint);
+  li.appendChild(runTo);
   li.appendChild(instruction);
   li.appendChild(bytes);
   return li;
@@ -410,6 +420,10 @@ function httpGET(uri, responseHandler, errorHandler) {
 function httpPOST(uri, body) {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", uri, true);
-  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-  xhr.send(body);
+  if (body) {
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.send(body);
+  } else {
+    xhr.send();
+  }
 }

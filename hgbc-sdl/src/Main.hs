@@ -19,6 +19,7 @@ import           Data.Functor
 import           Data.IORef
 import           Data.Maybe
 import           Debugger.Disassemble
+import           Debugger.Types
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( getBank )
@@ -177,7 +178,7 @@ emulator rom allOptions@Config.Options {..} = do
         pauseAudio
 
   let
-    emulatorLoop = do
+    emulatorLoop runToAddress = do
       emulatorClock <- getEmulatorClock
       now           <- liftIO SDL.time
       let
@@ -192,7 +193,7 @@ emulator rom allOptions@Config.Options {..} = do
               r           <- disassemblyRequired address disassembly
               when r $ liftIO . writeIORef disassemblyRef =<< disassembleFromPC pc disassembly
               breakpoint <- liftIO $ H.lookup breakPoints address
-              pure (isJust breakpoint)
+              pure (Just address == runToAddress || isJust breakpoint)
             else pure True
 
           if breakRequired
@@ -200,7 +201,7 @@ emulator rom allOptions@Config.Options {..} = do
             else if steps .&. 0x1FFFFF == 0
               then do
                 when optionStats $ printPerformanceStats emulatorClock now
-                emulatorLoop
+                emulatorLoop runToAddress
               else if steps .&. 0xFFFF == 0
                 then do
                   notification <- Emulator.getNotification emulatorChannel
@@ -216,15 +217,17 @@ emulator rom allOptions@Config.Options {..} = do
       notifyPaused
       notification <- Emulator.waitNotification emulatorChannel
       case notification of
-        Emulator.QuitNotification     -> onQuit
-        Emulator.PauseNotification    -> resumeAudio >> notifyResumed >> emulatorLoop
-        Emulator.RunNotification      -> resumeAudio >> notifyResumed >> emulatorLoop
+        Emulator.QuitNotification  -> onQuit
+        Emulator.PauseNotification -> resumeAudio >> notifyResumed >> emulatorLoop Nothing
+        Emulator.RunNotification   -> resumeAudio >> notifyResumed >> emulatorLoop Nothing
+        Emulator.RunToNotification address ->
+          resumeAudio >> notifyResumed >> emulatorLoop (Just address)
         Emulator.StepNotification     -> step >> pauseLoop
         Emulator.StepOverNotification -> step >> pauseLoop
         Emulator.StepOutNotification  -> step >> pauseLoop
         Emulator.RestartNotification  -> reset >> pauseLoop
 
-  runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop)
+  runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop Nothing)
              emulatorState
 
  where

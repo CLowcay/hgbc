@@ -10,12 +10,14 @@ where
 
 import           Control.Concurrent.STM
 import           Control.Monad.IO.Class
+import           Debugger.Types
 
 -- | A notification for the emulator thread.
 data Notification
   = PauseNotification
   | QuitNotification
   | RunNotification
+  | RunToNotification LongAddress
   | StepNotification
   | StepOverNotification
   | StepOutNotification
