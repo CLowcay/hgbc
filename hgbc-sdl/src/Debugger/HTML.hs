@@ -60,6 +60,9 @@ disassembly :: BB.Builder
 disassembly = divclass
   "disassembly"
   [ h 4 "Disassembly"
-  , nav [input "text" "disassemblyAddress" 9 "0000:0000"]
+  , nav
+    [ input "text" "disassemblyAddress" 9 "0000:0000"
+    , button "toPC" "Scroll to the next instruction that will execute" ["Scroll to PC"]
+    ]
   , divclass "window" [ulid "disassemblyList" []]
   ]

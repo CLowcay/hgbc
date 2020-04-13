@@ -150,6 +150,11 @@ const disassemblyState = {
 };
 
 function initDisassemblyPanel() {
+  const gotoPC = document.getElementsByName('toPC');
+  gotoPC.forEach(element => {
+    element.onclick = () => setDisassemblyTop(disassemblyState.pc);
+  });
+
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('input', event => {
     setDisassemblyTop(parseLongAddress(
