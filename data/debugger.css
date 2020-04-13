@@ -35,6 +35,12 @@ nav {
   padding: 2px;
   background-color: var(--value-background);
 }
+nav button {
+  padding: 0;
+}
+nav.main button img {
+  vertical-align: bottom;
+}
 
 #rootContainer {
   display: grid;

@@ -36,11 +36,11 @@ debugHTML romFileName = html [header, main]
           HTTP.methodPost
           "/"
           "invisible_frame"
-          [ button "run"      "Run"
-          , button "step"     "Step"
-          , button "stepOver" "Step Through"
-          , button "stepOut"  "Step Out"
-          , button "restart"  "Restart"
+          [ button "run"      "Run/Pause"                     [img "svg/run"]
+          , button "step"     "Step (step into procedures)"   [img "svg/step"]
+          , button "stepOver" "Step (execute procedures)"     [img "svg/stepthrough"]
+          , button "stepOut"  "Step out of current procedure" [img "svg/stepout"]
+          , button "restart"  "Restart emulator"              [img "svg/reset"]
           ]
       ]
     , divclassid

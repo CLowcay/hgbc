@@ -25,7 +25,7 @@ function handleEmulatorStarted(event) {
   if (currentStatus !== 'started') {
     currentStatus = 'started';
     document.getElementsByName('run')
-      .forEach(element => element.innerText = 'Pause');
+      .forEach(element => element.firstChild.src = "svg/pause");
     document.getElementsByName('step').forEach(disableButton);
     document.getElementsByName('stepOver').forEach(disableButton);
     document.getElementsByName('stepOut').forEach(disableButton);
@@ -43,7 +43,7 @@ function handleEmulatorPaused(event) {
   if (currentStatus !== "paused") {
     currentStatus = "paused";
     document.getElementsByName('run')
-      .forEach(element => element.innerText = "Run");
+      .forEach(element => element.firstChild.src = "svg/run");
     document.getElementsByName('step').forEach(enableButton);
     document.getElementsByName('stepOver').forEach(enableButton);
     document.getElementsByName('stepOut').forEach(enableButton);
@@ -192,7 +192,7 @@ function handleBreakPointRemoved(event) {
 }
 
 function toggleBreakpointAt(address) {
-  const uri = '/breakpoint?bank=' + address.bank.toString(16) +
+  const uri = '/breakpoints?bank=' + address.bank.toString(16) +
     '&offset=' + address.offset.toString(16);
   if (this.classList.contains('set')) {
     httpPOST(uri, 'unset');
@@ -225,7 +225,7 @@ function formatDisassemblyField(field, breakpoints) {
   breakpoint.type = 'button';
   breakpoint.title = 'Toggle break point';
   breakpoint.classList.add('disassemblyButton', 'breakpoint');
-  breakpoint.onclick = () => toggleBreakpointAt(field.address);
+  breakpoint.onclick = () => toggleBreakpointAt.call(breakpoint, field.address);
   if (containsAddress(field.address, breakpoints)) {
     breakpoint.classList.add('set');
   }

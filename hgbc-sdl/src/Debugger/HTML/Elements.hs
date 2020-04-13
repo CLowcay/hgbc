@@ -25,6 +25,7 @@ module Debugger.HTML.Elements
   , divclass
   , divclassid
   , spanclass
+  , img
   , label
   , input
   , value
@@ -129,6 +130,9 @@ divclassid did c contents = "<div id=" <> did <> classes c <> ">" <> mconcat con
 spanclass :: BB.Builder -> [BB.Builder] -> BB.Builder
 spanclass c contents = "<span class=" <> c <> ">" <> mconcat contents <> "</span>"
 
+img :: BB.Builder -> BB.Builder
+img url = "<img src='" <> url <> "'>"
+
 label :: [BB.Builder] -> BB.Builder
 label contents = "<label>" <> mconcat contents <> "</label>"
 
@@ -179,5 +183,6 @@ form method action target contents =
     <> mconcat contents
     <> "</form>"
 
-button :: BB.Builder -> BB.Builder -> BB.Builder
-button name content = "<button name='" <> name <> "'>" <> content <> "</button>"
+button :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
+button name tt content =
+  "<button name='" <> name <> "' title='" <> tt <> "'>" <> mconcat content <> "</button>"

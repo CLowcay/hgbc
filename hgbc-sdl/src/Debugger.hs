@@ -125,8 +125,20 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             pure (httpError HTTP.status422 "Invalid command")
       method -> pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /"))
 
-    ["css"   ] -> pure debugCSS
-    ["js"    ] -> pure debugJS
+    ["css"] -> pure debugCSS
+    ["js" ] -> pure debugJS
+    ["svg", "run"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/play.svg", "../data/play.svg"])))
+    ["svg", "pause"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/pause.svg", "../data/pause.svg"])))
+    ["svg", "step"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/step.svg", "../data/step.svg"])))
+    ["svg", "stepout"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/stepout.svg", "../data/stepout.svg"])))
+    ["svg", "stepthrough"] -> pure
+      (svg (LB.fromStrict $(embedOneFileOf ["data/stepthrough.svg", "../data/stepthrough.svg"])))
+    ["svg", "reset"] -> pure
+      (svg (LB.fromStrict $(embedOneFileOf ["data/reset.svg", "../data/reset.svg"])))
 
     ["memory"] -> case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->
@@ -287,6 +299,9 @@ debugJS = Wai.responseLBS
   HTTP.status200
   [(HTTP.hContentType, "application/javascript")]
   (LB.fromStrict $(embedOneFileOf ["data/debugger.js","../data/debugger.js"]))
+
+svg :: LB.ByteString -> Wai.Response
+svg = Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "image/svg+xml")]
 
 getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
 getMemoryAt address memLines emulatorState = do
