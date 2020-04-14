@@ -1,5 +1,7 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BinaryLiterals #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NumericUnderscores #-}
 
 module Machine.GBC.DecodeSpec where
@@ -13,19 +15,129 @@ import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Util
 import           Test.Hspec
 
-instance MonadFetch (DisassembleT (StateT [Word8] Maybe)) where
-  nextByte = lift $ do
+newtype DecodeM a = DecodeM { runDecodeM :: StateT [Word8] Maybe a }
+  deriving (Monad, Applicative, Functor)
+
+instance MonadFetch DecodeM where
+  nextByte = DecodeM $ do
     b0 : bs <- get
     put bs
     pure b0
-  nextWord = lift $ do
+  nextWord = DecodeM $ do
     b0 : b1 : bs <- get
     put bs
     pure ((fromIntegral b1 .<<. 8) .|. fromIntegral b0)
 
+instance MonadGMBZ80 DecodeM where
+  type ExecuteResult DecodeM = String
+  ldrr r r' = pure ("LD " <> show r <> ", " <> show r')
+  ldrn r n = pure ("LD " <> show r <> ", " <> formatHex n)
+  ldrHL r = pure ("LD " <> show r <> ", (HL)")
+  ldHLr r = pure ("LD (HL), " <> show r)
+  ldHLn n = pure ("LD (HL), " <> formatHex n)
+  ldaBC = pure "LD A, (BC)"
+  ldaDE = pure "LD A, (DE)"
+  ldaC  = pure "LD A, (C)"
+  ldCa  = pure "LD (C), A"
+  ldan n = pure ("LD A, (FF" <> formatHex n <> ")")
+  ldna n = pure ("LD (FF" <> formatHex n <> "), A")
+  ldann nn = pure ("LD A, (" <> formatHex nn <> ")")
+  ldnna nn = pure ("LD (" <> formatHex nn <> "), A")
+  ldaHLI = pure "LD A, (HLI)"
+  ldaHLD = pure "LD A, (HLD)"
+  ldBCa  = pure "LD (BC), A"
+  ldDEa  = pure "LD (DE), A"
+  ldHLIa = pure "LD (HLI), A"
+  ldHLDa = pure "LD (HLD), A"
+  ldddnn dd nn = pure ("LD " <> show dd <> ", " <> formatHex nn)
+  ldSPHL = pure "LD SP, HL"
+  push qq = pure ("PUSH " <> show qq)
+  pop qq = pure ("POP " <> show qq)
+  ldhl i = pure ("LDHL SP, " <> formatHex i)
+  ldnnSP nn = pure ("LD (" <> formatHex nn <> "), SP")
+  addr r = pure ("ADD A, " <> show r)
+  addn w = pure ("ADD A, " <> formatHex w)
+  addhl = pure "ADD A, (HL)"
+  adcr r = pure ("ADC A, " <> show r)
+  adcn i = pure ("ADC A, " <> formatHex i)
+  adchl = pure "ADC A, (HL)"
+  subr r = pure ("SUB A, " <> show r)
+  subn i = pure ("SUB A, " <> formatHex i)
+  subhl = pure "SUB A, (HL)"
+  sbcr r = pure ("SBC A, " <> show r)
+  sbcn i = pure ("SBC A, " <> formatHex i)
+  sbchl = pure "SBC A, (HL)"
+  andr r = pure ("AND A, " <> show r)
+  andn i = pure ("AND A, " <> formatHex i)
+  andhl = pure "AND A, (HL)"
+  orr r = pure ("OR A, " <> show r)
+  orn i = pure ("OR A, " <> formatHex i)
+  orhl = pure "OR A, (HL)"
+  xorr r = pure ("XOR A, " <> show r)
+  xorn i = pure ("XOR A, " <> formatHex i)
+  xorhl = pure "XOR A, (HL)"
+  cpr r = pure ("CP A, " <> show r)
+  cpn i = pure ("CP A, " <> formatHex i)
+  cphl = pure "CP A, (HL)"
+  incr r = pure ("INC " <> show r)
+  inchl = pure "INC (HL)"
+  decr r = pure ("DEC " <> show r)
+  dechl = pure "DEC (HL)"
+  addhlss ss = pure ("ADD HL, " <> show ss)
+  addSP i = pure ("ADD SP, " <> formatHex i)
+  incss ss = pure ("INC " <> show ss)
+  decss ss = pure ("DEC " <> show ss)
+  rlca = pure "RLCA"
+  rla  = pure "RLA"
+  rrca = pure "RRCA"
+  rra  = pure "RRA"
+  rlcr r = pure ("RLC " <> show r)
+  rlchl = pure "RLC (HL)"
+  rlr r = pure ("RL " <> show r)
+  rlhl = pure "RL (HL)"
+  rrcr r = pure ("RRC " <> show r)
+  rrchl = pure "RRC (HL)"
+  rrr r = pure ("RR " <> show r)
+  rrhl = pure "RR (HL)"
+  slar r = pure ("SLA " <> show r)
+  slahl = pure "SLA (HL)"
+  srar r = pure ("SRA " <> show r)
+  srahl = pure "SRA (HL)"
+  srlr r = pure ("SRL " <> show r)
+  srlhl = pure "SRL (HL)"
+  swapr r = pure ("SWAP " <> show r)
+  swaphl = pure "SWAP (HL)"
+  bitr r i = pure ("BIT " <> show i <> ", " <> show r)
+  bithl i = pure ("BIT " <> show i <> ", (HL)")
+  setr r i = pure ("SET " <> show i <> ", " <> show r)
+  sethl i = pure ("SET " <> show i <> ", (HL)")
+  resr r i = pure ("RES " <> show i <> ", " <> show r)
+  reshl i = pure ("RES " <> show i <> ", (HL)")
+  jpnn nn = pure ("JP " <> formatHex nn)
+  jphl = pure "JP (HL)"
+  jpccnn cc nn = pure ("JP " <> show cc <> ", " <> formatHex nn)
+  jr i = pure ("JR " <> formatHex i)
+  jrcc cc i = pure ("JR " <> show cc <> ", " <> formatHex i)
+  call nn = pure ("CALL " <> formatHex nn)
+  callcc cc nn = pure ("CALL " <> show cc <> ", " <> formatHex nn)
+  ret  = pure "RET"
+  reti = pure "RETI"
+  retcc cc = pure ("RET " <> show cc)
+  rst i = pure ("RST " <> show i)
+  daa  = pure "DAA"
+  cpl  = pure "CPL"
+  nop  = pure "NOP"
+  ccf  = pure "CCF"
+  scf  = pure "SCF"
+  di   = pure "DI"
+  ei   = pure "EI"
+  halt = pure "HALT"
+  stop = pure "STOP"
+  invalid b = pure (".data " <> formatHex b)
+
 decodesTo :: [Word8] -> String -> IO ()
 decodesTo encoding expectedDecoding = do
-  let result = runStateT (runDisassembleT fetchAndExecute (const Nothing)) encoding
+  let result = runStateT (runDecodeM fetchAndExecute) encoding
   case result of
     Nothing                    -> expectationFailure "Failed to decode instruction"
     Just (decoding, remainder) -> do

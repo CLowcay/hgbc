@@ -50,6 +50,7 @@ import           Data.Bits
 import           Data.IORef
 import           Data.Int
 import           Data.Word
+import           Foreign.Ptr
 import           Foreign.Storable
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
@@ -104,30 +105,30 @@ instance Storable RegisterFile where
   sizeOf _ = 14
   alignment _ = 2
   peek ptr = do
-    regA      <- peekByteOff ptr offsetA
-    regB      <- peekByteOff ptr offsetB
-    regC      <- peekByteOff ptr offsetC
-    regD      <- peekByteOff ptr offsetD
-    regE      <- peekByteOff ptr offsetE
-    regF      <- peekByteOff ptr offsetF
-    regH      <- peekByteOff ptr offsetH
-    regL      <- peekByteOff ptr offsetL
-    regSP     <- peekByteOff ptr offsetSP
-    regPC     <- peekByteOff ptr offsetPC
-    regHidden <- peekByteOff ptr offsetHidden
+    regA      <- peekElemOff (castPtr ptr) offsetA
+    regB      <- peekElemOff (castPtr ptr) offsetB
+    regC      <- peekElemOff (castPtr ptr) offsetC
+    regD      <- peekElemOff (castPtr ptr) offsetD
+    regE      <- peekElemOff (castPtr ptr) offsetE
+    regF      <- peekElemOff (castPtr ptr) offsetF
+    regH      <- peekElemOff (castPtr ptr) offsetH
+    regL      <- peekElemOff (castPtr ptr) offsetL
+    regSP     <- peekElemOff (castPtr ptr) offsetSP
+    regPC     <- peekElemOff (castPtr ptr) offsetPC
+    regHidden <- peekElemOff (castPtr ptr) offsetHidden
     pure RegisterFile { .. }
   poke ptr RegisterFile {..} = do
-    pokeByteOff ptr offsetA      regA
-    pokeByteOff ptr offsetB      regB
-    pokeByteOff ptr offsetC      regC
-    pokeByteOff ptr offsetD      regD
-    pokeByteOff ptr offsetE      regE
-    pokeByteOff ptr offsetF      regF
-    pokeByteOff ptr offsetH      regH
-    pokeByteOff ptr offsetL      regL
-    pokeByteOff ptr offsetSP     regSP
-    pokeByteOff ptr offsetPC     regPC
-    pokeByteOff ptr offsetHidden regHidden
+    pokeElemOff (castPtr ptr) offsetA      regA
+    pokeElemOff (castPtr ptr) offsetB      regB
+    pokeElemOff (castPtr ptr) offsetC      regC
+    pokeElemOff (castPtr ptr) offsetD      regD
+    pokeElemOff (castPtr ptr) offsetE      regE
+    pokeElemOff (castPtr ptr) offsetF      regF
+    pokeElemOff (castPtr ptr) offsetH      regH
+    pokeElemOff (castPtr ptr) offsetL      regL
+    pokeElemOff (castPtr ptr) offsetSP     regSP
+    pokeElemOff (castPtr ptr) offsetPC     regPC
+    pokeElemOff (castPtr ptr) offsetHidden regHidden
 
 -- | The current CPU mode.
 data CPUMode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, Enum)
