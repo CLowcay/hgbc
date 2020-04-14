@@ -7,6 +7,8 @@
 
 module Debugger.Disassemble
   ( Field(..)
+  , fieldAddress
+  , fieldBytes
   , Disassembly
   , DisassemblyState(..)
   , lookupN
@@ -17,12 +19,16 @@ module Debugger.Disassemble
   )
 where
 
+import           Control.Category        hiding ( (.) )
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Aeson
 import           Data.Bits
 import           Data.ByteString.Short
+import           Data.Foldable
+import           Data.Function
 import           Data.Int
+import           Data.Maybe
 import           Data.String
 import           Data.Word
 import           Debugger.Types
@@ -32,20 +38,30 @@ import           Machine.GBC.Memory
 import           Machine.GBC.Util
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
-import qualified Data.IntMap.Strict            as IM
+import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
+import qualified Data.Vector.Storable          as VS
 
-data Field = Field {
-    fieldAddress :: !LongAddress
-  , fieldBytes   :: !ShortByteString
-  , fieldText    :: !T.Text
-  } deriving (Eq, Ord, Show)
+type Overlap = Bool
+data FieldData = Instruction T.Text | Data deriving (Eq, Ord, Show)
+data Field =
+  Field LongAddress ShortByteString Overlap FieldData
+  deriving (Eq, Ord, Show)
+
+fieldAddress :: Field -> LongAddress
+fieldAddress (Field address _ _ _) = address
+
+fieldBytes :: Field -> ShortByteString
+fieldBytes (Field _ bytes _ _) = bytes
 
 instance ToJSON Field where
-  toJSON field = object
-    [ "address" .= fieldAddress field
-    , "bytes" .= unwords (formatHex <$> SB.unpack (fieldBytes field))
-    , "text" .= fieldText field
+  toJSON (Field address bytes overlap fdata) = object
+    [ "address" .= address
+    , "bytes" .= unwords (formatHex <$> SB.unpack bytes)
+    , "overlap" .= overlap
+    , "text" .= case fdata of
+      Data             -> "db"
+      Instruction text -> text
     ]
 
 data NextAction
@@ -60,9 +76,51 @@ data NextAction
 newtype Disassembly = Disassembly (IM.IntMap Field)
   deriving (Eq, Ord, Show, Semigroup, Monoid)
 
-insert :: Disassembly -> LongAddress -> Field -> Disassembly
-insert (Disassembly m) longAddress field =
-  Disassembly (IM.insert (encodeAddress longAddress) field m)
+insert :: Disassembly -> Field -> Disassembly
+insert (Disassembly m) field = Disassembly
+  ( m
+  & (   deleteAll overlappingDataFields
+    >>> insertAll (concat (truncateField <$> overlappingDataFields))
+    >>> IM.insert (key field)
+                  (if not (all isData overlappingFields) then setOverlapping field else field)
+    )
+  )
+ where
+  Field address bytes _ _ = field
+  nextAddress             = address `addOffset` SB.length bytes
+  deleteAll               = flip (foldl' (\m' f -> IM.delete (key f) m'))
+  insertAll               = flip (foldl' (\m' f -> IM.insert (key f) f m'))
+  key f = let Field a _ _ _ = f in encodeAddress a
+  isData (Field _ _ _ Data) = True
+  isData _                  = False
+  isOverlapping (Field fAddress fBytes _ _) =
+    let fNextAddress = fAddress `addOffset` SB.length fBytes
+    in  not (nextAddress <= fAddress || fNextAddress <= address)
+  overlappingDataFields = filter isData overlappingFields
+  overlappingFields =
+    let (before, mv, after) = IM.splitLookup (key field) m
+        overlappingBefore   = takeWhile isOverlapping (snd <$> IM.toDescList before)
+        overlappingAfter    = takeWhile isOverlapping (snd <$> IM.toAscList after)
+    in  case mv of
+          Nothing -> overlappingBefore ++ overlappingAfter
+          Just v  -> v : overlappingBefore ++ overlappingAfter
+
+  setOverlapping f = let Field a b _ fieldData = f in Field a b True fieldData
+  addOffset (LongAddress bank offset0) offset = LongAddress bank (offset0 + fromIntegral offset)
+  minus (LongAddress _ offset0) (LongAddress _ offset1) =
+    fromIntegral offset0 - fromIntegral offset1
+  truncateField f =
+    let
+      Field fAddress fBytes o d = f
+      leftPart                  = if address > fAddress
+        then Just (Field fAddress (unpacked (take (address `minus` fAddress)) fBytes) o d)
+        else Nothing
+      rightPart = if nextAddress < (fAddress `addOffset` SB.length fBytes)
+        then Just (Field nextAddress (unpacked (drop (nextAddress `minus` fAddress)) fBytes) o d)
+        else Nothing
+    in
+      catMaybes [leftPart, rightPart]
+  unpacked f = SB.pack . f . SB.unpack
 
 encodeAddress :: LongAddress -> Int
 encodeAddress (LongAddress bank offset) =
@@ -97,14 +155,16 @@ data DisassemblyState = DisassemblyState {
 
 disassemblyRequired :: HasMemory env => LongAddress -> Disassembly -> ReaderT env IO Bool
 disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disassembly address of
-  Nothing                -> pure True
-  Just (Field _ bytes _) -> do
-    actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
-    pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
+  Nothing                          -> pure True
+  Just (Field _ bytes _ fieldData) -> case fieldData of
+    Data -> pure True
+    _    -> do
+      actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
+      pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
 disassembleROM :: Memory -> IO Disassembly
 disassembleROM memory0 =
-  disassembleFrom entryPoint mempty
+  disassembleFrom entryPoint (bootSubstrate <> substrate)
     >>= disassembleFrom (romFrom 0x00)
     >>= disassembleFrom (romFrom 0x08)
     >>= disassembleFrom (romFrom 0x10)
@@ -120,7 +180,26 @@ disassembleROM memory0 =
     >>= disassembleFrom (romFrom 0x60)
  where
   romFrom origin = DisassemblyState origin True [] memory0
-  entryPoint = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
+  entryPoint    = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
+  bootSubstrate = case getBootROMData memory0 of
+    Nothing      -> mempty
+    Just bootROM -> Disassembly
+      (IM.fromList (filter (isAtBootROMAddress . snd) (toData bootROMAddressing bootROM)))
+  isAtBootROMAddress (Field (LongAddress bank offset) _ _ _) =
+    bank == 0xFFFF && (offset < 0x100 || offset >= 0x200)
+  substrate = Disassembly (IM.fromList (toData romAddressing (getROMData memory0)))
+  toData addressing rawData =
+    zipWith (\address bytes -> (encodeAddress address, Field address (SB.pack bytes) False Data))
+            addressing
+      $ chunksOf 16 (VS.toList rawData)
+  bootROMAddressing = LongAddress 0xFFFF <$> [0, 0x10 .. 0x1000]
+  romAddressing =
+    (LongAddress 0 <$> [0, 0x10 .. 0x3FFF])
+      ++ [ LongAddress bank offset | bank <- [1 ..], offset <- [0x4000, 0x4010 .. 0x7FFF] ]
+  chunksOf n = go
+   where
+    go [] = []
+    go xs = let (r, rs) = splitAt n xs in r : go rs
 
 disassembleFromPC :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
 disassembleFromPC pc disassembly = do
@@ -134,10 +213,11 @@ disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
     addressLong <- currentAddressLong
     (action, r) <- fetchAndExecute
     bs          <- currentInstructionBytes
-    if (fieldBytes <$> lookup accum addressLong) == Just bs
+    let oldDisassembly = lookup accum addressLong
+    if noUpdateRequired oldDisassembly bs
       then pure accum
       else do
-        let accum' = insert accum addressLong (Field addressLong bs r)
+        let accum' = insert accum (Field addressLong bs False (Instruction r))
         case action of
           Continue   -> go accum'
           Jump    nn -> modifyAddress (const nn) >> go accum'
@@ -150,6 +230,10 @@ disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
             go =<< liftIO
               (disassembleFrom (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
           Stop -> pure accum'
+
+  noUpdateRequired Nothing                          _        = False
+  noUpdateRequired (Just (Field _ _        _ Data)) _        = False
+  noUpdateRequired (Just (Field _ oldBytes _ _   )) newBytes = oldBytes == newBytes
 
 currentAddressLong :: StateT DisassemblyState IO LongAddress
 currentAddressLong = do
@@ -321,4 +405,4 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   ei   = pure (Continue, "EI")
   halt = pure (Continue, "HALT")
   stop = pure (Continue, "STOP")
-  invalid b = pure (Stop, "db " <> fromString (formatHex b))
+  invalid b = pure (Stop, "db" <> fromString (formatHex b))

@@ -184,6 +184,14 @@ div.disassembly span.instruction {
   width: 16ch;
 }
 div.disassembly span.bytes {
+  display: inline-block;
+  width: 16ch;
+  color: var(--text-unimportant);
+}
+div.disassembly span.data {
+  color: var(--text-unimportant);
+}
+div.disassembly span.overlapping {
   color: var(--text-unimportant);
 }
 div.disassembly ul {

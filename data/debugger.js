@@ -241,19 +241,38 @@ function formatDisassemblyField(field, breakpoints) {
   runTo.classList.add('disassemblyButton', 'runTo');
   runTo.onclick = () => runToAddress(field.address);
 
-  const instruction = document.createElement('span');
-  instruction.setAttribute('class', 'instruction');
-  instruction.innerHTML = field.text + "\t";
-
-  const bytes = document.createElement('span');
-  bytes.setAttribute('class', 'bytes');
-  bytes.innerText = "; " + field.bytes
-
   li.setAttribute('data-address', formatLongAddress(field.address));
   li.appendChild(breakpoint);
   li.appendChild(runTo);
-  li.appendChild(instruction);
-  li.appendChild(bytes);
+
+  const instruction = document.createElement('span');
+  if (field.text === 'db') {
+    instruction.classList.add('data');
+    instruction.innerText = field.text + " " + field.bytes;
+    li.appendChild(instruction);
+
+  } else {
+    instruction.classList.add('instruction');
+    instruction.innerText = field.text + "\t";
+
+    const bytes = document.createElement('span');
+    bytes.classList.add('bytes');
+    bytes.innerText = '; ' + field.bytes
+
+    li.appendChild(instruction);
+    li.appendChild(bytes);
+  }
+
+  if (field.overlap) {
+    instruction.innerText = '; ' + instruction.innerText;
+    instruction.classList.add('overlapping');
+    
+    const overlapping = document.createElement('span');
+    overlapping.classList.add('overlapping');
+    overlapping.innerText = "\t(overlapping)";
+    li.appendChild(overlapping);
+  }
+
   return li;
 }
 

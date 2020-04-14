@@ -8,6 +8,8 @@ module Machine.GBC.Memory
   , initMemory
   , initMemoryForROM
   , hasBootROM
+  , getROMData
+  , getBootROMData
   , getBank
   , getRamGate
   , readByteLong
@@ -196,6 +198,15 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
 getROMHeader :: Memory -> Header
 getROMHeader Memory {..} = header
 
+-- | Get all of the ROM bytes.
+getROMData :: Memory -> VS.Vector Word8
+getROMData Memory {..} = rom
+
+-- | Get all of the boot ROM bytes.
+getBootROMData :: Memory -> Maybe (VS.Vector Word8)
+getBootROMData Memory {..} = VS.take bootROMLength <$> bootROM
+
+-- | Check if a BOOT ROM is present.
 hasBootROM :: Memory -> Bool
 hasBootROM Memory {..} = isJust bootROM
 
