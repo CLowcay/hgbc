@@ -253,7 +253,8 @@ function formatDisassemblyField(field, breakpoints) {
 
   } else {
     instruction.classList.add('instruction');
-    instruction.innerText = field.text + "\t";
+    const parameters = field.p.map(x => x.text).join(", ");
+    instruction.innerText = field.text + (parameters ? " " + parameters : "") + "\t";
 
     const bytes = document.createElement('span');
     bytes.classList.add('bytes');
@@ -266,7 +267,7 @@ function formatDisassemblyField(field, breakpoints) {
   if (field.overlap) {
     instruction.innerText = '; ' + instruction.innerText;
     instruction.classList.add('overlapping');
-    
+
     const overlapping = document.createElement('span');
     overlapping.classList.add('overlapping');
     overlapping.innerText = "\t(overlapping)";

@@ -43,26 +43,48 @@ import qualified Data.Text                     as T
 import qualified Data.Vector.Storable          as VS
 
 type Overlap = Bool
-data FieldData = Instruction T.Text | Data deriving (Eq, Ord, Show)
 data Field =
-  Field LongAddress ShortByteString Overlap FieldData
+  Field LongAddress ShortByteString Overlap Instruction
   deriving (Eq, Ord, Show)
+
+data Instruction
+  = Data
+  | Instruction0 T.Text
+  | Instruction1 T.Text Parameter
+  | Instruction2 T.Text Parameter Parameter
+  deriving (Eq, Ord, Show)
+data Parameter
+  = Constant T.Text
+  | Address Word16
+  | AtAddress Word16
+  | RelativeAddress Int8
+  deriving (Eq, Ord, Show)
+
+instance ToJSON Parameter where
+  toJSON (Constant text   ) = object ["text" .= text]
+  toJSON (Address  address) = object ["text" .= ('$' : formatHex address), "address" .= address]
+  toJSON (AtAddress address) =
+    object ["text" .= ("($" ++ formatHex address ++ ")"), "atAddress" .= address]
+  toJSON (RelativeAddress relativeAddress) =
+    object ["text" .= show relativeAddress, "relAddress" .= relativeAddress]
+
+instance ToJSON Field where
+  toJSON (Field address bytes overlap fdata) =
+    object
+      $ ("address" .= address)
+      : ("bytes" .= unwords (formatHex <$> SB.unpack bytes))
+      : ("overlap" .= overlap)
+      : case fdata of
+          Data                    -> ["text" .= ("db" :: T.Text)]
+          Instruction0 text       -> ["text" .= text, "p" .= ([] :: [String])]
+          Instruction1 text p1    -> ["text" .= text, "p" .= [p1]]
+          Instruction2 text p1 p2 -> ["text" .= text, "p" .= [p1, p2]]
 
 fieldAddress :: Field -> LongAddress
 fieldAddress (Field address _ _ _) = address
 
 fieldBytes :: Field -> ShortByteString
 fieldBytes (Field _ bytes _ _) = bytes
-
-instance ToJSON Field where
-  toJSON (Field address bytes overlap fdata) = object
-    [ "address" .= address
-    , "bytes" .= unwords (formatHex <$> SB.unpack bytes)
-    , "overlap" .= overlap
-    , "text" .= case fdata of
-      Data             -> "db"
-      Instruction text -> text
-    ]
 
 data NextAction
   = Continue
@@ -217,7 +239,7 @@ disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
     if noUpdateRequired oldDisassembly bs
       then pure accum
       else do
-        let accum' = insert accum (Field addressLong bs False (Instruction r))
+        let accum' = insert accum (Field addressLong bs False r)
         case action of
           Continue   -> go accum'
           Jump    nn -> modifyAddress (const nn) >> go accum'
@@ -255,32 +277,44 @@ modifyAddress f = do
   s <- get
   put (s { disassemblyPC = f (disassemblyPC s) })
 
-formatR8 :: Register8 -> T.Text
-formatR8 RegA = "A"
-formatR8 RegB = "B"
-formatR8 RegC = "C"
-formatR8 RegD = "D"
-formatR8 RegE = "E"
-formatR8 RegH = "H"
-formatR8 RegL = "L"
+formatR8 :: Register8 -> Parameter
+formatR8 RegA = Constant "A"
+formatR8 RegB = Constant "B"
+formatR8 RegC = Constant "C"
+formatR8 RegD = Constant "D"
+formatR8 RegE = Constant "E"
+formatR8 RegH = Constant "H"
+formatR8 RegL = Constant "L"
 
-formatR16 :: Register16 -> T.Text
-formatR16 RegBC = "BC"
-formatR16 RegDE = "DE"
-formatR16 RegHL = "HL"
-formatR16 RegSP = "SP"
+formatR16 :: Register16 -> Parameter
+formatR16 RegBC = Constant "BC"
+formatR16 RegDE = Constant "DE"
+formatR16 RegHL = Constant "HL"
+formatR16 RegSP = Constant "SP"
 
-formatRpp :: RegisterPushPop -> T.Text
-formatRpp PushPopAF = "AF"
-formatRpp PushPopBC = "BC"
-formatRpp PushPopDE = "DE"
-formatRpp PushPopHL = "HL"
+formatRpp :: RegisterPushPop -> Parameter
+formatRpp PushPopAF = Constant "AF"
+formatRpp PushPopBC = Constant "BC"
+formatRpp PushPopDE = Constant "DE"
+formatRpp PushPopHL = Constant "HL"
 
-formatCC :: ConditionCode -> T.Text
-formatCC CondC  = "C"
-formatCC CondNC = "NC"
-formatCC CondZ  = "Z"
-formatCC CondNZ = "NZ"
+formatCC :: ConditionCode -> Parameter
+formatCC CondC  = Constant "C"
+formatCC CondNC = Constant "NC"
+formatCC CondZ  = Constant "Z"
+formatCC CondNZ = Constant "NZ"
+
+formatW8 :: Word8 -> Parameter
+formatW8 i = Constant (fromString ('$' : formatHex i))
+
+formatB8 :: Word8 -> Parameter
+formatB8 i = Constant (fromString (show i))
+
+formatI8 :: Int8 -> Parameter
+formatI8 i = Constant (fromString (show i))
+
+formatA8 :: Word8 -> Parameter
+formatA8 w = AtAddress (0xFF00 .|. fromIntegral w)
 
 instance MonadFetch (StateT DisassemblyState IO) where
   nextByte = do
@@ -301,108 +335,108 @@ instance MonadFetch (StateT DisassemblyState IO) where
     pure byte
 
 instance MonadGMBZ80 (StateT DisassemblyState IO) where
-  type ExecuteResult (StateT DisassemblyState IO) = (NextAction, T.Text)
-  ldrr r r' = pure (Continue, "LD " <> formatR8 r <> ", " <> formatR8 r')
-  ldrn r n = pure (Continue, "LD " <> formatR8 r <> ", " <> fromString (formatHex n))
-  ldrHL r = pure (Continue, "LD " <> formatR8 r <> ", (HL)")
-  ldHLr r = pure (Continue, "LD (HL), " <> formatR8 r)
-  ldHLn n = pure (Continue, "LD (HL), " <> fromString (formatHex n))
-  ldaBC = pure (Continue, "LD A, (BC)")
-  ldaDE = pure (Continue, "LD A, (DE)")
-  ldaC  = pure (Continue, "LD A, (C)")
-  ldCa  = pure (Continue, "LD (C), A")
-  ldan n = pure (Continue, "LD A, (FF" <> fromString (formatHex n) <> ")")
-  ldna n = pure (Continue, "LD (FF" <> fromString (formatHex n) <> "), A")
-  ldann nn = pure (Continue, "LD A, (" <> fromString (formatHex nn) <> ")")
-  ldnna nn = pure (Continue, "LD (" <> fromString (formatHex nn) <> "), A")
-  ldaHLI = pure (Continue, "LD A, (HLI)")
-  ldaHLD = pure (Continue, "LD A, (HLD)")
-  ldBCa  = pure (Continue, "LD (BC), A")
-  ldDEa  = pure (Continue, "LD (DE), A")
-  ldHLIa = pure (Continue, "LD (HLI), A")
-  ldHLDa = pure (Continue, "LD (HLD), A")
-  ldddnn dd nn = pure (Continue, "LD " <> formatR16 dd <> ", " <> fromString (formatHex nn))
-  ldSPHL = pure (Continue, "LD SP, HL")
-  push qq = pure (Continue, "PUSH " <> formatRpp qq)
-  pop qq = pure (Continue, "POP " <> formatRpp qq)
-  ldhl i = pure (Continue, "LDHL SP, " <> fromString (formatHex i))
-  ldnnSP nn = pure (Continue, "LD (" <> fromString (formatHex nn) <> "), SP")
-  addr r = pure (Continue, "ADD A, " <> formatR8 r)
-  addn w = pure (Continue, "ADD A, " <> fromString (formatHex w))
-  addhl = pure (Continue, "ADD A, (HL)")
-  adcr r = pure (Continue, "ADC A, " <> formatR8 r)
-  adcn i = pure (Continue, "ADC A, " <> fromString (formatHex i))
-  adchl = pure (Continue, "ADC A, (HL)")
-  subr r = pure (Continue, "SUB A, " <> formatR8 r)
-  subn i = pure (Continue, "SUB A, " <> fromString (formatHex i))
-  subhl = pure (Continue, "SUB A, (HL)")
-  sbcr r = pure (Continue, "SBC A, " <> formatR8 r)
-  sbcn i = pure (Continue, "SBC A, " <> fromString (formatHex i))
-  sbchl = pure (Continue, "SBC A, (HL)")
-  andr r = pure (Continue, "AND A, " <> formatR8 r)
-  andn i = pure (Continue, "AND A, " <> fromString (formatHex i))
-  andhl = pure (Continue, "AND A, (HL)")
-  orr r = pure (Continue, "OR A, " <> formatR8 r)
-  orn i = pure (Continue, "OR A, " <> fromString (formatHex i))
-  orhl = pure (Continue, "OR A, (HL)")
-  xorr r = pure (Continue, "XOR A, " <> formatR8 r)
-  xorn i = pure (Continue, "XOR A, " <> fromString (formatHex i))
-  xorhl = pure (Continue, "XOR A, (HL)")
-  cpr r = pure (Continue, "CP A, " <> formatR8 r)
-  cpn i = pure (Continue, "CP A, " <> fromString (formatHex i))
-  cphl = pure (Continue, "CP A, (HL)")
-  incr r = pure (Continue, "INC " <> formatR8 r)
-  inchl = pure (Continue, "INC (HL)")
-  decr r = pure (Continue, "DEC " <> formatR8 r)
-  dechl = pure (Continue, "DEC (HL)")
-  addhlss ss = pure (Continue, "ADD HL, " <> formatR16 ss)
-  addSP i = pure (Continue, "ADD SP, " <> fromString (formatHex i))
-  incss ss = pure (Continue, "INC " <> formatR16 ss)
-  decss ss = pure (Continue, "DEC " <> formatR16 ss)
-  rlca = pure (Continue, "RLCA")
-  rla  = pure (Continue, "RLA")
-  rrca = pure (Continue, "RRCA")
-  rra  = pure (Continue, "RRA")
-  rlcr r = pure (Continue, "RLC " <> formatR8 r)
-  rlchl = pure (Continue, "RLC (HL)")
-  rlr r = pure (Continue, "RL " <> formatR8 r)
-  rlhl = pure (Continue, "RL (HL)")
-  rrcr r = pure (Continue, "RRC " <> formatR8 r)
-  rrchl = pure (Continue, "RRC (HL)")
-  rrr r = pure (Continue, "RR " <> formatR8 r)
-  rrhl = pure (Continue, "RR (HL)")
-  slar r = pure (Continue, "SLA " <> formatR8 r)
-  slahl = pure (Continue, "SLA (HL)")
-  srar r = pure (Continue, "SRA " <> formatR8 r)
-  srahl = pure (Continue, "SRA (HL)")
-  srlr r = pure (Continue, "SRL " <> formatR8 r)
-  srlhl = pure (Continue, "SRL (HL)")
-  swapr r = pure (Continue, "SWAP " <> formatR8 r)
-  swaphl = pure (Continue, "SWAP (HL)")
-  bitr r i = pure (Continue, "BIT " <> fromString (show i) <> ", " <> formatR8 r)
-  bithl i = pure (Continue, "BIT " <> fromString (show i) <> ", (HL)")
-  setr r i = pure (Continue, "SET " <> fromString (show i) <> ", " <> formatR8 r)
-  sethl i = pure (Continue, "SET " <> fromString (show i) <> ", (HL)")
-  resr r i = pure (Continue, "RES " <> fromString (show i) <> ", " <> formatR8 r)
-  reshl i = pure (Continue, "RES " <> fromString (show i) <> ", (HL)")
-  jpnn nn = pure (Jump nn, "JP " <> fromString (formatHex nn))
-  jphl = pure (Stop, "JP (HL)")
-  jpccnn cc nn = pure (Fork nn, "JP " <> formatCC cc <> ", " <> fromString (formatHex nn))
-  jr i = pure (JumpRel i, "JR " <> fromString (formatHex i))
-  jrcc cc i = pure (ForkRel i, "JR " <> formatCC cc <> ", " <> fromString (formatHex i))
-  call nn = pure (Fork nn, "CALL " <> fromString (formatHex nn))
-  callcc cc nn = pure (Fork nn, "CALL " <> formatCC cc <> ", " <> fromString (formatHex nn))
-  ret  = pure (Stop, "RET")
-  reti = pure (Stop, "RETI")
-  retcc cc = pure (Continue, "RET " <> formatCC cc)
-  rst i = pure (Jump (8 * fromIntegral i), "RST " <> fromString (show i))
-  daa  = pure (Continue, "DAA")
-  cpl  = pure (Continue, "CPL")
-  nop  = pure (Continue, "NOP")
-  ccf  = pure (Continue, "CCF")
-  scf  = pure (Continue, "SCF")
-  di   = pure (Continue, "DI")
-  ei   = pure (Continue, "EI")
-  halt = pure (Continue, "HALT")
-  stop = pure (Continue, "STOP")
-  invalid b = pure (Stop, "db" <> fromString (formatHex b))
+  type ExecuteResult (StateT DisassemblyState IO) = (NextAction, Instruction)
+  ldrr r r' = pure (Continue, Instruction2 "LD" (formatR8 r) (formatR8 r'))
+  ldrn r n = pure (Continue, Instruction2 "LD" (formatR8 r) (formatW8 n))
+  ldrHL r = pure (Continue, Instruction2 "LD" (formatR8 r) (Constant "(HL)"))
+  ldHLr r = pure (Continue, Instruction2 "LD" (Constant "(HL)") (formatR8 r))
+  ldHLn n = pure (Continue, Instruction2 "LD" (Constant "(HL)") (formatW8 n))
+  ldaBC = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(BC)"))
+  ldaDE = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(DE)"))
+  ldaC  = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(C)"))
+  ldCa  = pure (Continue, Instruction2 "LD" (Constant "(C)") (Constant "A"))
+  ldan n = pure (Continue, Instruction2 "LD" (Constant "A") (formatA8 n))
+  ldna n = pure (Continue, Instruction2 "LD" (formatA8 n) (Constant "A"))
+  ldann nn = pure (Continue, Instruction2 "LD" (Constant "A") (AtAddress nn))
+  ldnna nn = pure (Continue, Instruction2 "LD" (AtAddress nn) (Constant "A"))
+  ldaHLI = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(HLI)"))
+  ldaHLD = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(HLD)"))
+  ldBCa  = pure (Continue, Instruction2 "LD" (Constant "(BC)") (Constant "A"))
+  ldDEa  = pure (Continue, Instruction2 "LD" (Constant "(DE)") (Constant "A"))
+  ldHLIa = pure (Continue, Instruction2 "LD" (Constant "(HLI)") (Constant "A"))
+  ldHLDa = pure (Continue, Instruction2 "LD" (Constant "(HLD)") (Constant "A"))
+  ldddnn dd nn = pure (Continue, Instruction2 "LD" (formatR16 dd) (Address nn))
+  ldSPHL = pure (Continue, Instruction2 "LD" (Constant "SP") (Constant "HL"))
+  push qq = pure (Continue, Instruction1 "PUSH" (formatRpp qq))
+  pop qq = pure (Continue, Instruction1 "POP" (formatRpp qq))
+  ldhl i = pure (Continue, Instruction2 "LDHL" (Constant "SP") (formatI8 i))
+  ldnnSP nn = pure (Continue, Instruction2 "LD" (AtAddress nn) (Constant "SP"))
+  addr r = pure (Continue, Instruction2 "ADD" (Constant "A") (formatR8 r))
+  addn w = pure (Continue, Instruction2 "ADD" (Constant "A") (formatW8 w))
+  addhl = pure (Continue, Instruction2 "ADD" (Constant "A") (Constant "(HL)"))
+  adcr r = pure (Continue, Instruction2 "ADC" (Constant "A") (formatR8 r))
+  adcn i = pure (Continue, Instruction2 "ADC" (Constant "A") (formatW8 i))
+  adchl = pure (Continue, Instruction2 "ADC" (Constant "A") (Constant "(HL)"))
+  subr r = pure (Continue, Instruction2 "SUB" (Constant "A") (formatR8 r))
+  subn i = pure (Continue, Instruction2 "SUB" (Constant "A") (formatW8 i))
+  subhl = pure (Continue, Instruction2 "SUB" (Constant "A") (Constant "(HL)"))
+  sbcr r = pure (Continue, Instruction2 "SBC" (Constant "A") (formatR8 r))
+  sbcn i = pure (Continue, Instruction2 "SBC" (Constant "A") (formatW8 i))
+  sbchl = pure (Continue, Instruction2 "SBC" (Constant "A") (Constant "(HL)"))
+  andr r = pure (Continue, Instruction2 "AND" (Constant "A") (formatR8 r))
+  andn i = pure (Continue, Instruction2 "AND" (Constant "A") (formatW8 i))
+  andhl = pure (Continue, Instruction2 "AND" (Constant "A") (Constant "(HL)"))
+  orr r = pure (Continue, Instruction2 "OR" (Constant "A") (formatR8 r))
+  orn i = pure (Continue, Instruction2 "OR" (Constant "A") (formatW8 i))
+  orhl = pure (Continue, Instruction2 "OR" (Constant "A") (Constant "(HL)"))
+  xorr r = pure (Continue, Instruction2 "XOR" (Constant "A") (formatR8 r))
+  xorn i = pure (Continue, Instruction2 "XOR" (Constant "A") (formatW8 i))
+  xorhl = pure (Continue, Instruction2 "XOR" (Constant "A") (Constant "(HL)"))
+  cpr r = pure (Continue, Instruction2 "CP" (Constant "A") (formatR8 r))
+  cpn i = pure (Continue, Instruction2 "CP" (Constant "A") (formatW8 i))
+  cphl = pure (Continue, Instruction2 "CP" (Constant "A") (Constant "(HL)"))
+  incr r = pure (Continue, Instruction1 "INC" (formatR8 r))
+  inchl = pure (Continue, Instruction1 "INC" (Constant "(HL)"))
+  decr r = pure (Continue, Instruction1 "DEC" (formatR8 r))
+  dechl = pure (Continue, Instruction1 "DEC" (Constant "(HL)"))
+  addhlss ss = pure (Continue, Instruction2 "ADD" (Constant "HL") (formatR16 ss))
+  addSP i = pure (Continue, Instruction2 "ADD" (Constant "SP") (formatI8 i))
+  incss ss = pure (Continue, Instruction1 "INC" (formatR16 ss))
+  decss ss = pure (Continue, Instruction1 "DEC" (formatR16 ss))
+  rlca = pure (Continue, Instruction0 "RLCA")
+  rla  = pure (Continue, Instruction0 "RLA")
+  rrca = pure (Continue, Instruction0 "RRCA")
+  rra  = pure (Continue, Instruction0 "RRA")
+  rlcr r = pure (Continue, Instruction1 "RLC" (formatR8 r))
+  rlchl = pure (Continue, Instruction1 "RLC" (Constant "(HL)"))
+  rlr r = pure (Continue, Instruction1 "RL " (formatR8 r))
+  rlhl = pure (Continue, Instruction1 "RL " (Constant "(HL)"))
+  rrcr r = pure (Continue, Instruction1 "RRC" (formatR8 r))
+  rrchl = pure (Continue, Instruction1 "RRC" (Constant "(HL)"))
+  rrr r = pure (Continue, Instruction1 "RR " (formatR8 r))
+  rrhl = pure (Continue, Instruction1 "RR " (Constant "(HL)"))
+  slar r = pure (Continue, Instruction1 "SLA" (formatR8 r))
+  slahl = pure (Continue, Instruction1 "SLA" (Constant "(HL)"))
+  srar r = pure (Continue, Instruction1 "SRA" (formatR8 r))
+  srahl = pure (Continue, Instruction1 "SRA" (Constant "(HL)"))
+  srlr r = pure (Continue, Instruction1 "SRL" (formatR8 r))
+  srlhl = pure (Continue, Instruction1 "SRL" (Constant "(HL)"))
+  swapr r = pure (Continue, Instruction1 "SWAP" (formatR8 r))
+  swaphl = pure (Continue, Instruction1 "SWAP" (Constant "(HL)"))
+  bitr r i = pure (Continue, Instruction2 "BIT" (formatB8 i) (formatR8 r))
+  bithl i = pure (Continue, Instruction2 "BIT" (formatB8 i) (Constant "(HL)"))
+  setr r i = pure (Continue, Instruction2 "SET" (formatB8 i) (formatR8 r))
+  sethl i = pure (Continue, Instruction2 "SET" (formatB8 i) (Constant "(HL)"))
+  resr r i = pure (Continue, Instruction2 "RES" (formatB8 i) (formatR8 r))
+  reshl i = pure (Continue, Instruction2 "RES" (formatB8 i) (Constant "(HL)"))
+  jpnn nn = pure (Jump nn, Instruction1 "JP" (Address nn))
+  jphl = pure (Stop, Instruction1 "JP" (Constant "(HL)"))
+  jpccnn cc nn = pure (Fork nn, Instruction2 "JP" (formatCC cc) (Address nn))
+  jr i = pure (JumpRel i, Instruction1 "JR" (RelativeAddress i))
+  jrcc cc i = pure (ForkRel i, Instruction2 "JR" (formatCC cc) (RelativeAddress i))
+  call nn = pure (Fork nn, Instruction1 "CALL" (Address nn))
+  callcc cc nn = pure (Fork nn, Instruction2 "CALL" (formatCC cc) (Address nn))
+  ret  = pure (Stop, Instruction0 "RET")
+  reti = pure (Stop, Instruction0 "RETI")
+  retcc cc = pure (Continue, Instruction1 "RET " (formatCC cc))
+  rst i = pure (Jump (8 * fromIntegral i), Instruction1 "RST " (formatB8 i))
+  daa  = pure (Continue, Instruction0 "DAA")
+  cpl  = pure (Continue, Instruction0 "CPL")
+  nop  = pure (Continue, Instruction0 "NOP")
+  ccf  = pure (Continue, Instruction0 "CCF")
+  scf  = pure (Continue, Instruction0 "SCF")
+  di   = pure (Continue, Instruction0 "DI")
+  ei   = pure (Continue, Instruction0 "EI")
+  halt = pure (Continue, Instruction0 "HALT")
+  stop = pure (Continue, Instruction0 "STOP")
+  invalid b = pure (Stop, Instruction1 "INVALID" (formatW8 b))
