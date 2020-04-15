@@ -10,7 +10,7 @@ import qualified Data.ByteString.Builder       as BB
 
 cpuRegisters :: BB.Builder
 cpuRegisters = table
-  "cpu"
+  "'panel cpu'"
   [tr [th 1 ["CPU Registers"]]]
   [ tr [td ["AF ", value [field "rA" "00", field "rF" "00"]]]
   , tr [td ["BC ", value [field "rB" "00", field "rC" "00"]]]

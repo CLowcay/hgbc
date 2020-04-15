@@ -11,7 +11,7 @@ import qualified Data.ByteString.Builder       as BB
 
 systemRegisters :: BB.Builder
 systemRegisters = table
-  "hardware"
+  "'panel hardware'"
   [tr [th 5 ["System Registers"]]]
   [ tr
     [ td

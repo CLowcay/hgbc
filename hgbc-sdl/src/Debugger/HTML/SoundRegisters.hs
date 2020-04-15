@@ -10,7 +10,7 @@ import qualified Data.ByteString.Builder       as BB
 
 soundRegisters :: BB.Builder
 soundRegisters = table
-  "hardware"
+  "'panel hardware'"
   [tr [th 5 ["Sound Registers"]]]
   [ tr
     [ td

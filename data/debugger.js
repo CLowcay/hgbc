@@ -25,7 +25,10 @@ function handleEmulatorStarted(event) {
   if (currentStatus !== 'started') {
     currentStatus = 'started';
     document.getElementsByName('run')
-      .forEach(element => element.firstChild.src = "svg/pause");
+      .forEach(element => {
+        element.firstChild.src = "svg/pause";
+        element.lastChild.nodeValue = "Pause";
+      });
     document.getElementsByName('step').forEach(disableButton);
     document.getElementsByName('stepOver').forEach(disableButton);
     document.getElementsByName('stepOut').forEach(disableButton);
@@ -43,7 +46,10 @@ function handleEmulatorPaused(event) {
   if (currentStatus !== "paused") {
     currentStatus = "paused";
     document.getElementsByName('run')
-      .forEach(element => element.firstChild.src = "svg/run");
+      .forEach(element => {
+        element.firstChild.src = "svg/run";
+        element.lastChild.nodeValue = "Run";
+      });
     document.getElementsByName('step').forEach(enableButton);
     document.getElementsByName('stepOver').forEach(enableButton);
     document.getElementsByName('stepOut').forEach(enableButton);

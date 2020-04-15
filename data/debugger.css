@@ -37,9 +37,18 @@ nav {
 }
 nav button {
   padding: 0;
+  width: 7em;
 }
-nav.main button img {
-  vertical-align: bottom;
+nav button img {
+  display: block;
+  height: 24px;
+  margin: 2px auto 0 auto;
+}
+
+.panel {
+  margin-top: var(--padding);
+  border: 2px solid black;
+  background-color: var(--panel-background);
 }
 
 #rootContainer {
@@ -53,10 +62,7 @@ div.sidebyside {
 
 table {
 	table-layout: fixed;
-  margin-top: var(--padding);
   border-collapse: collapse;
-  border: 2px solid black;
-	background-color: var(--panel-background);
 }
 th, td {
 	padding: 2px var(--padding);
@@ -134,9 +140,7 @@ div.memory {
   display: grid;
   grid-template-columns: 5em 15em 6em;
   grid-auto-rows: 2.5em 1fr;
-  margin: var(--padding) 0 0 var(--padding);
-  border: 2px solid black;
-  background-color: var(--panel-background);
+  margin-left: var(--padding);
 }
 div.memory div.addressContainer {
   display: flex;
@@ -169,11 +173,6 @@ div.memory div.hex {
   white-space: nowrap;
 }
 
-div.disassembly {
-  margin-top: var(--padding);
-  border: 2px solid black;
-  background-color: var(--panel-background);
-}
 div.disassembly div.window {
   overflow: hidden;
   padding: 0 var(--padding) var(--padding) 0;

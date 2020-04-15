@@ -10,7 +10,7 @@ import qualified Data.ByteString.Builder       as BB
 
 memory :: BB.Builder
 memory = divclass
-  "memory"
+  "'panel memory'"
   [ divclass "addressContainer" [input "text" "address" 9 "0000"]
   , h 4 "Memory"
   , divclassid "addressLabels" ["addresses"] ["0000"]

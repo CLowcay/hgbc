@@ -36,11 +36,11 @@ debugHTML romFileName = html [header, main]
           HTTP.methodPost
           "/"
           "invisible_frame"
-          [ button "run"      "Run/Pause"                     [img "svg/run"]
-          , button "step"     "Step (step into procedures)"   [img "svg/step"]
-          , button "stepOver" "Step (execute procedures)"     [img "svg/stepthrough"]
-          , button "stepOut"  "Step out of current procedure" [img "svg/stepout"]
-          , button "restart"  "Restart emulator"              [img "svg/reset"]
+          [ button "run"      [img "svg/run", "Run"]
+          , button "step"     [img "svg/step", "Step in"]
+          , button "stepOver" [img "svg/stepthrough", "Step"]
+          , button "stepOut"  [img "svg/stepout", "Step out"]
+          , button "restart"  [img "svg/reset", "Restart"]
           ]
       ]
     , divclassid
@@ -58,11 +58,8 @@ debugHTML romFileName = html [header, main]
 
 disassembly :: BB.Builder
 disassembly = divclass
-  "disassembly"
+  "'panel disassembly'"
   [ h 4 "Disassembly"
-  , nav
-    [ input "text" "disassemblyAddress" 9 "0000:0000"
-    , button "toPC" "Scroll to the next instruction that will execute" ["Scroll to PC"]
-    ]
+  , nav [input "text" "disassemblyAddress" 9 "0000:0000", button "toPC" ["Scroll to PC"]]
   , divclass "window" [ulid "disassemblyList" []]
   ]

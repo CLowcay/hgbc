@@ -10,7 +10,7 @@ import qualified Data.ByteString.Builder       as BB
 
 lcdRegisters :: BB.Builder
 lcdRegisters = table
-  "hardware"
+  "'panel hardware'"
   [tr [th 5 ["LCD Registers"]]]
   [ tr
     [ td

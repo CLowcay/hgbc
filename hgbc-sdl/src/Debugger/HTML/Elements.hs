@@ -183,6 +183,5 @@ form method action target contents =
     <> mconcat contents
     <> "</form>"
 
-button :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
-button name tt content =
-  "<button name='" <> name <> "' title='" <> tt <> "'>" <> mconcat content <> "</button>"
+button :: BB.Builder -> [BB.Builder] -> BB.Builder
+button name content = "<button name='" <> name <> "'>" <> mconcat content <> "</button>"
