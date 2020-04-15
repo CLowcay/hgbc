@@ -15,6 +15,7 @@ module Machine.GBC.CPU
   , setMode
   , getCPUCycleClocks
   , setCPUCycleClocks
+  , getCPUCallDepth
   , reset
   , getRegisterFile
   , readR8
@@ -143,6 +144,7 @@ data CPUState = CPUState {
   , portKEY1       :: !(Port Word8)
   , cpuMode        :: !(IORef CPUMode)
   , cpuCycleClocks :: !(UnboxedRef Int)
+  , cpuCallDepth   :: !(UnboxedRef Int)
   , haltBug        :: !(IORef Bool)
 }
 
@@ -158,6 +160,7 @@ initCPU portIF portIE cpuType busCatchup = do
   portKEY1       <- newPort 0x00 0x01 alwaysUpdate
   cpuMode        <- newIORef ModeNormal
   cpuCycleClocks <- newUnboxedRef 4
+  cpuCallDepth   <- newUnboxedRef 0
   haltBug        <- newIORef False
   pure CPUState { .. }
 
@@ -573,6 +576,28 @@ setCPUCycleClocks :: HasCPU env => Int -> ReaderT env IO ()
 setCPUCycleClocks clocks = do
   CPUState {..} <- asks forCPUState
   liftIO (writeUnboxedRef cpuCycleClocks clocks)
+
+{-# INLINE getCPUCallDepth #-}
+getCPUCallDepth :: HasCPU env => ReaderT env IO Int
+getCPUCallDepth = do
+  CPUState {..} <- asks forCPUState
+  liftIO (readUnboxedRef cpuCallDepth)
+
+{-# INLINE incrementCPUCallDepth #-}
+incrementCPUCallDepth :: HasCPU env => ReaderT env IO ()
+incrementCPUCallDepth = do
+  CPUState {..} <- asks forCPUState
+  liftIO $ do
+    d <- readUnboxedRef cpuCallDepth
+    writeUnboxedRef cpuCallDepth (d + 1)
+
+{-# INLINE decrementCPUCallDepth #-}
+decrementCPUCallDepth :: HasCPU env => ReaderT env IO ()
+decrementCPUCallDepth = do
+  CPUState {..} <- asks forCPUState
+  liftIO $ do
+    d <- readUnboxedRef cpuCallDepth
+    writeUnboxedRef cpuCallDepth (d - 1)
 
 {-# SPECIALIZE table0 :: HasCPU env => V.Vector (CPUM env Int) #-}
 {-# SPECIALIZE table1 :: HasCPU env => V.Vector (CPUM env Int) #-}
@@ -1009,6 +1034,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
         pure 3
       else pure 2
   call nn = CPUM $ do
+    incrementCPUCallDepth
     push16 =<< readPC
     writePC nn
     pure 6
@@ -1016,11 +1042,13 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     shouldJump <- testCondition cc
     if shouldJump
       then do
+        incrementCPUCallDepth
         push16 =<< readPC
         writePC nn
         pure 6
       else pure 3
   ret = CPUM $ do
+    decrementCPUCallDepth
     writePC =<< pop16
     pure 4
   reti = CPUM $ do
@@ -1028,6 +1056,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
     setIME
     pure 4
   retcc cc = CPUM $ do
+    decrementCPUCallDepth
     shouldJump <- testCondition cc
     if shouldJump
       then do
@@ -1035,6 +1064,7 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
         pure 5
       else pure 2
   rst t = CPUM $ do
+    incrementCPUCallDepth
     push16 =<< readPC
     writePC $ 8 * fromIntegral t
     pure 4

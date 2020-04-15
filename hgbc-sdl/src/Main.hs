@@ -20,7 +20,9 @@ import           Data.IORef
 import           Data.Maybe
 import           Disassembler
 import           Machine.GBC
-import           Machine.GBC.CPU                ( readPC )
+import           Machine.GBC.CPU                ( readPC
+                                                , getCPUCallDepth
+                                                )
 import           Machine.GBC.Memory             ( getBank )
 import           Machine.GBC.ROM
 import           Machine.GBC.Util
@@ -177,7 +179,7 @@ emulator rom allOptions@Config.Options {..} = do
         pauseAudio
 
   let
-    emulatorLoop runToAddress = do
+    emulatorLoop runToAddress level = do
       emulatorClock <- getEmulatorClock
       now           <- liftIO SDL.time
       let
@@ -192,7 +194,8 @@ emulator rom allOptions@Config.Options {..} = do
               r           <- disassemblyRequired address disassembly
               when r $ liftIO . writeIORef disassemblyRef =<< disassembleFrom pc disassembly
               breakpoint <- liftIO $ H.lookup breakPoints address
-              pure (Just address == runToAddress || isJust breakpoint)
+              callDepth  <- getCPUCallDepth
+              pure (Just address == runToAddress || isJust breakpoint || Just callDepth == level)
             else pure True
 
           if breakRequired
@@ -200,7 +203,7 @@ emulator rom allOptions@Config.Options {..} = do
             else if steps .&. 0x1FFFFF == 0
               then do
                 when optionStats $ printPerformanceStats emulatorClock now
-                emulatorLoop runToAddress
+                emulatorLoop runToAddress level
               else if steps .&. 0xFFFF == 0
                 then do
                   notification <- Emulator.getNotification emulatorChannel
@@ -217,17 +220,24 @@ emulator rom allOptions@Config.Options {..} = do
       notification <- Emulator.waitNotification emulatorChannel
       case notification of
         Emulator.QuitNotification  -> onQuit
-        Emulator.PauseNotification -> resumeAudio >> notifyResumed >> emulatorLoop Nothing
-        Emulator.RunNotification   -> resumeAudio >> notifyResumed >> emulatorLoop Nothing
+        Emulator.PauseNotification -> resumeAudio >> notifyResumed >> emulatorLoop Nothing Nothing
+        Emulator.RunNotification   -> resumeAudio >> notifyResumed >> emulatorLoop Nothing Nothing
         Emulator.RunToNotification address ->
-          resumeAudio >> notifyResumed >> emulatorLoop (Just address)
+          resumeAudio >> notifyResumed >> emulatorLoop (Just address) Nothing
         Emulator.StepNotification     -> step >> pauseLoop
-        Emulator.StepOverNotification -> step >> pauseLoop
-        Emulator.StepOutNotification  -> step >> pauseLoop
-        Emulator.RestartNotification  -> reset >> pauseLoop
+        Emulator.StepOverNotification -> do
+          callDepth0 <- getCPUCallDepth
+          step
+          callDepth1 <- getCPUCallDepth
+          if callDepth1 > callDepth0 then emulatorLoop Nothing (Just callDepth0) else pauseLoop
+        Emulator.StepOutNotification -> do
+          callDepth <- getCPUCallDepth
+          emulatorLoop Nothing (Just (callDepth - 1))
+        Emulator.RestartNotification -> reset >> pauseLoop
 
-  runReaderT (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop Nothing)
-             emulatorState
+  runReaderT
+    (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop Nothing Nothing)
+    emulatorState
 
  where
   printPerformanceStats :: Int -> Double -> ReaderT EmulatorState IO ()
