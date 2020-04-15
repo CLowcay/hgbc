@@ -5,8 +5,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Debugger.Disassemble
-  ( Field(..)
+module Disassembler
+  ( LongAddress(..)
+  , Field(..)
   , fieldAddress
   , fieldBytes
   , Disassembly
@@ -27,11 +28,11 @@ import           Data.Bits
 import           Data.ByteString.Short
 import           Data.Foldable
 import           Data.Function
+import           Data.Hashable
 import           Data.Int
 import           Data.Maybe
 import           Data.String
 import           Data.Word
-import           Debugger.Types
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
@@ -41,6 +42,17 @@ import qualified Data.ByteString.Short         as SB
 import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
 import qualified Data.Vector.Storable          as VS
+
+data LongAddress
+  = LongAddress !Word16 !Word16
+  deriving (Eq, Ord, Show)
+
+instance Hashable LongAddress where
+  hashWithSalt salt (LongAddress bank offset) =
+    hashWithSalt salt ((fromIntegral bank .<<. 16) .|. fromIntegral offset :: Int)
+
+instance ToJSON LongAddress where
+  toJSON (LongAddress bank address) = object ["offset" .= address, "bank" .= bank]
 
 type Overlap = Bool
 data Field =

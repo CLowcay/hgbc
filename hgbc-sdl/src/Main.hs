@@ -18,8 +18,7 @@ import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
 import           Data.Maybe
-import           Debugger.Disassemble
-import           Debugger.Types
+import           Disassembler
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( getBank )

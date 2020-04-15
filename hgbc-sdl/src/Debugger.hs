@@ -24,9 +24,9 @@ import           Data.Maybe
 import           Data.String
 import           Data.Traversable
 import           Data.Word
-import           Debugger.Disassemble
 import           Debugger.HTML
 import           Debugger.Status
+import           Disassembler
 import           Machine.GBC                    ( EmulatorState )
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( readChunk
@@ -38,7 +38,6 @@ import qualified Config
 import qualified Control.Concurrent.Async      as Async
 import qualified Data.Binary.Builder           as BNB
 import qualified Data.ByteString               as B
-import           Debugger.Types
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB

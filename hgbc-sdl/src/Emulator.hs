@@ -10,7 +10,7 @@ where
 
 import           Control.Concurrent.STM
 import           Control.Monad.IO.Class
-import           Debugger.Types
+import           Disassembler
 
 -- | A notification for the emulator thread.
 data Notification
