@@ -15,8 +15,8 @@ module Disassembler
   , lookupN
   , disassemblyRequired
   , disassembleROM
-  , disassembleFromPC
   , disassembleFrom
+  , disassemble
   )
 where
 
@@ -110,6 +110,9 @@ data NextAction
 newtype Disassembly = Disassembly (IM.IntMap Field)
   deriving (Eq, Ord, Show, Semigroup, Monoid)
 
+-- | Insert a new field into the disassembly. This is somewhat complicated since
+-- there may already be data fields that need to be split or truncated to
+-- accomodate the new disassembled field.
 insert :: Disassembly -> Field -> Disassembly
 insert (Disassembly m) field = Disassembly
   ( m
@@ -156,6 +159,8 @@ insert (Disassembly m) field = Disassembly
       catMaybes [leftPart, rightPart]
   unpacked f = SB.pack . f . SB.unpack
 
+-- | Encode a LongAddress into an Int so that when the address are ordered by
+-- that Int, the banks are sorted and group in a sensible way.
 encodeAddress :: LongAddress -> Int
 encodeAddress (LongAddress bank offset) =
   section .|. (fromIntegral bank .<<. 16) .|. fromIntegral offset
@@ -164,9 +169,16 @@ encodeAddress (LongAddress bank offset) =
     then if bank == 0xFFFF then 0 else 0x100000000
     else (fromIntegral offset .&. 0xE000) .<<. 19
 
+-- | Get the field at exactly the given address.
 lookup :: Disassembly -> LongAddress -> Maybe Field
 lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
 
+-- | Get the next n disassembled fields starting at the given address. If there is a
+-- field at the given address, then it is included in the output. Otherwise the
+-- first field returned is the first field that occurs after the given address.
+-- If a negative n is used, then the previous n fields are returned in reverse
+-- order (highest to lowest address). Again, if there is a field at the given
+-- address then it is included in the output.
 lookupN :: Disassembly -> Int -> LongAddress -> [Field]
 lookupN (Disassembly m) n startAddress | n == 0    = []
                                        | n < 0     = consV (take (-n) leftList)
@@ -187,6 +199,7 @@ data DisassemblyState = DisassemblyState {
   , disassemblyMemory      :: !Memory
 }
 
+-- | Check if more disassembly is required at the given address.
 disassemblyRequired :: HasMemory env => LongAddress -> Disassembly -> ReaderT env IO Bool
 disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disassembly address of
   Nothing                          -> pure True
@@ -196,22 +209,23 @@ disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disasse
       actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
       pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
+-- | Disassemble the ROM currently loaded in memory.
 disassembleROM :: Memory -> IO Disassembly
 disassembleROM memory0 =
-  disassembleFrom entryPoint (bootSubstrate <> substrate)
-    >>= disassembleFrom (romFrom 0x00)
-    >>= disassembleFrom (romFrom 0x08)
-    >>= disassembleFrom (romFrom 0x10)
-    >>= disassembleFrom (romFrom 0x18)
-    >>= disassembleFrom (romFrom 0x20)
-    >>= disassembleFrom (romFrom 0x28)
-    >>= disassembleFrom (romFrom 0x30)
-    >>= disassembleFrom (romFrom 0x38)
-    >>= disassembleFrom (romFrom 0x40)
-    >>= disassembleFrom (romFrom 0x48)
-    >>= disassembleFrom (romFrom 0x50)
-    >>= disassembleFrom (romFrom 0x58)
-    >>= disassembleFrom (romFrom 0x60)
+  disassemble entryPoint (bootSubstrate <> substrate)
+    >>= disassemble (romFrom 0x00)
+    >>= disassemble (romFrom 0x08)
+    >>= disassemble (romFrom 0x10)
+    >>= disassemble (romFrom 0x18)
+    >>= disassemble (romFrom 0x20)
+    >>= disassemble (romFrom 0x28)
+    >>= disassemble (romFrom 0x30)
+    >>= disassemble (romFrom 0x38)
+    >>= disassemble (romFrom 0x40)
+    >>= disassemble (romFrom 0x48)
+    >>= disassemble (romFrom 0x50)
+    >>= disassemble (romFrom 0x58)
+    >>= disassemble (romFrom 0x60)
  where
   romFrom origin = DisassemblyState origin True [] memory0
   entryPoint    = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
@@ -235,18 +249,20 @@ disassembleROM memory0 =
     go [] = []
     go xs = let (r, rs) = splitAt n xs in r : go rs
 
-disassembleFromPC :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
-disassembleFromPC pc disassembly = do
+-- | Generate disassembly starting at a particular PC.
+disassembleFrom :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
+disassembleFrom pc disassembly = do
   memory <- asks forMemory
-  liftIO (disassembleFrom (DisassemblyState pc False [] memory) disassembly)
+  liftIO (disassemble (DisassemblyState pc False [] memory) disassembly)
 
-disassembleFrom :: DisassemblyState -> Disassembly -> IO Disassembly
-disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
+-- | Generate disassembly.
+disassemble :: DisassemblyState -> Disassembly -> IO Disassembly
+disassemble state0 disassembly = evalStateT (go disassembly) state0
  where
   go !accum = do
     addressLong <- currentAddressLong
     (action, r) <- fetchAndExecute
-    bs          <- currentInstructionBytes
+    bs          <- takeAccumulatedBytes
     let oldDisassembly = lookup accum addressLong
     if noUpdateRequired oldDisassembly bs
       then pure accum
@@ -254,15 +270,15 @@ disassembleFrom state0 disassembly = evalStateT (go disassembly) state0
         let accum' = insert accum (Field addressLong bs False r)
         case action of
           Continue   -> go accum'
-          Jump    nn -> modifyAddress (const nn) >> go accum'
-          JumpRel i  -> modifyAddress (+ fromIntegral i) >> go accum'
+          Jump    nn -> modifyPC (const nn) >> go accum'
+          JumpRel i  -> modifyPC (+ fromIntegral i) >> go accum'
           Fork    nn -> do
             s <- get
-            liftIO (disassembleFrom (s { disassemblyPC = nn }) accum') >>= go
+            liftIO (disassemble (s { disassemblyPC = nn }) accum') >>= go
           ForkRel i -> do
             s <- get
             go =<< liftIO
-              (disassembleFrom (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
+              (disassemble (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
           Stop -> pure accum'
 
   noUpdateRequired Nothing                          _        = False
@@ -278,14 +294,17 @@ currentAddressLong = do
     else liftIO (runReaderT (getBank pc) (disassemblyMemory s))
   pure (LongAddress bank pc)
 
-currentInstructionBytes :: StateT DisassemblyState IO SB.ShortByteString
-currentInstructionBytes = do
+-- | Take the disassembled bytes that have been accumulated in the
+-- DisassemblyState.
+takeAccumulatedBytes :: StateT DisassemblyState IO SB.ShortByteString
+takeAccumulatedBytes = do
   s <- get
   put (s { disassemblyBytes = [] })
   pure (SB.pack (reverse (disassemblyBytes s)))
 
-modifyAddress :: (Word16 -> Word16) -> StateT DisassemblyState IO ()
-modifyAddress f = do
+-- | Apply a function to the disassembly PC.
+modifyPC :: (Word16 -> Word16) -> StateT DisassemblyState IO ()
+modifyPC f = do
   s <- get
   put (s { disassemblyPC = f (disassemblyPC s) })
 

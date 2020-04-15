@@ -190,7 +190,7 @@ emulator rom allOptions@Config.Options {..} = do
               let address = LongAddress bank pc
               disassembly <- liftIO (readIORef disassemblyRef)
               r           <- disassemblyRequired address disassembly
-              when r $ liftIO . writeIORef disassemblyRef =<< disassembleFromPC pc disassembly
+              when r $ liftIO . writeIORef disassemblyRef =<< disassembleFrom pc disassembly
               breakpoint <- liftIO $ H.lookup breakPoints address
               pure (Just address == runToAddress || isJust breakpoint)
             else pure True
