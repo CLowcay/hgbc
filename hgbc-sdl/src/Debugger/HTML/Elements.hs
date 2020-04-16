@@ -11,7 +11,7 @@ module Debugger.HTML.Elements
   , body
   , h
   , nav
-  , iframe
+  , innerNav
   , br
   , p
   , table
@@ -24,6 +24,7 @@ module Debugger.HTML.Elements
   , div
   , divclass
   , divclassid
+  , focusDiv
   , spanclass
   , img
   , label
@@ -35,7 +36,6 @@ module Debugger.HTML.Elements
   , enableDisable
   , unused
   , padding
-  , form
   , button
   )
 where
@@ -44,7 +44,6 @@ import           Data.List               hiding ( head )
 import           Prelude                 hiding ( head
                                                 , div
                                                 )
-import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 
 html :: [BB.Builder] -> BB.Builder
@@ -77,8 +76,13 @@ h n t = "<h" <> BB.intDec n <> ">" <> t <> "</h" <> BB.intDec n <> ">"
 nav :: [BB.Builder] -> BB.Builder
 nav contents = "<nav>" <> mconcat contents <> "</nav>"
 
-iframe :: BB.Builder -> BB.Builder
-iframe name = "<iframe name='" <> name <> "'></iframe>"
+innerNav :: [BB.Builder] -> [BB.Builder] -> BB.Builder
+innerNav contentsLeft contentsRight =
+  "<nav class=innerNav>"
+    <> mconcat contentsLeft
+    <> "<span class=leftRightSeparator>&nbsp;</span>"
+    <> mconcat contentsRight
+    <> "</nav>"
 
 br :: BB.Builder
 br = "<br>"
@@ -127,6 +131,9 @@ divclassid did c contents = "<div id=" <> did <> classes c <> ">" <> mconcat con
   classes [cl] = " class=" <> cl
   classes cls  = " class='" <> mconcat (intersperse " " cls) <> "'"
 
+focusDiv :: BB.Builder -> [BB.Builder] -> BB.Builder
+focusDiv c contents = "<div class=" <> c <> " tabindex=0>" <> mconcat contents <> "</div>"
+
 spanclass :: BB.Builder -> [BB.Builder] -> BB.Builder
 spanclass c contents = "<span class=" <> c <> ">" <> mconcat contents <> "</span>"
 
@@ -171,17 +178,5 @@ unused = "<span class=u>&nbsp;</span>"
 padding :: Int -> BB.Builder
 padding n = "<span class=padding>" <> mconcat (replicate n "&nbsp;") <> "</span>"
 
-form :: B.ByteString -> BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
-form method action target contents =
-  "<form method="
-    <> BB.byteString method
-    <> " action='"
-    <> action
-    <> "' target='"
-    <> target
-    <> "'>"
-    <> mconcat contents
-    <> "</form>"
-
 button :: BB.Builder -> [BB.Builder] -> BB.Builder
-button name content = "<button name='" <> name <> "'>" <> mconcat content <> "</button>"
+button name content = "<button id=" <> name <> ">" <> mconcat content <> "</button>"

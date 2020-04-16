@@ -138,6 +138,14 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       (svg (LB.fromStrict $(embedOneFileOf ["data/stepthrough.svg", "../data/stepthrough.svg"])))
     ["svg", "reset"] ->
       pure (svg (LB.fromStrict $(embedOneFileOf ["data/reset.svg", "../data/reset.svg"])))
+    ["svg", "runto"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/runto.svg", "../data/runto.svg"])))
+    ["svg", "breakpoint"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/breakpoint.svg", "../data/breakpoint.svg"])))
+    ["svg", "home"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"])))
+    ["svg", "label"] ->
+      pure (svg (LB.fromStrict $(embedOneFileOf ["data/label.svg", "../data/label.svg"])))
 
     ["memory"] -> case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->

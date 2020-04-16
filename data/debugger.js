@@ -10,6 +10,12 @@ window.onload = () => {
 
   eventSource.addEventListener('breakpoint-added', disassembly.breakPointAdded);
   eventSource.addEventListener('breakpoint-removed', disassembly.breakPointRemoved);
+
+  document.getElementById('run').onclick = () => httpPOST('/', 'run');
+  document.getElementById('step').onclick = () => httpPOST('/', 'step');
+  document.getElementById('stepOver').onclick = () => httpPOST('/', 'stepOver');
+  document.getElementById('stepOut').onclick = () => httpPOST('/', 'stepOut');
+  document.getElementById('restart').onclick = () => httpPOST('/', 'restart');
 };
 
 /*****************************************************************************
@@ -23,41 +29,36 @@ function initStatus(eventSource, memory, disassembly) {
   eventSource.addEventListener('paused', onPause);
   eventSource.addEventListener('status', onUpdate);
 
-  function onRun() {
-    const disableButton = button => button.setAttribute('disabled', true);
+  const runButton = document.getElementById('run');
+  const stepButton = document.getElementById('step');
+  const stepOverButton = document.getElementById('stepOver');
+  const stepOutButton = document.getElementById('stepOut');
 
+  function onRun() {
     if (currentStatus !== 'started') {
       currentStatus = 'started';
-      document.getElementsByName('run')
-        .forEach(element => {
-          element.firstChild.src = "svg/pause";
-          element.lastChild.nodeValue = "Pause";
-        });
-      document.getElementsByName('step').forEach(disableButton);
-      document.getElementsByName('stepOver').forEach(disableButton);
-      document.getElementsByName('stepOut').forEach(disableButton);
+      runButton.firstChild.src = "svg/pause";
+      runButton.lastChild.nodeValue = "Pause";
+      stepButton.setAttribute('disabled', true);
+      stepOverButton.setAttribute('disabled', true);
+      stepOutButton.setAttribute('disabled', true);
     }
   }
 
   function onPause(event) {
-    const enableButton = button => button.removeAttribute("disabled");
     const data = JSON.parse(event.data);
 
     memory.refresh();
     disassembly.setPC(data);
     disassembly.revealPC();
-    document.getElementById('disassemblyAddress').value = formatLongAddress(data);
 
     if (currentStatus !== "paused") {
       currentStatus = "paused";
-      document.getElementsByName('run')
-        .forEach(element => {
-          element.firstChild.src = "svg/run";
-          element.lastChild.nodeValue = "Run";
-        });
-      document.getElementsByName('step').forEach(enableButton);
-      document.getElementsByName('stepOver').forEach(enableButton);
-      document.getElementsByName('stepOut').forEach(enableButton);
+      runButton.firstChild.src = "svg/run";
+      runButton.lastChild.nodeValue = "Run";
+      stepButton.removeAttribute('disabled');
+      stepOverButton.removeAttribute('disabled');
+      stepOutButton.removeAttribute('disabled');
     }
   }
 
@@ -95,7 +96,6 @@ function Memory() {
     fillLabels(address, LINES);
     refresh(address);
   });
-  addressField.addEventListener('wheel', onWheel);
   addressField.addEventListener('keydown', event => {
     switch (event.code) {
       case 'ArrowUp': return scroll(-8);
@@ -160,44 +160,83 @@ function Disassembly() {
   const state = {
     lines: [], // { field :: { address, etc. }, li :: Element<li> }
     pc: { bank: 0, offset: 0 },
+    selection: { bank: 0, offset: 0 }
   };
 
   this.setPC = setPC;
   this.revealPC = () => {
     if (!getVisibleLineAt(state.pc)) jumpTo(state.pc);
+    setSelection(state.pc);
   };
   this.breakPointAdded = function (event) {
     const line = getVisibleLineAt(JSON.parse(event.data));
-    if (line) {
-      line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.add('set'));
-    }
+    if (line) line.li.querySelector('input.breakpoint').classList.add('set');
   };
 
   this.breakPointRemoved = function (event) {
     const line = getVisibleLineAt(JSON.parse(event.data));
-    if (line) {
-      line.li.querySelectorAll('input.breakpoint').forEach(button => button.classList.remove('set'));
-    }
+    if (line) line.li.querySelector('input.breakpoint').classList.remove('set');
   };
 
-  const gotoPCButton = document.getElementsByName('toPC');
-  gotoPCButton.forEach(element => element.onclick = () => jumpTo(state.pc));
+  // Set up the disassembler buttons.
+  document.getElementById('toPC').onclick = () => {
+    if (!getVisibleLineAt(state.pc)) jumpTo(state.pc);
+    setSelection(state.pc);
+  };
+  document.getElementById('runTo').onclick = () => runToAddress(state.selection);
+  document.getElementById('breakpoint').onclick = () => {
+    if (!getVisibleLineAt(state.selection)) jumpTo(state.selection);
+    toggleBreakpointAtVisibleAddress(state.selection);
+  };
+  // TODO: implement labels
+  //document.getElementById('label')
 
   document.getElementById('disassemblyList').addEventListener('wheel', onWheel);
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('input', event => {
-    jumpTo(parseLongAddress(
-      state.lines[0].field.address,
-      disassemblyAddress.value));
+    const address = parseLongAddress(
+      state.lines[0].field.address, disassemblyAddress.value);
+    jumpTo(address);
+    setSelection(address);
   });
-  disassemblyAddress.addEventListener('wheel', onWheel);
   disassemblyAddress.addEventListener('keydown', event => {
     switch (event.code) {
-      case 'ArrowUp': return scroll(-1);
-      case 'ArrowDown': return scroll(1);
-      case 'PageUp': return scroll(-DLINES);
-      case 'PageDown': return scroll(DLINES);
+      case 'ArrowUp':
+        event.preventDefault();
+        return moveSelection(-1);
+      case 'ArrowDown':
+        event.preventDefault();
+        return moveSelection(1);
+      case 'Enter':
+        event.preventDefault();
+        return moveSelection(0);
+    }
+  });
+
+  const disassemblyWindow = document.querySelector('div.disassembly div.window');
+  disassemblyWindow.addEventListener('keydown', event => {
+    switch (event.code) {
+      case 'ArrowUp':
+        event.preventDefault();
+        return moveSelection(-1);
+      case 'ArrowDown':
+        event.preventDefault();
+        return moveSelection(1);
+      case 'PageUp':
+        event.preventDefault();
+        return moveSelection(-DLINES);
+      case 'PageDown':
+        event.preventDefault();
+        return moveSelection(DLINES);
+      case 'Home':
+      case 'End':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'Space':
+      case 'Enter':
+        event.preventDefault();
+        return moveSelection(0);
     }
   });
 
@@ -208,10 +247,11 @@ function Disassembly() {
     return null;
   }
 
-  function toggleBreakpointAt(address) {
+  function toggleBreakpointAtVisibleAddress(address) {
+    const button = getVisibleLineAt(state.selection).li.querySelector('input.breakpoint');
     const uri = '/breakpoints?bank=' + address.bank.toString(16) +
       '&offset=' + address.offset.toString(16);
-    if (this.classList.contains('set')) {
+    if (button.classList.contains('set')) {
       httpPOST(uri, 'unset');
     } else {
       httpPOST(uri, 'set');
@@ -237,7 +277,7 @@ function Disassembly() {
     breakpoint.type = 'button';
     breakpoint.title = 'Toggle break point';
     breakpoint.classList.add('disassemblyButton', 'breakpoint');
-    breakpoint.onclick = () => toggleBreakpointAt.call(breakpoint, field.address);
+    breakpoint.onclick = () => toggleBreakpointAtVisibleAddress(field.address);
     if (containsAddress(field.address, breakpoints)) {
       breakpoint.classList.add('set');
     }
@@ -246,11 +286,7 @@ function Disassembly() {
     runTo.type = 'button';
     runTo.title = 'Run to here';
     runTo.classList.add('disassemblyButton', 'runTo');
-    runTo.onclick = () => {
-      const address = field.address;
-      httpPOST('/', 'runTo=&bank=' +
-        address.bank.toString(16) + '&offset=' + address.offset.toString(16));
-    };
+    runTo.onclick = () => runToAddress(field.address);
 
     li.setAttribute('data-address', formatLongAddress(field.address));
     li.appendChild(breakpoint);
@@ -285,6 +321,12 @@ function Disassembly() {
       li.appendChild(overlapping);
     }
 
+    li.onmousedown = () => setSelection(field.address);
+    li.onmouseup = () => setSelection(field.address);
+    li.onmousemove = event => {
+      if (event.buttons > 0) setSelection(field.address);
+    };
+
     return li;
   }
 
@@ -298,7 +340,7 @@ function Disassembly() {
   }
 
   const scrollQueue = [];
-  function scroll(amount) {
+  function scroll(amount, continuation) {
     scrollQueue.push(amount);
     if (scrollQueue.length === 1) {
       doScroll(amount);
@@ -336,10 +378,9 @@ function Disassembly() {
             }
           }
 
-          document.getElementById('disassemblyAddress').value =
-            formatLongAddress(state.lines[0].field.address);
-
           setPC(state.pc);
+          setSelection(state.selection);
+          if (continuation) continuation();
 
           scrollQueue.shift();
           if (scrollQueue.length > 0) {
@@ -353,7 +394,12 @@ function Disassembly() {
     }
   }
 
-  function jumpTo(address) {
+  function runToAddress(address) {
+    httpPOST('/', 'runTo=&bank=' +
+      address.bank.toString(16) + '&offset=' + address.offset.toString(16));
+  }
+
+  function jumpTo(address, continuation) {
     httpGET(
       "disassembly?bank=" + address.bank.toString(16) +
       "&offset=" + address.offset.toString(16) +
@@ -371,10 +417,40 @@ function Disassembly() {
         }
 
         setPC(state.pc);
+        setSelection(state.selection);
+        if (continuation) continuation();
       });
   }
-}
 
+  function setSelection(address) {
+    const oldSelection = state.lines.find(line => sameAddress(line.field.address, state.selection));
+    if (oldSelection) oldSelection.li.classList.remove('selected');
+
+    const selection = state.lines.find(line => sameAddress(line.field.address, address));
+    if (selection) selection.li.classList.add('selected');
+
+    if (!sameAddress(state.selection, address)) {
+      state.selection = address;
+      disassemblyAddress.value = formatLongAddress(address);
+    }
+  }
+
+  function moveSelection(amount) {
+    const i = state.lines.findIndex(line => sameAddress(line.field.address, state.selection));
+    if (i === -1) {
+      jumpTo(state.selection, () => moveSelection(amount));
+    } else {
+      const iNext = i + amount;
+      if (iNext < 0) {
+        scroll(iNext, () => setSelection(state.lines[0].field.address));
+      } else if (iNext >= DLINES) {
+        scroll(iNext - DLINES + 1, () => setSelection(state.lines[DLINES - 1].field.address));
+      } else {
+        setSelection(state.lines[iNext].field.address);
+      }
+    }
+  }
+}
 
 /*****************************************************************************
  * Utility

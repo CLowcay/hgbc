@@ -16,7 +16,6 @@ import           Prelude                 hiding ( head
                                                 , div
                                                 )
 import qualified Data.ByteString.Builder       as BB
-import qualified Network.HTTP.Types            as HTTP
 
 debugHTML :: FilePath -> BB.Builder
 debugHTML romFileName = html [header, main]
@@ -30,18 +29,12 @@ debugHTML romFileName = html [header, main]
     ]
 
   main = body
-    [ iframe "invisible_frame"
-    , nav
-      [ form
-          HTTP.methodPost
-          "/"
-          "invisible_frame"
-          [ button "run"      [img "svg/run", "Run"]
-          , button "step"     [img "svg/step", "Step in"]
-          , button "stepOver" [img "svg/stepthrough", "Step"]
-          , button "stepOut"  [img "svg/stepout", "Step out"]
-          , button "restart"  [img "svg/reset", "Restart"]
-          ]
+    [ nav
+      [ button "run"      [img "svg/run", "Run"]
+      , button "step"     [img "svg/step", "Step in"]
+      , button "stepOver" [img "svg/stepthrough", "Step"]
+      , button "stepOut"  [img "svg/stepout", "Step out"]
+      , button "restart"  [img "svg/reset", "Restart"]
       ]
     , divclassid
       "rootContainer"
@@ -60,6 +53,11 @@ disassembly :: BB.Builder
 disassembly = divclass
   "'panel disassembly'"
   [ h 4 "Disassembly"
-  , nav [input "text" "disassemblyAddress" 9 "0000:0000", button "toPC" ["Scroll to PC"]]
-  , divclass "window" [ulid "disassemblyList" []]
+  , innerNav
+    [input "text" "disassemblyAddress" 9 "0000:0000", button "toPC" [img "svg/home", "PC"]]
+    [ button "runTo"      [img "svg/runto", "Run to"]
+    , button "breakpoint" [img "svg/breakpoint", "Breakpoint"]
+    , button "label"      [img "svg/label", "Label"]
+    ]
+  , focusDiv "window" [ulid "disassemblyList" []]
   ]

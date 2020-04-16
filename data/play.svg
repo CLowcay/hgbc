@@ -1,10 +1,5 @@
-<svg
-  width="32" height="32" viewBox="0 0 8.4666665 8.4666669"
-  version="1.1" baseProfile="full"
-  xmlns="http://www.w3.org/2000/svg"
-  xmlns:xlink="http://www.w3.org/1999/xlink"
-  xmlns:ev="http://www.w3.org/2001/xml-events">
-  >
+<svg width="32" height="32" viewBox="0 0 8.4666665 8.4666669" version="1.1" 
+  xmlns="http://www.w3.org/2000/svg">
   <g transform="translate(0,-288.53332)">
     <path fill="#d99000" d="m 7.4197282,292.75488 -5.3030615,-3.69239 -0.5165,-0.0117 -0.00127,7.40826 h 0.5291648 l 5.2916667,-3.43958 z" />
   </g>
