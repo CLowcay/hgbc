@@ -149,7 +149,8 @@ emulator rom allOptions@Config.Options {..} = do
   disassemblyRef <- newIORef mempty
   when optionDebugMode $ writeIORef disassemblyRef =<< disassembleROM (memory emulatorState)
 
-  breakPoints <- H.new
+  breakpoints <- H.new
+  labels      <- newIORef mempty
   let debugState = Debugger.DebugState { .. }
 
   debuggerChannel <- if optionDebugMode
@@ -193,7 +194,7 @@ emulator rom allOptions@Config.Options {..} = do
               disassembly <- liftIO (readIORef disassemblyRef)
               r           <- disassemblyRequired address disassembly
               when r $ liftIO . writeIORef disassemblyRef =<< disassembleFrom pc disassembly
-              breakpoint <- liftIO $ H.lookup breakPoints address
+              breakpoint <- liftIO $ H.lookup breakpoints address
               callDepth  <- getCPUCallDepth
               pure (Just address == runToAddress || isJust breakpoint || Just callDepth == level)
             else pure True

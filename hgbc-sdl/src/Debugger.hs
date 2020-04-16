@@ -42,7 +42,11 @@ import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Lazy.Char8    as LBC
+import qualified Data.HashMap.Strict           as HM
 import qualified Data.HashTable.IO             as H
+import qualified Data.Text                     as T
+import qualified Data.Text.Encoding            as T
+import qualified Data.Text.Encoding.Error      as T
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -53,6 +57,8 @@ data Notification
   | EmulatorPaused
   | BreakPointAdded LongAddress
   | BreakPointRemoved LongAddress
+  | LabelUpdated LongAddress T.Text
+  | LabelRemoved LongAddress
   deriving (Eq, Ord, Show)
 
 newtype DebuggerChannel = DebuggerChannel (TChan Notification)
@@ -62,7 +68,8 @@ sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan ch
 
 data DebugState = DebugState {
     disassemblyRef :: IORef Disassembly
-  , breakPoints    :: H.BasicHashTable LongAddress ()
+  , breakpoints    :: H.BasicHashTable LongAddress ()
+  , labels         :: IORef (HM.HashMap LongAddress T.Text)
 }
 
 start
@@ -173,7 +180,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             Just (address, n) -> do
               disassembly <- readIORef (disassemblyRef debugState)
               let fields = lookupN disassembly n address
-              breakpoints <- filterM (fmap isJust . H.lookup (breakPoints debugState))
+              breakpoints <- filterM (fmap isJust . H.lookup (breakpoints debugState))
                                      (fieldAddress <$> fields)
               pure
                 (Wai.responseLBS
@@ -190,33 +197,42 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         putStrLn ("Invalid query string for /disassembly: " <> show query)
         pure (httpError HTTP.status422 "invalid query string")
 
-    ["breakpoints"] -> case Wai.queryString req of
-      [("bank", Just bank), ("offset", Just offset)] ->
-        case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
-          Nothing -> do
-            putStrLn ("Invalid parameters for /breakpoints: " <> show (Wai.queryString req))
-            pure (httpError HTTP.status422 "invalid parameters")
-          Just address -> case Wai.requestMethod req of
-            "POST" -> do
-              body <- Wai.lazyRequestBody req
-              case HTTP.parseQuery (LB.toStrict body) of
-                [("set", _)] -> do
-                  H.insert (breakPoints debugState) address ()
-                  sendNotification channel (BreakPointAdded address)
-                  pure emptyResponse
-                [("unset", _)] -> do
-                  H.delete (breakPoints debugState) address
-                  sendNotification channel (BreakPointRemoved address)
-                  pure emptyResponse
-                query -> do
-                  putStrLn ("Invalid breakpoint command: " <> show query)
-                  pure (httpError HTTP.status422 "Invalid breakpoint command")
-            method ->
-              pure
-                (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
-      query -> do
-        putStrLn ("Invalid query string for /breakpoints: " <> show query)
-        pure (httpError HTTP.status422 "invalid query string")
+    ["breakpoints"] -> withAddress "breakpoints" $ \address -> case Wai.requestMethod req of
+      "POST" -> do
+        body <- Wai.lazyRequestBody req
+        case HTTP.parseQuery (LB.toStrict body) of
+          [("set", _)] -> do
+            H.insert (breakpoints debugState) address ()
+            sendNotification channel (BreakPointAdded address)
+            pure emptyResponse
+          [("unset", _)] -> do
+            H.delete (breakpoints debugState) address
+            sendNotification channel (BreakPointRemoved address)
+            pure emptyResponse
+          query -> do
+            putStrLn ("Invalid breakpoint command: " <> show query)
+            pure (httpError HTTP.status422 "Invalid breakpoint command")
+      method ->
+        pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
+
+    ["label"] -> withAddress "label" $ \address -> case Wai.requestMethod req of
+      "POST" -> do
+        body <- Wai.lazyRequestBody req
+        case HTTP.parseQuery (LB.toStrict body) of
+          [("update", Just rawText)] -> do
+            let text = T.decodeUtf8With T.lenientDecode rawText
+            modifyIORef' (labels debugState) (HM.insert address text)
+            sendNotification channel (LabelUpdated address text)
+            pure emptyResponse
+          [("delete", _)] -> do
+            modifyIORef' (labels debugState) (HM.delete address)
+            sendNotification channel (LabelRemoved address)
+            pure emptyResponse
+          query -> do
+            putStrLn ("Invalid breakpoint command: " <> show query)
+            pure (httpError HTTP.status422 "Invalid breakpoint command")
+      method ->
+        pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
 
     ["events"] -> pure (events channel emulatorState)
 
@@ -231,6 +247,16 @@ debugger channel romFileName emulator emulatorState debugState req respond =
   httpError status = Wai.responseLBS status [(HTTP.hContentType, "text/plain")]
   readMaybeHexText t = readMaybe ("0x" <> CB.unpack t)
   readMaybeText t = readMaybe (CB.unpack t)
+  withAddress endpoint handler = case Wai.queryString req of
+    [("bank", Just bank), ("offset", Just offset)] ->
+      case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
+        Nothing -> do
+          putStrLn ("Invalid parameters for /" <> endpoint <> ": " <> show (Wai.queryString req))
+          pure (httpError HTTP.status422 "invalid parameters")
+        Just address -> handler address
+    query -> do
+      putStrLn ("Invalid query string for /" <> endpoint <> ": " <> show query)
+      pure (httpError HTTP.status422 "invalid query string")
 
 keepAliveTime :: Int
 keepAliveTime = 60 * 1000000
@@ -292,6 +318,20 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
           continue isPaused
         Right (BreakPointRemoved address) -> do
           write "event: breakpoint-removed\ndata:"
+          pushAddress address
+          continue isPaused
+        Right (LabelUpdated address text) -> do
+          write "event: label-added\ndata:"
+          write
+            (  "{\"address\":"
+            <> BB.lazyByteString (encode address)
+            <> ",\"text\":"
+            <> fromString (show text)
+            <> "}\n\n"
+            )
+          continue isPaused
+        Right (LabelRemoved address) -> do
+          write "event: label-removed\ndata:"
           pushAddress address
           continue isPaused
 

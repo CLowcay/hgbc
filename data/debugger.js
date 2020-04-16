@@ -8,8 +8,10 @@ window.onload = () => {
   const disassembly = new Disassembly();
   initStatus(eventSource, memory, disassembly);
 
-  eventSource.addEventListener('breakpoint-added', disassembly.breakPointAdded);
-  eventSource.addEventListener('breakpoint-removed', disassembly.breakPointRemoved);
+  eventSource.addEventListener('breakpoint-added',
+    event => disassembly.breakPointAdded(JSON.parse(event.data)));
+  eventSource.addEventListener('breakpoint-removed',
+    event => disassembly.breakPointRemoved(JSON.parse(event.data)));
 
   document.getElementById('run').onclick = () => httpPOST('/', 'run');
   document.getElementById('step').onclick = () => httpPOST('/', 'step');
@@ -114,8 +116,8 @@ function Memory() {
   }
 
   function scroll(amount) {
-    const v = parseInt('0' + address.value, 16) + amount & 0xFFFF;
-    address.value = v.toString(16).toUpperCase();
+    const v = (getAddress() + amount) & 0xFFFF;
+    addressField.value = formatShortAddress(v);
     fillLabels(v, LINES);
     refresh(v);
   }
@@ -132,7 +134,7 @@ function Memory() {
   function fillLabels(baseAddress, lines) {
     const labels = [];
     for (let i = 0; i < lines; i++) {
-      labels[i] = (baseAddress + (8 * i) & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+      labels[i] = formatShortAddress(baseAddress + (8 * i) & 0xFFFF);
     }
     document.getElementById('addressLabels').innerText = labels.join('\n');
   }
@@ -155,10 +157,10 @@ function Memory() {
  * Disassembly
  *****************************************************************************/
 function Disassembly() {
-  const DLINES = 20;
+  const LINES = 20;
 
   const state = {
-    lines: [], // { field :: { address, etc. }, li :: Element<li> }
+    lines: [], // { address, field :: { text, data } | label :: string, li :: Element<li> }
     pc: { bank: 0, offset: 0 },
     selection: { bank: 0, offset: 0 }
   };
@@ -168,15 +170,20 @@ function Disassembly() {
     if (!getVisibleLineAt(state.pc)) jumpTo(state.pc);
     setSelection(state.pc);
   };
-  this.breakPointAdded = function (event) {
-    const line = getVisibleLineAt(JSON.parse(event.data));
+  this.breakPointAdded = function (address) {
+    const line = getVisibleLineAt(address);
     if (line) line.li.querySelector('input.breakpoint').classList.add('set');
   };
-
-  this.breakPointRemoved = function (event) {
-    const line = getVisibleLineAt(JSON.parse(event.data));
+  this.breakPointRemoved = function (address) {
+    const line = getVisibleLineAt(address);
     if (line) line.li.querySelector('input.breakpoint').classList.remove('set');
   };
+  this.labelUpdated = function (label) {  // {address, text}
+
+  }
+  this.labelRemoved = function (label) {
+
+  }
 
   // Set up the disassembler buttons.
   document.getElementById('toPC').onclick = () => {
@@ -195,8 +202,7 @@ function Disassembly() {
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('input', event => {
-    const address = parseLongAddress(
-      state.lines[0].field.address, disassemblyAddress.value);
+    const address = parseLongAddress(state.lines[0].address, disassemblyAddress.value);
     jumpTo(address);
     setSelection(address);
   });
@@ -225,10 +231,10 @@ function Disassembly() {
         return moveSelection(1);
       case 'PageUp':
         event.preventDefault();
-        return moveSelection(-DLINES);
+        return moveSelection(-LINES);
       case 'PageDown':
         event.preventDefault();
-        return moveSelection(DLINES);
+        return moveSelection(LINES);
       case 'Home':
       case 'End':
       case 'ArrowLeft':
@@ -241,10 +247,7 @@ function Disassembly() {
   });
 
   function getVisibleLineAt(address) {
-    for (const line of state.lines) {
-      if (sameAddress(line.field.address, address)) return line;
-    }
-    return null;
+    return state.lines.find(line => sameAddress(line.address, address));
   }
 
   function toggleBreakpointAtVisibleAddress(address) {
@@ -266,7 +269,7 @@ function Disassembly() {
       case 1: // DOM_DELTA_LINE
         return scroll(Math.round(event.deltaY));
       case 2: // DOM_DELTA_PAGE
-        return scroll(Math.round(event.deltaY * DLINES));
+        return scroll(Math.round(event.deltaY * LINES));
     }
   }
 
@@ -349,7 +352,7 @@ function Disassembly() {
     function doScroll(amount) {
       const baseAddress = (amount < 0
         ? state.lines[0]
-        : state.lines[state.lines.length - 1]).field.address;
+        : state.lines[state.lines.length - 1]).address;
 
       httpGET(
         "disassembly?bank=" + baseAddress.bank.toString(16) +
@@ -359,21 +362,25 @@ function Disassembly() {
           const disassembly = JSON.parse(text);
           const newFields = disassembly.fields.slice(1)
             .map(field => {
-              return { field: field, li: formatDisassemblyField(field, disassembly.breakpoints) }
+              return {
+                address: field.address,
+                field: field,
+                li: formatDisassemblyField(field, disassembly.breakpoints)
+              }
             });
 
           const ul = document.getElementById('disassemblyList');
           if (amount < 0) {
             newFields.reverse();
-            state.lines = newFields.concat(state.lines).slice(0, DLINES);
+            state.lines = newFields.concat(state.lines).slice(0, LINES);
             ul.prepend(...newFields.map(line => line.li));
-            while (ul.childNodes.length > DLINES) {
+            while (ul.childNodes.length > LINES) {
               ul.removeChild(ul.lastChild);
             }
           } else {
             state.lines = state.lines.concat(newFields).slice(newFields.length);
             ul.append(...newFields.map(line => line.li));
-            while (ul.childNodes.length > DLINES) {
+            while (ul.childNodes.length > LINES) {
               ul.removeChild(ul.firstChild);
             }
           }
@@ -403,17 +410,17 @@ function Disassembly() {
     httpGET(
       "disassembly?bank=" + address.bank.toString(16) +
       "&offset=" + address.offset.toString(16) +
-      "&n=" + DLINES,
+      "&n=" + LINES,
       text => {
         const disassembly = JSON.parse(text);
 
         const ul = document.getElementById('disassemblyList');
         ul.innerHTML = '';
         state.lines = [];
-        for (const field of disassembly.fields.slice(0, DLINES)) {
+        for (const field of disassembly.fields.slice(0, LINES)) {
           const li = formatDisassemblyField(field, disassembly.breakpoints);
           ul.appendChild(li);
-          state.lines.push({ field: field, li: li });
+          state.lines.push({ address: field.address, field: field, li: li });
         }
 
         setPC(state.pc);
@@ -423,10 +430,10 @@ function Disassembly() {
   }
 
   function setSelection(address) {
-    const oldSelection = state.lines.find(line => sameAddress(line.field.address, state.selection));
+    const oldSelection = getVisibleLineAt(state.selection);
     if (oldSelection) oldSelection.li.classList.remove('selected');
 
-    const selection = state.lines.find(line => sameAddress(line.field.address, address));
+    const selection = getVisibleLineAt(address);
     if (selection) selection.li.classList.add('selected');
 
     if (!sameAddress(state.selection, address)) {
@@ -436,17 +443,17 @@ function Disassembly() {
   }
 
   function moveSelection(amount) {
-    const i = state.lines.findIndex(line => sameAddress(line.field.address, state.selection));
+    const i = state.lines.findIndex(line => sameAddress(line.address, state.selection));
     if (i === -1) {
       jumpTo(state.selection, () => moveSelection(amount));
     } else {
       const iNext = i + amount;
       if (iNext < 0) {
-        scroll(iNext, () => setSelection(state.lines[0].field.address));
-      } else if (iNext >= DLINES) {
-        scroll(iNext - DLINES + 1, () => setSelection(state.lines[DLINES - 1].field.address));
+        scroll(iNext, () => setSelection(state.lines[0].address));
+      } else if (iNext >= LINES) {
+        scroll(iNext - LINES + 1, () => setSelection(state.lines[LINES - 1].address));
       } else {
-        setSelection(state.lines[iNext].field.address);
+        setSelection(state.lines[iNext].address);
       }
     }
   }
@@ -460,15 +467,16 @@ function sameAddress(a, b) {
 }
 
 function containsAddress(a, array) {
-  for (const b of array) {
-    if (sameAddress(a, b)) return true;
-  }
-  return false;
+  return array.some(b => sameAddress(a, b));
 }
 
 function formatLongAddress(a) {
-  return (a.bank === 0xFFFF ? "BOOT" : a.bank.toString(16).padStart(4, '0').toUpperCase()) +
-    ":" + a.offset.toString(16).padStart(4, '0').toUpperCase();
+  return (a.bank === 0xFFFF ? "BOOT" : formatShortAddress(a.bank)) +
+    ":" + formatShortAddress(a.offset);
+}
+
+function formatShortAddress(a) {
+  return a.toString(16).toUpperCase().padStart(4, '0');
 }
 
 function parseLongAddress(defaultAddress, address) {
