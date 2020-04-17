@@ -43,6 +43,7 @@ dependencies:
 - sdl2
 - stm
 - text
+- time
 - unordered-containers
 - vector
 - wai

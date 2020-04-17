@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2b95a1060f87f486c670dd968337e1f870c103ae1111267a5169af200a0384c6
+-- hash: c997e9461654d587e03fca054fe525b1ba29efeda3d24157537471225274f405
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -76,6 +76,7 @@ executable hgbc-sdl
     , sdl2
     , stm
     , text
+    , time
     , unordered-containers
     , vector
     , wai

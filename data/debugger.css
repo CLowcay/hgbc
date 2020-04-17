@@ -189,10 +189,16 @@ div.memory div.hex {
   white-space: nowrap;
 }
 
+div.disassembly {
+  --line-height: 1.5em;
+  --n-lines: 20;
+}
 div.disassembly div.window {
+  position:relative;
   overflow: hidden;
-  margin: 0 var(--padding) var(--padding);
+  height: calc(var(--line-height) * var(--n-lines));
   white-space: pre;
+  margin: 0 var(--padding) var(--padding);
 }
 div.disassembly span.instruction {
   display: inline-block;
@@ -211,13 +217,15 @@ div.disassembly span.overlapping {
 }
 div.disassembly ul {
   list-style: none;
+  position: absolute;
+  left: 0; top: 0; width: 100%;
   margin: 0;
   padding: 0;
   background-color: var(--value-background);
 }
 div.disassembly li {
   position: relative;
-  line-height: 1.4em;
+  line-height: var(--line-height);
   background-color: var(--active-background);
 }
 div.disassembly li.selected {

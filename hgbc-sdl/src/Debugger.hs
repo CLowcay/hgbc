@@ -17,11 +17,14 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Data.Aeson
+import           Data.Aeson.Encoding            ( list )
 import           Data.FileEmbed
 import           Data.Functor.Identity
 import           Data.IORef
 import           Data.Maybe
 import           Data.String
+import           Data.Time.Format
+import           Data.Time.LocalTime
 import           Data.Traversable
 import           Data.Word
 import           Debugger.HTML
@@ -33,6 +36,7 @@ import           Machine.GBC.Memory             ( readChunk
                                                 , getBank
                                                 )
 import           Machine.GBC.Util               ( formatHex )
+import           System.IO
 import           Text.Read
 import qualified Config
 import qualified Control.Concurrent.Async      as Async
@@ -72,6 +76,19 @@ data DebugState = DebugState {
   , labels         :: IORef (HM.HashMap LongAddress T.Text)
 }
 
+logError :: Wai.Request -> String -> IO ()
+logError req message = do
+  time <- getZonedTime
+  hPutStrLn
+    stderr
+    (  "["
+    <> formatTime defaultTimeLocale "%F %T%3Q UTC%z" time
+    <> "] "
+    <> (CB.unpack (Wai.requestMethod req) <> " ")
+    <> (CB.unpack (Wai.rawPathInfo req) <> ": ")
+    <> message
+    )
+
 start
   :: FilePath
   -> Config.Config Identity
@@ -80,7 +97,7 @@ start
   -> DebugState
   -> IO DebuggerChannel
 start romFileName Config.Config {..} emulator emulatorState debugState = do
-  channel <- DebuggerChannel <$> newTChanIO
+  channel <- DebuggerChannel <$> newBroadcastTChanIO
   void $ forkIO $ Warp.run debugPort
                            (debugger channel romFileName emulator emulatorState debugState)
   pure channel
@@ -120,63 +137,53 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             pure emptyResponse
           [("runTo", _), ("bank", Just bank), ("offset", Just offset)] ->
             case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
-              Nothing -> do
-                putStrLn ("Invalid parameters for runTo command: " <> show body)
-                pure (httpError HTTP.status422 "invalid parameters")
+              Nothing      -> invalidCommandParamters "runTo"
               Just address -> do
                 Emulator.sendNotification emulator (Emulator.RunToNotification address)
                 pure emptyResponse
-          query -> do
-            putStrLn ("Invalid command: " <> show query)
-            pure (httpError HTTP.status422 "Invalid command")
-      method -> pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /"))
+          _ -> invalidCommand ""
+      _ -> badMethod
 
-    ["css"] -> pure debugCSS
-    ["js" ] -> pure debugJS
+    ["css"] -> whenMethodGET (pure debugCSS)
+    ["js" ] -> whenMethodGET (pure debugJS)
     ["svg", "run"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/play.svg", "../data/play.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/play.svg", "../data/play.svg"]))
     ["svg", "pause"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/pause.svg", "../data/pause.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/pause.svg", "../data/pause.svg"]))
     ["svg", "step"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/step.svg", "../data/step.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/step.svg", "../data/step.svg"]))
     ["svg", "stepout"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/stepout.svg", "../data/stepout.svg"])))
-    ["svg", "stepthrough"] -> pure
-      (svg (LB.fromStrict $(embedOneFileOf ["data/stepthrough.svg", "../data/stepthrough.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/stepout.svg", "../data/stepout.svg"]))
+    ["svg", "stepthrough"] ->
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/stepthrough.svg", "../data/stepthrough.svg"]))
     ["svg", "reset"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/reset.svg", "../data/reset.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/reset.svg", "../data/reset.svg"]))
     ["svg", "runto"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/runto.svg", "../data/runto.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/runto.svg", "../data/runto.svg"]))
     ["svg", "breakpoint"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/breakpoint.svg", "../data/breakpoint.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/breakpoint.svg", "../data/breakpoint.svg"]))
     ["svg", "home"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"]))
     ["svg", "label"] ->
-      pure (svg (LB.fromStrict $(embedOneFileOf ["data/label.svg", "../data/label.svg"])))
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/label.svg", "../data/label.svg"]))
 
-    ["memory"] -> case Wai.queryString req of
+    ["memory"] -> whenMethodGET $ case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->
         case (,) <$> readMaybe ("0x" <> CB.unpack addressText) <*> readMaybe (CB.unpack rawLines) of
-          Nothing -> do
-            putStrLn ("Invalid parameters for /memory: " <> show (Wai.queryString req))
-            pure (httpError HTTP.status422 "invalid parameters")
+          Nothing -> invalidQuery
           Just (address, memLines) ->
             Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "text/plain")]
               <$> getMemoryAt address memLines emulatorState
-      query -> do
-        putStrLn ("Invalid query string for /memory: " <> show query)
-        pure (httpError HTTP.status422 "invalid query string")
+      _ -> invalidQuery
 
-    ["disassembly"] -> case Wai.queryString req of
+    ["disassembly"] -> whenMethodGET $ case Wai.queryString req of
       [("bank", Just bank), ("offset", Just offset), ("n", Just linesText)] ->
         case
             (,)
             <$> (LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset)
             <*> readMaybeText linesText
           of
-            Nothing -> do
-              putStrLn ("Invalid parameters for /disassembly: " <> show (Wai.queryString req))
-              pure (httpError HTTP.status422 "invalid parameters")
+            Nothing           -> invalidQuery
             Just (address, n) -> do
               disassembly <- readIORef (disassemblyRef debugState)
               let fields = lookupN disassembly n address
@@ -193,70 +200,75 @@ debugger channel romFileName emulator emulatorState debugState req respond =
                   $ ["fields" .= fields, "breakpoints" .= breakpoints]
                   )
                 )
-      query -> do
-        putStrLn ("Invalid query string for /disassembly: " <> show query)
-        pure (httpError HTTP.status422 "invalid query string")
+      _ -> invalidQuery
 
-    ["breakpoints"] -> withAddress "breakpoints" $ \address -> case Wai.requestMethod req of
-      "POST" -> do
-        body <- Wai.lazyRequestBody req
-        case HTTP.parseQuery (LB.toStrict body) of
-          [("set", _)] -> do
-            H.insert (breakpoints debugState) address ()
-            sendNotification channel (BreakPointAdded address)
-            pure emptyResponse
-          [("unset", _)] -> do
-            H.delete (breakpoints debugState) address
-            sendNotification channel (BreakPointRemoved address)
-            pure emptyResponse
-          query -> do
-            putStrLn ("Invalid breakpoint command: " <> show query)
-            pure (httpError HTTP.status422 "Invalid breakpoint command")
-      method ->
-        pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
+    ["breakpoints"] -> withAddress $ \address -> whenMethodPOST $ do
+      body <- Wai.lazyRequestBody req
+      case HTTP.parseQuery (LB.toStrict body) of
+        [("set", _)] -> do
+          H.insert (breakpoints debugState) address ()
+          sendNotification channel (BreakPointAdded address)
+          pure emptyResponse
+        [("unset", _)] -> do
+          H.delete (breakpoints debugState) address
+          sendNotification channel (BreakPointRemoved address)
+          pure emptyResponse
+        _ -> invalidCommand "breakpoints"
 
-    ["label"] -> withAddress "label" $ \address -> case Wai.requestMethod req of
-      "POST" -> do
-        body <- Wai.lazyRequestBody req
-        case HTTP.parseQuery (LB.toStrict body) of
-          [("update", Just rawText)] -> do
-            let text = T.decodeUtf8With T.lenientDecode rawText
-            modifyIORef' (labels debugState) (HM.insert address text)
-            sendNotification channel (LabelUpdated address text)
-            pure emptyResponse
-          [("delete", _)] -> do
-            modifyIORef' (labels debugState) (HM.delete address)
-            sendNotification channel (LabelRemoved address)
-            pure emptyResponse
-          query -> do
-            putStrLn ("Invalid breakpoint command: " <> show query)
-            pure (httpError HTTP.status422 "Invalid breakpoint command")
-      method ->
-        pure (httpError HTTP.status404 ("Cannot " <> LB.fromStrict method <> " on /breakpoints"))
+    ["labels"] -> whenMethodGET $ do
+      allLabels <- HM.toList <$> readIORef (labels debugState)
+      let labelsJSON =
+            list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) allLabels
+      pure
+        (Wai.responseLBS HTTP.status200
+                         [(HTTP.hContentType, "application/json")]
+                         (BNB.toLazyByteString (fromEncoding labelsJSON))
+        )
 
-    ["events"] -> pure (events channel emulatorState)
+    ["label"] -> withAddress $ \address -> whenMethodPOST $ do
+      body <- Wai.lazyRequestBody req
+      case HTTP.parseQuery (LB.toStrict body) of
+        [("update", Just rawText)] -> do
+          let text = T.decodeUtf8With T.lenientDecode rawText
+          modifyIORef' (labels debugState) (HM.insert address text)
+          sendNotification channel (LabelUpdated address text)
+          pure emptyResponse
+        [("delete", _)] -> do
+          modifyIORef' (labels debugState) (HM.delete address)
+          sendNotification channel (LabelRemoved address)
+          pure emptyResponse
+        _ -> invalidCommand "label"
 
-    path       -> do
-      putStrLn ("No such resource  " <> show path)
-      pure (httpError HTTP.status404 ("No such resource " <> LB.fromStrict (Wai.rawPathInfo req)))
+    ["events"] -> whenMethodGET (pure (events channel emulatorState))
+    _          -> resourceNotFound
 
  where
   emptyResponse = Wai.responseLBS HTTP.status200
                                   [(HTTP.hContentType, "text/html")]
                                   "<html><head><meta charset=UTF-8></head></html>"
-  httpError status = Wai.responseLBS status [(HTTP.hContentType, "text/plain")]
+  httpError status message = do
+    logError req (LBC.unpack message)
+    pure (Wai.responseLBS status [(HTTP.hContentType, "text/plain")] message)
+  badMethod        = httpError HTTP.status405 "Method not supported"
+  resourceNotFound = httpError HTTP.status404 "No such resource"
+  invalidCommandParamters resource =
+    httpError HTTP.status422 ("Invalid parameters for " <> resource <> " command")
+  invalidCommand resource = httpError
+    HTTP.status422
+    (if LBC.null resource then "Invalid command" else "Invalid " <> resource <> " command")
+  invalidQuery = httpError HTTP.status422 "Invalid query string"
   readMaybeHexText t = readMaybe ("0x" <> CB.unpack t)
   readMaybeText t = readMaybe (CB.unpack t)
-  withAddress endpoint handler = case Wai.queryString req of
+  whenMethodGET handler = if Wai.requestMethod req == "GET" then handler else badMethod
+  whenMethodPOST handler = if Wai.requestMethod req == "POST" then handler else badMethod
+  withAddress handler = case Wai.queryString req of
     [("bank", Just bank), ("offset", Just offset)] ->
-      case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
-        Nothing -> do
-          putStrLn ("Invalid parameters for /" <> endpoint <> ": " <> show (Wai.queryString req))
-          pure (httpError HTTP.status422 "invalid parameters")
-        Just address -> handler address
-    query -> do
-      putStrLn ("Invalid query string for /" <> endpoint <> ": " <> show query)
-      pure (httpError HTTP.status422 "invalid query string")
+      maybe invalidQuery handler (LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset)
+    _ -> invalidQuery
+
+  getSVG :: LB.ByteString -> IO Wai.Response
+  getSVG content = whenMethodGET
+    (pure (Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "image/svg+xml")] content))
 
 keepAliveTime :: Int
 keepAliveTime = 60 * 1000000
@@ -265,14 +277,53 @@ updateDelay :: Int
 updateDelay = 250000
 
 events :: DebuggerChannel -> EmulatorState -> Wai.Response
-events (DebuggerChannel channel) emulatorState = Wai.responseStream
+events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
   HTTP.status200
   [(HTTP.hContentType, "text/event-stream"), (HTTP.hCacheControl, "no-cache")]
   eventStream
 
  where
   eventStream :: (BB.Builder -> IO ()) -> IO () -> IO ()
-  eventStream write flush = pushPaused >> continue True
+  eventStream write flush = do
+    channel <- atomically (dupTChan writeChannel)
+    let continue isPaused = do
+          event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
+                              (atomically (readTChan channel))
+          case event of
+            Left () -> do
+              if isPaused then write ": keep-alive\n\n" >> flush else pushStatus
+              continue isPaused
+            Right EmulatorStarted -> do
+              write "event: started\ndata:\n\n" >> flush
+              continue False
+            Right EmulatorPaused -> do
+              pushPaused
+              continue True
+            Right (BreakPointAdded address) -> do
+              write "event: breakpoint-added\ndata:"
+              pushAddress address
+              continue isPaused
+            Right (BreakPointRemoved address) -> do
+              write "event: breakpoint-removed\ndata:"
+              pushAddress address
+              continue isPaused
+            Right (LabelUpdated address text) -> do
+              write "event: label-added\ndata:"
+              write
+                (  "{\"address\":"
+                <> BB.lazyByteString (encode address)
+                <> ",\"text\":"
+                <> fromString (show text)
+                <> "}\n\n"
+                )
+              flush
+              continue isPaused
+            Right (LabelRemoved address) -> do
+              write "event: label-removed\ndata:"
+              pushAddress address
+              continue isPaused
+
+    pushPaused >> continue True
 
    where
     pushStatus = do
@@ -299,41 +350,6 @@ events (DebuggerChannel channel) emulatorState = Wai.responseStream
     pushAddress address = do
       write (BB.lazyByteString (encode address))
       write "\n\n" >> flush
-    continue isPaused = do
-      event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
-                          (atomically (readTChan channel))
-      case event of
-        Left () -> do
-          if isPaused then write ": keep-alive\n\n" >> flush else pushStatus
-          continue isPaused
-        Right EmulatorStarted -> do
-          write "event: started\ndata:\n\n" >> flush
-          continue False
-        Right EmulatorPaused -> do
-          pushPaused
-          continue True
-        Right (BreakPointAdded address) -> do
-          write "event: breakpoint-added\ndata:"
-          pushAddress address
-          continue isPaused
-        Right (BreakPointRemoved address) -> do
-          write "event: breakpoint-removed\ndata:"
-          pushAddress address
-          continue isPaused
-        Right (LabelUpdated address text) -> do
-          write "event: label-added\ndata:"
-          write
-            (  "{\"address\":"
-            <> BB.lazyByteString (encode address)
-            <> ",\"text\":"
-            <> fromString (show text)
-            <> "}\n\n"
-            )
-          continue isPaused
-        Right (LabelRemoved address) -> do
-          write "event: label-removed\ndata:"
-          pushAddress address
-          continue isPaused
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS
@@ -346,9 +362,6 @@ debugJS = Wai.responseLBS
   HTTP.status200
   [(HTTP.hContentType, "application/javascript")]
   (LB.fromStrict $(embedOneFileOf ["data/debugger.js","../data/debugger.js"]))
-
-svg :: LB.ByteString -> Wai.Response
-svg = Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "image/svg+xml")]
 
 getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
 getMemoryAt address memLines emulatorState = do

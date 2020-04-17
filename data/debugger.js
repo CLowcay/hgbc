@@ -12,6 +12,10 @@ window.onload = () => {
     event => disassembly.breakPointAdded(JSON.parse(event.data)));
   eventSource.addEventListener('breakpoint-removed',
     event => disassembly.breakPointRemoved(JSON.parse(event.data)));
+  eventSource.addEventListener('label-added',
+    event => disassembly.labelUpdated(JSON.parse(event.data)));
+  eventSource.addEventListener('label-removed',
+    event => disassembly.labelRemoved(JSON.parse(event.data)));
 
   document.getElementById('run').onclick = () => httpPOST('/', 'run');
   document.getElementById('step').onclick = () => httpPOST('/', 'step');
@@ -158,53 +162,68 @@ function Memory() {
  *****************************************************************************/
 function Disassembly() {
   const LINES = 20;
+  const LINE_HEIGHT = 1.5;
 
   const state = {
     lines: [], // { address, field :: { text, data } | label :: string, li :: Element<li> }
+    scrollIndex: 0,
+    maxScrollIndex: LINES,
     pc: { bank: 0, offset: 0 },
-    selection: { bank: 0, offset: 0 }
+    selection: { isLabel: false, address: { bank: 0, offset: 0 } },
+    labels: {} // address => text
   };
 
+  let uninitialized = true;
   this.setPC = setPC;
   this.revealPC = () => {
-    if (!getVisibleLineAt(state.pc)) jumpTo(state.pc);
-    setSelection(state.pc);
+    jumpTo(state.pc, () => {
+      if (uninitialized) {
+        setSelection({ address: state.pc, isLabel: false });
+        uninitialized = false;
+      }
+    });
   };
+
   this.breakPointAdded = function (address) {
-    const line = getVisibleLineAt(address);
-    if (line) line.li.querySelector('input.breakpoint').classList.add('set');
+    const li = getFieldLI(address);
+    if (li) li.querySelector('input.breakpoint').classList.add('set');
   };
   this.breakPointRemoved = function (address) {
-    const line = getVisibleLineAt(address);
-    if (line) line.li.querySelector('input.breakpoint').classList.remove('set');
+    const li = getFieldLI(address);
+    if (li) li.querySelector('input.breakpoint').classList.remove('set');
   };
-  this.labelUpdated = function (label) {  // {address, text}
-
-  }
-  this.labelRemoved = function (label) {
-
-  }
+  this.labelUpdated = function (label) {
+    state.labels[formatLongAddress(label.address)] = label.text;
+    refreshListing();
+  };
+  this.labelRemoved = function (address) {
+    delete state.labels[formatLongAddress(address)];
+    refreshListing();
+  };
 
   // Set up the disassembler buttons.
   document.getElementById('toPC').onclick = () => {
-    if (!getVisibleLineAt(state.pc)) jumpTo(state.pc);
-    setSelection(state.pc);
-  };
-  document.getElementById('runTo').onclick = () => runToAddress(state.selection);
-  document.getElementById('breakpoint').onclick = () => {
-    if (!getVisibleLineAt(state.selection)) jumpTo(state.selection);
-    toggleBreakpointAtVisibleAddress(state.selection);
-  };
-  // TODO: implement labels
-  //document.getElementById('label')
+    jumpTo(state.pc, () => setSelection({ address: state.pc, isLabel: false }));
+  }
+  document.getElementById('runTo').onclick = () => runToAddress(state.selection.address);
+  document.getElementById('breakpoint').onclick = () =>
+    jumpTo(state.selection.address, () =>
+      toggleBreakpointAtVisibleAddress(state.selection.address));
+  document.getElementById('label').onclick = () => {
+    const address = state.selection.address;
+    jumpTo(address);
+    const uri = "label?bank=" + address.bank.toString(16) +
+      "&offset=" + address.offset.toString(16);
+    httpPOST(uri, "update=newLabel");
+  }
 
   document.getElementById('disassemblyList').addEventListener('wheel', onWheel);
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
-  disassemblyAddress.addEventListener('input', event => {
+  disassemblyAddress.addEventListener('blur', () => refreshDisassemblyAddress());
+  disassemblyAddress.addEventListener('input', () => {
     const address = parseLongAddress(state.lines[0].address, disassemblyAddress.value);
-    jumpTo(address);
-    setSelection(address);
+    jumpTo(address, () => setSelection({ address: address, isLabel: false }));
   });
   disassemblyAddress.addEventListener('keydown', event => {
     switch (event.code) {
@@ -246,20 +265,12 @@ function Disassembly() {
     }
   });
 
-  function getVisibleLineAt(address) {
-    return state.lines.find(line => sameAddress(line.address, address));
-  }
-
-  function toggleBreakpointAtVisibleAddress(address) {
-    const button = getVisibleLineAt(state.selection).li.querySelector('input.breakpoint');
-    const uri = '/breakpoints?bank=' + address.bank.toString(16) +
-      '&offset=' + address.offset.toString(16);
-    if (button.classList.contains('set')) {
-      httpPOST(uri, 'unset');
-    } else {
-      httpPOST(uri, 'set');
-    }
-  }
+  // initialize the labels
+  httpGET('labels', text => {
+    JSON.parse(text).forEach(label =>
+      state.labels[formatLongAddress(label.address)] = label.text);
+    refreshListing();
+  });
 
   function onWheel(event) {
     event.preventDefault();
@@ -273,7 +284,135 @@ function Disassembly() {
     }
   }
 
-  function formatDisassemblyField(field, breakpoints) {
+  function lineAt(position) {
+    return state.lines.find(line =>
+      sameAddress(line.address, position.address) &&
+      position.isLabel === line.hasOwnProperty('label'));
+  }
+
+  function positionToIndex(position) {
+    return state.lines.findIndex(line =>
+      sameAddress(line.address, position.address) &&
+      (line.hasOwnProperty('label') ? position.isLabel : true));
+  }
+
+  function indexToPosition(index) {
+    const line = state.lines[index];
+    return {
+      address: line.address,
+      isLabel: line.hasOwnProperty('label')
+    };
+  }
+
+  function getLI(position) {
+    const line = lineAt(position);
+    return line ? line.li : undefined;
+  }
+
+  function getFieldLI(address) {
+    return getLI({ address: address, isLabel: false });
+  }
+
+  function isVisible(position) {
+    const i = positionToIndex(position);
+    return i >= state.scrollIndex && i < state.scrollIndex + LINES;
+  }
+
+  function updateMaxScrollIndex() {
+    state.maxScrollIndex = state.lines.length - LINES;
+  }
+
+  function toggleBreakpointAtVisibleAddress(address) {
+    const button = getFieldLI(state.selection.address).querySelector('input.breakpoint');
+    const uri = '/breakpoints?bank=' + address.bank.toString(16) +
+      '&offset=' + address.offset.toString(16);
+    if (button.classList.contains('set')) {
+      httpPOST(uri, 'unset');
+    } else {
+      httpPOST(uri, 'set');
+    }
+  }
+
+  function updateLabels(lines) {
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.hasOwnProperty('label')) {
+        i += 2;
+      } else {
+        const label = state.labels[formatLongAddress(line.address)];
+        if (label !== undefined) {
+          lines.splice(i, 0, {
+            address: line.address,
+            label: label,
+            li: createLabel(line.address, label)
+          });
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+    }
+  }
+
+  function refreshListing() {
+    updateLabels(state.lines);
+    updateMaxScrollIndex();
+    const ul = document.getElementById('disassemblyList');
+    ul.innerHTML = '';
+    state.lines.forEach(line => ul.appendChild(line.li));
+  }
+
+  function setScrollIndex(index) {
+    state.scrollIndex = index;
+    document.getElementById('disassemblyList').style.top =
+      (LINE_HEIGHT * -index).toString() + 'em';
+  }
+
+  function setPC(pc) {
+    const oldPCLine = getFieldLI(state.pc);
+    if (oldPCLine) oldPCLine.classList.remove('pc');
+
+    state.pc = pc;
+    const pcLine = getFieldLI(pc);
+    if (pcLine) pcLine.classList.add('pc');
+  }
+
+  function refreshDisassemblyAddress() {
+    disassemblyAddress.value = formatLongAddress(state.selection.address);
+  }
+
+  function setSelection(position) {
+    const oldLine = getLI(state.selection);
+    if (oldLine) oldLine.classList.remove('selected');
+
+    const newLine = getLI(position);
+    if (newLine) newLine.classList.add('selected');
+
+    state.selection = position;
+    if (document.activeElement !== disassemblyAddress) {
+      refreshDisassemblyAddress();
+    }
+  }
+
+  function createLabel(address, labelText) {
+    const li = document.createElement('li');
+    const text = document.createElement('span');
+    text.innerText = labelText;
+    const colon = document.createElement('span');
+    colon.innerText = ':';
+    li.appendChild(text);
+    li.appendChild(colon);
+
+    li.onmousedown = () => setSelection({ address: address, isLabel: true });
+    li.onmouseup = () => setSelection({ address: address, isLabel: true });
+    li.onmousemove = event => {
+      if (event.buttons > 0) setSelection({ address: address, isLabel: true });
+    };
+    return li;
+  }
+
+  function createField(field, breakpoints) {
     const li = document.createElement('li');
 
     const breakpoint = document.createElement('input');
@@ -324,40 +463,101 @@ function Disassembly() {
       li.appendChild(overlapping);
     }
 
-    li.onmousedown = () => setSelection(field.address);
-    li.onmouseup = () => setSelection(field.address);
+    li.onmousedown = () => setSelection({ address: field.address, isLabel: false });
+    li.onmouseup = () => setSelection({ address: field.address, isLabel: false });
     li.onmousemove = event => {
-      if (event.buttons > 0) setSelection(field.address);
+      if (event.buttons > 0) setSelection({ address: field.address, isLabel: false });
     };
 
     return li;
   }
 
-  function setPC(pc) {
-    const oldPCLine = getVisibleLineAt(state.pc);
-    if (oldPCLine) oldPCLine.li.classList.remove('pc');
+  function jumpTo(address, continuation) {
+    if (isVisible({ address: address, isLabel: true })) {
+      if (continuation) continuation();
+      return;
+    };
+    httpGET(
+      "disassembly?bank=" + address.bank.toString(16) +
+      "&offset=" + address.offset.toString(16) +
+      "&n=" + LINES,
+      text => {
+        const disassembly = JSON.parse(text);
+        state.lines = disassembly.fields.slice(0, LINES).map(field => {
+          return {
+            address: field.address, field: field,
+            li: createField(field, disassembly.breakpoints)
+          };
+        })
 
-    state.pc = pc;
-    const pcLine = getVisibleLineAt(pc);
-    if (pcLine) pcLine.li.classList.add('pc');
+        setScrollIndex(0);
+        refreshListing();
+        setPC(state.pc);
+        setSelection(state.selection);
+        if (continuation) continuation();
+      });
   }
 
-  const scrollQueue = [];
+  function moveSelection(amount) {
+    const i = positionToIndex(state.selection);
+    if (i < state.scrollIndex || i >= state.scrollIndex + LINES) {
+      jumpTo(state.selection.address, () => moveSelection(amount));
+    } else {
+      const iNext = i + amount;
+      if (iNext < state.scrollIndex) {
+        scroll(iNext - state.scrollIndex, () => {
+          setSelection(indexToPosition(state.scrollIndex));
+          refreshDisassemblyAddress();
+        });
+      } else if (iNext >= state.scrollIndex + LINES) {
+        scroll(iNext - LINES - state.scrollIndex + 1, () => {
+          setSelection(indexToPosition(state.scrollIndex + LINES - 1))
+          refreshDisassemblyAddress();
+        });
+      } else {
+        setSelection(indexToPosition(iNext));
+        refreshDisassemblyAddress();
+      }
+    }
+  }
+
+  let isScrolling = false;
+  let nextScrollAmount = 0;
   function scroll(amount, continuation) {
-    scrollQueue.push(amount);
-    if (scrollQueue.length === 1) {
+    if (!isScrolling) {
       doScroll(amount);
+    } else {
+      nextScrollAmount += amount;
+    }
+
+    function doNextScroll() {
+      if (nextScrollAmount === 0) {
+        isScrolling = false;
+      } else {
+        const total = nextScrollAmount;
+        nextScrollAmount = 0;
+        doScroll(total);
+      }
     }
 
     function doScroll(amount) {
-      const baseAddress = (amount < 0
+      isScrolling = true;
+      const adjustedAmount = state.scrollIndex + amount;
+      if (adjustedAmount >= 0 && adjustedAmount <= state.maxScrollIndex) {
+        setScrollIndex(adjustedAmount);
+        if (continuation) continuation();
+        doNextScroll();
+        return;
+      }
+
+      const baseAddress = (adjustedAmount < 0
         ? state.lines[0]
         : state.lines[state.lines.length - 1]).address;
 
       httpGET(
         "disassembly?bank=" + baseAddress.bank.toString(16) +
         "&offset=" + baseAddress.offset.toString(16) +
-        "&n=" + amount,
+        "&n=" + adjustedAmount,
         text => {
           const disassembly = JSON.parse(text);
           const newFields = disassembly.fields.slice(1)
@@ -365,37 +565,46 @@ function Disassembly() {
               return {
                 address: field.address,
                 field: field,
-                li: formatDisassemblyField(field, disassembly.breakpoints)
-              }
+                li: createField(field, disassembly.breakpoints)
+              };
             });
 
           const ul = document.getElementById('disassemblyList');
-          if (amount < 0) {
+          if (adjustedAmount < 0) {
             newFields.reverse();
-            state.lines = newFields.concat(state.lines).slice(0, LINES);
+            updateLabels(newFields);
+            state.lines = newFields.concat(state.lines);
             ul.prepend(...newFields.map(line => line.li));
-            while (ul.childNodes.length > LINES) {
-              ul.removeChild(ul.lastChild);
-            }
+            setScrollIndex(Math.max(0, newFields.length + adjustedAmount));
+
+            let i0 = state.scrollIndex + LINES;
+            if (state.lines[i0 - 1].hasOwnProperty('label')) i0 += 1;
+            state.lines.splice(i0).forEach(line => ul.removeChild(line.li));
+
           } else {
-            state.lines = state.lines.concat(newFields).slice(newFields.length);
+            updateLabels(newFields);
+            state.lines = state.lines.concat(newFields);
             ul.append(...newFields.map(line => line.li));
-            while (ul.childNodes.length > LINES) {
-              ul.removeChild(ul.firstChild);
+
+            let toTrim = adjustedAmount;
+            if (state.lines[toTrim - 1].hasOwnProperty('label')) {
+              toTrim -= 1;
+              setScrollIndex(1);
+            } else {
+              setScrollIndex(0);
             }
+
+            state.lines.splice(0, toTrim).forEach(line => ul.removeChild(line.li));
           }
 
+          updateMaxScrollIndex();
           setPC(state.pc);
           setSelection(state.selection);
-          if (continuation) continuation();
-
-          scrollQueue.shift();
-          if (scrollQueue.length > 0) {
-            doScroll(scrollQueue[0]);
-          }
+          if (continuation) continuation()
+          doNextScroll();
         },
         error => {
-          scrollQueue.slice(0, 0);
+          isScrolling = false;
         }
       );
     }
@@ -404,58 +613,6 @@ function Disassembly() {
   function runToAddress(address) {
     httpPOST('/', 'runTo=&bank=' +
       address.bank.toString(16) + '&offset=' + address.offset.toString(16));
-  }
-
-  function jumpTo(address, continuation) {
-    httpGET(
-      "disassembly?bank=" + address.bank.toString(16) +
-      "&offset=" + address.offset.toString(16) +
-      "&n=" + LINES,
-      text => {
-        const disassembly = JSON.parse(text);
-
-        const ul = document.getElementById('disassemblyList');
-        ul.innerHTML = '';
-        state.lines = [];
-        for (const field of disassembly.fields.slice(0, LINES)) {
-          const li = formatDisassemblyField(field, disassembly.breakpoints);
-          ul.appendChild(li);
-          state.lines.push({ address: field.address, field: field, li: li });
-        }
-
-        setPC(state.pc);
-        setSelection(state.selection);
-        if (continuation) continuation();
-      });
-  }
-
-  function setSelection(address) {
-    const oldSelection = getVisibleLineAt(state.selection);
-    if (oldSelection) oldSelection.li.classList.remove('selected');
-
-    const selection = getVisibleLineAt(address);
-    if (selection) selection.li.classList.add('selected');
-
-    if (!sameAddress(state.selection, address)) {
-      state.selection = address;
-      disassemblyAddress.value = formatLongAddress(address);
-    }
-  }
-
-  function moveSelection(amount) {
-    const i = state.lines.findIndex(line => sameAddress(line.address, state.selection));
-    if (i === -1) {
-      jumpTo(state.selection, () => moveSelection(amount));
-    } else {
-      const iNext = i + amount;
-      if (iNext < 0) {
-        scroll(iNext, () => setSelection(state.lines[0].address));
-      } else if (iNext >= LINES) {
-        scroll(iNext - LINES + 1, () => setSelection(state.lines[LINES - 1].address));
-      } else {
-        setSelection(state.lines[iNext].address);
-      }
-    }
   }
 }
 
