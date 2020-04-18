@@ -23,15 +23,18 @@ window.onload = () => {
   document.getElementById('stepOut').onclick = () => httpPOST('/', 'stepOut');
   document.getElementById('restart').onclick = () => httpPOST('/', 'restart');
 
-  document.addEventListener('keydown', event => {
-    switch (event.code) {
-      case 'KeyG':
-        if (event.ctrlKey) {
-          event.preventDefault();
-          document.getElementById('disassemblyAddress').focus();
-        }
-    }
-  });
+  const globalKeymap = new KeyMap();
+  document.addEventListener('keydown', globalKeymap.handleEvent);
+
+  globalKeymap.override('control KeyG', () =>
+    document.getElementById('disassemblyAddress').focus());
+  globalKeymap.override('control KeyI', () => httpPOST('/', 'step'));
+  globalKeymap.override('control KeyO', () => httpPOST('/', 'stepOut'));
+  globalKeymap.override('control KeyP', () => httpPOST('/', 'stepOver'));
+  globalKeymap.override('control shift KeyR', () => httpPOST('/', 'restart'));
+  globalKeymap.override('Pause', () => httpPOST('/', 'run'));
+  globalKeymap.override('control KeyR', () => httpPOST('/', 'run'));
+  globalKeymap.override('control Home', () => disassembly.revealPC());
 };
 
 /*****************************************************************************
@@ -185,15 +188,10 @@ function Disassembly() {
 
   let newestLabel = undefined;
 
-  let uninitialized = true;
   this.setPC = setPC;
-  this.revealPC = () => {
-    jumpTo(state.pc, () => {
-      if (uninitialized) {
-        setSelection({ address: state.pc, isLabel: false });
-        uninitialized = false;
-      }
-    });
+  this.revealPC = function () {
+    jumpTo(state.pc, () =>
+      setSelection({ address: state.pc, isLabel: false }));
   };
 
   this.breakPointAdded = function (address) {
@@ -223,11 +221,8 @@ function Disassembly() {
       toggleBreakpointAtVisibleAddress(state.selection.address));
   document.getElementById('label').onclick = () => {
     const address = state.selection.address;
-    jumpTo(address);
-    if (state.labels[formatLongAddress(address)] === undefined) {
-      newestLabel = address;
-      postLabelUpdate(address, "newLabel");
-    } else {
+    if (!newLabelAt(address)) {
+      jumpTo(address);
       const position = { address: address, isLabel: true };
       const text = getLI(position).firstChild;
       setSelection(position);
@@ -235,50 +230,27 @@ function Disassembly() {
     }
   }
 
+  const disassemblyKeymap = new KeyMap();
   const disassemblyWindow = document.querySelector('div.disassembly div.window');
   disassemblyWindow.addEventListener('wheel', onWheel);
-  disassemblyWindow.addEventListener('keydown', event => {
-    switch (event.key) {
-      case 'ArrowUp':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        return moveSelection(-1);
-      case 'ArrowDown':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        return moveSelection(1);
-      case 'PageUp':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        return moveSelection(-LINES);
-      case 'PageDown':
-        event.preventDefault();
-        return moveSelection(LINES);
-      case '+':
-        const address = state.selection.address;
-        if (state.labels[formatLongAddress(address)] === undefined) {
-          jumpTo(address);
-          newestLabel = address;
-          postLabelUpdate(address, "newLabel");
-        }
-        break;
-      case 'Home':
-      case 'End':
-      case 'ArrowLeft':
-      case 'ArrowRight':
-      case ' ':
-        if (!event.target.classList.contains('label')) {
-          event.preventDefault();
-          moveSelection(0);
-          updateFocus();
-        }
-        break;
-      case 'Enter':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        moveSelection(1);
-    }
-  });
+  disassemblyWindow.addEventListener('keydown', disassemblyKeymap.handleEvent);
+
+  disassemblyKeymap.override('ArrowUp', () => moveSelection(-1));
+  disassemblyKeymap.override('ArrowDown', () => moveSelection(1));
+  disassemblyKeymap.override('PageUp', () => moveSelection(-LINES));
+  disassemblyKeymap.override('PageDown', () => moveSelection(LINES));
+  disassemblyKeymap.override('Enter', () => moveSelection(1));
+  disassemblyKeymap.override('NumpadEnter', () => moveSelection(1));
+  disassemblyKeymap.add('shift Equal', () => newLabelAt(state.selection.address));
+  disassemblyKeymap.add('NumpadAdd', () => newLabelAt(state.selection.address));
+  disassemblyKeymap.add('Home', handleFocusSelection);
+  disassemblyKeymap.add('End', handleFocusSelection);
+  disassemblyKeymap.add('ArrowLeft', handleFocusSelection);
+  disassemblyKeymap.add('ArrowRight', handleFocusSelection);
+  disassemblyKeymap.add('Space', handleFocusSelection);
+  disassemblyKeymap.override('control KeyH', () => runToAddress(state.selection.address));
+  disassemblyKeymap.override('control KeyB', () => jumpTo(state.selection.address, () =>
+    toggleBreakpointAtVisibleAddress(state.selection.address)));
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('blur', () => refreshDisassemblyAddress());
@@ -286,24 +258,21 @@ function Disassembly() {
     const address = parseLongAddress(state.lines[0].address, disassemblyAddress.value);
     jumpTo(address, () => setSelection({ address: address, isLabel: false }));
   });
-  disassemblyAddress.addEventListener('keydown', event => {
-    switch (event.code) {
-      case 'ArrowUp':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        moveSelection(-1);
-        break;
-      case 'ArrowDown':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        moveSelection(1);
-        break;
-      case 'Enter':
-        event.preventDefault();
-        disassemblyWindow.focus();
-        moveSelection(0);
-        break;
-    }
+
+  const disassemblyAddressKeymap = new KeyMap();
+  disassemblyAddress.addEventListener('keydown', disassemblyAddressKeymap.handleEvent);
+
+  disassemblyAddressKeymap.override('ArrowUp', () => {
+    disassemblyWindow.focus();
+    moveSelection(-1);
+  });
+  disassemblyAddressKeymap.override('ArrowDown', () => {
+    disassemblyWindow.focus();
+    moveSelection(1);
+  });
+  disassemblyAddressKeymap.override('Enter', () => {
+    disassemblyWindow.focus();
+    moveSelection(0);
   });
 
   // initialize the labels
@@ -312,6 +281,25 @@ function Disassembly() {
       state.labels[formatLongAddress(label.address)] = label.text);
     refreshListing();
   });
+
+  function newLabelAt(address) {
+    if (state.labels[formatLongAddress(address)] === undefined) {
+      jumpTo(address);
+      newestLabel = address;
+      postLabelUpdate(address, "newLabel");
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  function handleFocusSelection(event) {
+    if (!event.target.classList.contains('label')) {
+      event.preventDefault();
+      moveSelection(0);
+      updateFocus();
+    }
+  }
 
   function postLabelUpdate(address, text) {
     const uri = "label?bank=" + address.bank.toString(16) +
@@ -333,13 +321,15 @@ function Disassembly() {
 
   function lineAt(position) {
     return state.lines.find(line =>
-      sameAddress(line.address, position.address) &&
+      (line.field ? addressInField(position.address, line.field) :
+        sameAddress(line.address, position.address)) &&
       position.isLabel === line.hasOwnProperty('label'));
   }
 
   function positionToIndex(position) {
     return state.lines.findIndex(line =>
-      sameAddress(line.address, position.address) &&
+      (line.field ? addressInField(position.address, line.field) :
+        sameAddress(line.address, position.address)) &&
       (line.hasOwnProperty('label') ? position.isLabel : true));
   }
 
@@ -476,20 +466,12 @@ function Disassembly() {
     text.spellcheck = false;
     text.innerText = labelText;
     text.classList.add('label');
-    text.addEventListener('keyup', event => event.stopPropagation());
-    text.addEventListener('keydown', event => {
-      switch (event.code) {
-        case 'End':
-          event.preventDefault();
-          if (event.shiftKey) {
-            window.getSelection().extend(text, 1);
-          } else {
-            window.getSelection().collapse(text, 1);
-          }
-          break;
-      }
-    });
-    text.addEventListener('focus', () => setSelection({ address: address, isLabel: true }));
+
+    const keymap = new KeyMap();
+    keymap.override('End', () => window.getSelection().collapse(text, 1));
+    keymap.override('shift End', () => window.getSelection().extend(text, 1));
+
+    text.addEventListener('keydown', keymap.handleEvent);
     text.addEventListener('blur', () => postLabelUpdate(address, text.innerText));
 
     const colon = document.createElement('span');
@@ -707,6 +689,12 @@ function sameAddress(a, b) {
   return a.offset === b.offset && a.bank === b.bank;
 }
 
+function addressInField(address, field) {
+  return address.bank === field.address.bank &&
+    address.offset >= field.address.offset &&
+    address.offset < field.address.offset + ((field.bytes.length + 1) / 3);
+}
+
 function containsAddress(a, array) {
   return array.some(b => sameAddress(a, b));
 }
@@ -732,6 +720,54 @@ function parseLongAddress(defaultAddress, address) {
     }
   } else {
     return defaultAddress;
+  }
+}
+
+function KeyMap() {
+  const map = {};
+
+  this.add = function (key, action) {
+    map[makeKey(key)] = action;
+  };
+
+  this.override = function (key, action) {
+    map[makeKey(key)] = event => {
+      event.preventDefault();
+      action(event);
+    };
+  };
+
+  this.handleEvent = function (event) {
+    const mods = modifiersFromEvent(event);
+    let action = map[event.code + mods];
+    if (action) {
+      return action(event);
+    } else {
+      action = map[event.code];
+      if (action) return action(event);
+    }
+  }
+
+  function makeKey(key) {
+    const elements = key.split(' ');
+    const modifiers = elements.splice(0, elements.length - 1).map(mod => {
+      switch (mod) {
+        case 'control': return 1;
+        case 'alt': return 2;
+        case 'shift': return 4;
+      }
+    });
+    if (modifiers.length === 0) {
+      return elements[0];
+    } else {
+      return elements[0] + modifiers.reduce((a, i) => a | i, 0);
+    }
+  }
+
+  function modifiersFromEvent(event) {
+    return (event.ctrlKey ? 1 : 0) |
+      (event.altKey ? 2 : 0) |
+      (event.shiftKey ? 4 : 0);
   }
 }
 
