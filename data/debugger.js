@@ -224,8 +224,15 @@ function Disassembly() {
   document.getElementById('label').onclick = () => {
     const address = state.selection.address;
     jumpTo(address);
-    newestLabel = address;
-    postLabelUpdate(address, "newLabel");
+    if (state.labels[formatLongAddress(address)] === undefined) {
+      newestLabel = address;
+      postLabelUpdate(address, "newLabel");
+    } else {
+      const position = { address: address, isLabel: true };
+      const text = getLI(position).firstChild;
+      setSelection(position);
+      window.getSelection().setBaseAndExtent(text, 0, text, 1);
+    }
   }
 
   const disassemblyWindow = document.querySelector('div.disassembly div.window');
@@ -262,8 +269,8 @@ function Disassembly() {
       case ' ':
         if (!event.target.classList.contains('label')) {
           event.preventDefault();
-          disassemblyWindow.focus();
           moveSelection(0);
+          updateFocus();
         }
         break;
       case 'Enter':
@@ -437,7 +444,13 @@ function Disassembly() {
   function updateFocus() {
     if (state.selection.isLabel) {
       const li = getLI(state.selection);
-      li.querySelector('span').focus();
+      if (li && window.getSelection().isCollapsed) {
+        const span = li.firstChild;
+        span.contentEditable = true;
+        span.focus();
+      } else {
+        disassemblyWindow.focus();
+      }
     } else {
       disassemblyWindow.focus();
     }
@@ -451,7 +464,7 @@ function Disassembly() {
     if (newLine) newLine.classList.add('selected');
 
     state.selection = position;
-    if (document.activeElement !== disassemblyAddress) {
+    if (oldLine !== newLine && document.activeElement !== disassemblyAddress) {
       refreshDisassemblyAddress();
       updateFocus();
     }
@@ -460,7 +473,6 @@ function Disassembly() {
   function createLabel(address, labelText) {
     const li = document.createElement('li');
     const text = document.createElement('span');
-    text.contentEditable = true;
     text.spellcheck = false;
     text.innerText = labelText;
     text.classList.add('label');
@@ -477,6 +489,7 @@ function Disassembly() {
           break;
       }
     });
+    text.addEventListener('focus', () => setSelection({ address: address, isLabel: true }));
     text.addEventListener('blur', () => postLabelUpdate(address, text.innerText));
 
     const colon = document.createElement('span');
@@ -486,9 +499,6 @@ function Disassembly() {
 
     li.onmousedown = () => setSelection({ address: address, isLabel: true });
     li.onmouseup = () => setSelection({ address: address, isLabel: true });
-    li.onmousemove = event => {
-      if (event.buttons > 0) setSelection({ address: address, isLabel: true });
-    };
     return li;
   }
 
@@ -545,9 +555,6 @@ function Disassembly() {
 
     li.onmousedown = () => setSelection({ address: field.address, isLabel: false });
     li.onmouseup = () => setSelection({ address: field.address, isLabel: false });
-    li.onmousemove = event => {
-      if (event.buttons > 0) setSelection({ address: field.address, isLabel: false });
-    };
 
     return li;
   }
@@ -652,8 +659,10 @@ function Disassembly() {
             ul.prepend(...newFields.map(line => line.li));
             setScrollIndex(Math.max(0, newFields.length + adjustedAmount));
 
-            let i0 = state.scrollIndex + LINES;
-            if (state.lines[i0 - 1].hasOwnProperty('label')) i0 += 1;
+            let i0 = state.scrollIndex + 2 * LINES;
+            if (i0 < state.lines.length && state.lines[i0 - 1].hasOwnProperty('label')) {
+              i0 += 1;
+            }
             state.lines.splice(i0).forEach(line => ul.removeChild(line.li));
 
           } else {
