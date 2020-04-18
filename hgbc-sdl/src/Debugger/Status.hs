@@ -9,7 +9,6 @@ where
 import           Control.Applicative
 import           Control.Monad.Reader
 import           Data.Aeson
-import           Data.Binary.Builder            ( toLazyByteString )
 import           Data.Bits
 import           Data.Functor
 import           Data.List
@@ -25,11 +24,13 @@ import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( div )
+import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Lazy          as LBS
 import qualified Data.Vector                   as V
 
 getStatus :: EmulatorState -> IO LBS.ByteString
-getStatus emulatorState = toLazyByteString . fromEncoding . pairs <$> runReaderT go emulatorState
+getStatus emulatorState =
+  BB.toLazyByteString . fromEncoding . pairs <$> runReaderT go emulatorState
  where
   highlow x = let s = formatHex x in splitAt 2 s
   getBit n x = if x `testBit` n then '1' else '0'

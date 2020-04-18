@@ -22,6 +22,16 @@ window.onload = () => {
   document.getElementById('stepOver').onclick = () => httpPOST('/', 'stepOver');
   document.getElementById('stepOut').onclick = () => httpPOST('/', 'stepOut');
   document.getElementById('restart').onclick = () => httpPOST('/', 'restart');
+
+  document.addEventListener('keydown', event => {
+    switch (event.code) {
+      case 'KeyG':
+        if (event.ctrlKey) {
+          event.preventDefault();
+          document.getElementById('disassemblyAddress').focus();
+        }
+    }
+  });
 };
 
 /*****************************************************************************
@@ -173,6 +183,8 @@ function Disassembly() {
     labels: {} // address => text
   };
 
+  let newestLabel = undefined;
+
   let uninitialized = true;
   this.setPC = setPC;
   this.revealPC = () => {
@@ -212,12 +224,54 @@ function Disassembly() {
   document.getElementById('label').onclick = () => {
     const address = state.selection.address;
     jumpTo(address);
-    const uri = "label?bank=" + address.bank.toString(16) +
-      "&offset=" + address.offset.toString(16);
-    httpPOST(uri, "update=newLabel");
+    newestLabel = address;
+    postLabelUpdate(address, "newLabel");
   }
 
-  document.getElementById('disassemblyList').addEventListener('wheel', onWheel);
+  const disassemblyWindow = document.querySelector('div.disassembly div.window');
+  disassemblyWindow.addEventListener('wheel', onWheel);
+  disassemblyWindow.addEventListener('keydown', event => {
+    switch (event.key) {
+      case 'ArrowUp':
+        event.preventDefault();
+        disassemblyWindow.focus();
+        return moveSelection(-1);
+      case 'ArrowDown':
+        event.preventDefault();
+        disassemblyWindow.focus();
+        return moveSelection(1);
+      case 'PageUp':
+        event.preventDefault();
+        disassemblyWindow.focus();
+        return moveSelection(-LINES);
+      case 'PageDown':
+        event.preventDefault();
+        return moveSelection(LINES);
+      case '+':
+        const address = state.selection.address;
+        if (state.labels[formatLongAddress(address)] === undefined) {
+          jumpTo(address);
+          newestLabel = address;
+          postLabelUpdate(address, "newLabel");
+        }
+        break;
+      case 'Home':
+      case 'End':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case ' ':
+        if (!event.target.classList.contains('label')) {
+          event.preventDefault();
+          disassemblyWindow.focus();
+          moveSelection(0);
+        }
+        break;
+      case 'Enter':
+        event.preventDefault();
+        disassemblyWindow.focus();
+        moveSelection(1);
+    }
+  });
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('blur', () => refreshDisassemblyAddress());
@@ -229,39 +283,19 @@ function Disassembly() {
     switch (event.code) {
       case 'ArrowUp':
         event.preventDefault();
-        return moveSelection(-1);
+        disassemblyWindow.focus();
+        moveSelection(-1);
+        break;
       case 'ArrowDown':
         event.preventDefault();
-        return moveSelection(1);
+        disassemblyWindow.focus();
+        moveSelection(1);
+        break;
       case 'Enter':
         event.preventDefault();
-        return moveSelection(0);
-    }
-  });
-
-  const disassemblyWindow = document.querySelector('div.disassembly div.window');
-  disassemblyWindow.addEventListener('keydown', event => {
-    switch (event.code) {
-      case 'ArrowUp':
-        event.preventDefault();
-        return moveSelection(-1);
-      case 'ArrowDown':
-        event.preventDefault();
-        return moveSelection(1);
-      case 'PageUp':
-        event.preventDefault();
-        return moveSelection(-LINES);
-      case 'PageDown':
-        event.preventDefault();
-        return moveSelection(LINES);
-      case 'Home':
-      case 'End':
-      case 'ArrowLeft':
-      case 'ArrowRight':
-      case 'Space':
-      case 'Enter':
-        event.preventDefault();
-        return moveSelection(0);
+        disassemblyWindow.focus();
+        moveSelection(0);
+        break;
     }
   });
 
@@ -271,6 +305,12 @@ function Disassembly() {
       state.labels[formatLongAddress(label.address)] = label.text);
     refreshListing();
   });
+
+  function postLabelUpdate(address, text) {
+    const uri = "label?bank=" + address.bank.toString(16) +
+      "&offset=" + address.offset.toString(16);
+    httpPOST(uri, "update=" + encodeURIComponent(text));
+  }
 
   function onWheel(event) {
     event.preventDefault();
@@ -337,20 +377,25 @@ function Disassembly() {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      if (line.hasOwnProperty('label')) {
-        i += 2;
+      const label = state.labels[formatLongAddress(line.address)];
+      if (label === undefined) {
+        if (line.label === undefined) {
+          i += 1;
+        } else {
+          lines.splice(i, 1);
+        }
       } else {
-        const label = state.labels[formatLongAddress(line.address)];
-        if (label !== undefined) {
+        if (line.label === undefined) {
           lines.splice(i, 0, {
             address: line.address,
             label: label,
             li: createLabel(line.address, label)
           });
-          i += 2;
-        } else {
-          i += 1;
+        } else if (line.li.firstChild.innerText !== label) {
+          line.label = label;
+          line.li.firstChild.innerText = label;
         }
+        i += 2;
       }
     }
   }
@@ -361,6 +406,13 @@ function Disassembly() {
     const ul = document.getElementById('disassemblyList');
     ul.innerHTML = '';
     state.lines.forEach(line => ul.appendChild(line.li));
+    if (newestLabel) {
+      const position = { address: newestLabel, isLabel: true };
+      const text = getLI(position).firstChild;
+      setSelection(position);
+      window.getSelection().setBaseAndExtent(text, 0, text, 1);
+      newestLabel = undefined;
+    }
   }
 
   function setScrollIndex(index) {
@@ -382,6 +434,15 @@ function Disassembly() {
     disassemblyAddress.value = formatLongAddress(state.selection.address);
   }
 
+  function updateFocus() {
+    if (state.selection.isLabel) {
+      const li = getLI(state.selection);
+      li.querySelector('span').focus();
+    } else {
+      disassemblyWindow.focus();
+    }
+  }
+
   function setSelection(position) {
     const oldLine = getLI(state.selection);
     if (oldLine) oldLine.classList.remove('selected');
@@ -392,13 +453,32 @@ function Disassembly() {
     state.selection = position;
     if (document.activeElement !== disassemblyAddress) {
       refreshDisassemblyAddress();
+      updateFocus();
     }
   }
 
   function createLabel(address, labelText) {
     const li = document.createElement('li');
     const text = document.createElement('span');
+    text.contentEditable = true;
+    text.spellcheck = false;
     text.innerText = labelText;
+    text.classList.add('label');
+    text.addEventListener('keyup', event => event.stopPropagation());
+    text.addEventListener('keydown', event => {
+      switch (event.code) {
+        case 'End':
+          event.preventDefault();
+          if (event.shiftKey) {
+            window.getSelection().extend(text, 1);
+          } else {
+            window.getSelection().collapse(text, 1);
+          }
+          break;
+      }
+    });
+    text.addEventListener('blur', () => postLabelUpdate(address, text.innerText));
+
     const colon = document.createElement('span');
     colon.innerText = ':';
     li.appendChild(text);
@@ -505,18 +585,13 @@ function Disassembly() {
     } else {
       const iNext = i + amount;
       if (iNext < state.scrollIndex) {
-        scroll(iNext - state.scrollIndex, () => {
-          setSelection(indexToPosition(state.scrollIndex));
-          refreshDisassemblyAddress();
-        });
+        scroll(iNext - state.scrollIndex, () =>
+          setSelection(indexToPosition(state.scrollIndex)));
       } else if (iNext >= state.scrollIndex + LINES) {
-        scroll(iNext - LINES - state.scrollIndex + 1, () => {
-          setSelection(indexToPosition(state.scrollIndex + LINES - 1))
-          refreshDisassemblyAddress();
-        });
+        scroll(iNext - LINES - state.scrollIndex + 1, () =>
+          setSelection(indexToPosition(state.scrollIndex + LINES - 1)));
       } else {
         setSelection(indexToPosition(iNext));
-        refreshDisassemblyAddress();
       }
     }
   }

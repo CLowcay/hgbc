@@ -18,6 +18,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.Aeson.Encoding            ( list )
+import           Data.Char
 import           Data.FileEmbed
 import           Data.Functor.Identity
 import           Data.IORef
@@ -40,7 +41,6 @@ import           System.IO
 import           Text.Read
 import qualified Config
 import qualified Control.Concurrent.Async      as Async
-import qualified Data.Binary.Builder           as BNB
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
@@ -172,7 +172,8 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         case (,) <$> readMaybe ("0x" <> CB.unpack addressText) <*> readMaybe (CB.unpack rawLines) of
           Nothing -> invalidQuery
           Just (address, memLines) ->
-            Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "text/plain")]
+            Wai.responseLBS HTTP.status200
+                            [(HTTP.hContentType, "text/plain"), (HTTP.hCacheControl, "no-cache")]
               <$> getMemoryAt address memLines emulatorState
       _ -> invalidQuery
 
@@ -192,8 +193,8 @@ debugger channel romFileName emulator emulatorState debugState req respond =
               pure
                 (Wai.responseLBS
                   HTTP.status200
-                  [(HTTP.hContentType, "application/json")]
-                  ( BNB.toLazyByteString
+                  [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
+                  ( BB.toLazyByteString
                   . fromEncoding
                   . pairs
                   . mconcat
@@ -220,18 +221,24 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       let labelsJSON =
             list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) allLabels
       pure
-        (Wai.responseLBS HTTP.status200
-                         [(HTTP.hContentType, "application/json")]
-                         (BNB.toLazyByteString (fromEncoding labelsJSON))
+        (Wai.responseLBS
+          HTTP.status200
+          [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
+          (BB.toLazyByteString (fromEncoding labelsJSON))
         )
 
     ["label"] -> withAddress $ \address -> whenMethodPOST $ do
       body <- Wai.lazyRequestBody req
       case HTTP.parseQuery (LB.toStrict body) of
         [("update", Just rawText)] -> do
-          let text = T.decodeUtf8With T.lenientDecode rawText
-          modifyIORef' (labels debugState) (HM.insert address text)
-          sendNotification channel (LabelUpdated address text)
+          let text = T.filter (not . isSpace) . T.decodeUtf8With T.lenientDecode $ rawText
+          if T.null text
+            then do
+              modifyIORef' (labels debugState) (HM.delete address)
+              sendNotification channel (LabelRemoved address)
+            else do
+              modifyIORef' (labels debugState) (HM.insert address text)
+              sendNotification channel (LabelUpdated address text)
           pure emptyResponse
         [("delete", _)] -> do
           modifyIORef' (labels debugState) (HM.delete address)
@@ -308,13 +315,10 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
               pushAddress address
               continue isPaused
             Right (LabelUpdated address text) -> do
-              write "event: label-added\ndata:"
               write
-                (  "{\"address\":"
-                <> BB.lazyByteString (encode address)
-                <> ",\"text\":"
-                <> fromString (show text)
-                <> "}\n\n"
+                (  "event: label-added\ndata:"
+                <> fromEncoding (pairs ("address" .= address <> "text" .= text))
+                <> "\n\n"
                 )
               flush
               continue isPaused
@@ -327,9 +331,8 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
 
    where
     pushStatus = do
-      write "event: status\ndata:"
-      write . BB.lazyByteString =<< getStatus emulatorState
-      write "\n\n" >> flush
+      status <- getStatus emulatorState
+      write ("event: status\ndata:" <> BB.lazyByteString status <> "\n\n") >> flush
     pushPaused = do
       pushStatus
       (bank, pc) <- runReaderT
@@ -347,9 +350,7 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
           <> "}\n\n"
           )
         >> flush
-    pushAddress address = do
-      write (BB.lazyByteString (encode address))
-      write "\n\n" >> flush
+    pushAddress address = write (BB.lazyByteString (encode address) <> "\n\n") >> flush
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS

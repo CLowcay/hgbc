@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c997e9461654d587e03fca054fe525b1ba29efeda3d24157537471225274f405
+-- hash: fa75387e61690acb7c2f9ec735733130a2caf840d13006f8beaa8e3fc7965ae3
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -57,7 +57,6 @@ executable hgbc-sdl
     , aeson
     , async
     , base >=4.7 && <5
-    , binary
     , bytestring
     , containers
     , directory
