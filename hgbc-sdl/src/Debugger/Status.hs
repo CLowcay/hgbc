@@ -117,8 +117,10 @@ getStatus emulatorState =
     (rA, rF) <- highlow <$> readR16pp PushPopAF
     pure ["rA" .= rA, "rF" .= rF]
   rPC = do
-    (rPCH, rPCL) <- highlow <$> readPC
-    pure ["rPCH" .= rPCH, "rPCL" .= rPCL]
+    pc <- readPC
+    bank <- getBank pc
+    let (rPCH, rPCL) = highlow pc
+    pure ["rPCH" .= rPCH, "rPCL" .= rPCL, "pcBank" .= formatHex bank]
   rSP = do
     (rSPH, rSPL) <- highlow <$> readR16 RegSP
     pure ["rSPH" .= rSPH, "rSPL" .= rSPL]

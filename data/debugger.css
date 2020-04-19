@@ -104,21 +104,21 @@ div.value {
 div.info {
 	display: none;
 	position:absolute;
-	top: 90%; left: 50%;
-	width: 20em;
+	top: 95%; left: 50%;
+	font-size:small;
+  white-space: nowrap;
 	border: 1px solid black;
 	padding: var(--padding);
 	background-color: var(--tooltip-color);
 	opacity: 0.9;
-	z-index:1;
-	font-size:small;
+  z-index:1;
 }
 div.info ul {
   margin: var(--padding) 0 0;
   padding: 0;
   list-style-type: none;
 }
-div.value span:hover>div.info {
+:hover>div.info {
 	display:block;
 }
 div.value span {

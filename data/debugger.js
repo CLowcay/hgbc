@@ -4,9 +4,10 @@ window.onload = () => {
   const eventSource = new EventSource('events');
   window.onbeforeunload = () => eventSource.close();
 
+  const banks = new BankStatus();
   const memory = new Memory();
-  const disassembly = new Disassembly();
-  initStatus(eventSource, memory, disassembly);
+  const disassembly = new Disassembly(banks);
+  initStatus(eventSource, banks, memory, disassembly);
 
   eventSource.addEventListener('breakpoint-added',
     event => disassembly.breakPointAdded(JSON.parse(event.data)));
@@ -38,9 +39,48 @@ window.onload = () => {
 };
 
 /*****************************************************************************
+ * BANK STATUS
+ *****************************************************************************/
+function BankStatus() {
+  const banks = { pcBank: 0, rom: 0, ram: 0, vram: 0, wram: 0 };
+
+  this.update = function (status) {
+    banks.pcBank = parseInt(status.pcBank, 16);
+    banks.rom = parseInt(status.romBank, 16);
+    banks.ram = parseInt(status.ramBank, 16);
+    banks.vram = parseInt(status.vbk0, 16);
+    banks.wram = parseInt(status.svbk2_0, 16);
+  }
+
+  this.expandAddress = function (offset) {
+    if (banks.pcBank === 0xFFFF) {
+      return { bank: 0xFFFF, offset: offset };
+    } else if (offset < 0x4000) {
+      return { bank: 0, offset: offset };
+    } else if (offset < 0x8000) {
+      return { bank: banks.rom, offset: offset };
+    } else if (offset < 0xA000) {
+      return { bank: banks.vram, offset: offset };
+    } else if (offset < 0xC000) {
+      return { bank: banks.ram, offset: offset };
+    } else if (offset < 0xD000) {
+      return { bank: 0, offset: offset };
+    } else if (offset < 0xE000) {
+      return { bank: banks.wram, offset: offset };
+    } else if (offset < 0xF000) {
+      return { bank: 0, offset: offset };
+    } else if (offset < 0xFE00) {
+      return { bank: banks.wram, offset: offset };
+    } else {
+      return { bank: 0, offset: offset };
+    }
+  }
+}
+
+/*****************************************************************************
  * STATUS
  *****************************************************************************/
-function initStatus(eventSource, memory, disassembly) {
+function initStatus(eventSource, banks, memory, disassembly) {
   let currentStatus = "";
   let currentStatusData = {};
 
@@ -84,7 +124,9 @@ function initStatus(eventSource, memory, disassembly) {
   function onUpdate(event) {
     memory.refresh();
     const data = JSON.parse(event.data);
+    banks.update(data);
     for (let key of Object.keys(data)) {
+      if (key === 'pcBank') continue;
       const value = data[key];
       const element = document.getElementById(key);
       if (!element) console.log("bad key " + key);
@@ -173,7 +215,7 @@ function Memory() {
 /*****************************************************************************
  * Disassembly
  *****************************************************************************/
-function Disassembly() {
+function Disassembly(banks) {
   const LINES = 20;
   const LINE_HEIGHT = 1.5;
 
@@ -271,6 +313,10 @@ function Disassembly() {
     moveSelection(1);
   });
   disassemblyAddressKeymap.override('Enter', () => {
+    disassemblyWindow.focus();
+    moveSelection(0);
+  });
+  disassemblyAddressKeymap.override('NumpadEnter', () => {
     disassemblyWindow.focus();
     moveSelection(0);
   });
@@ -514,8 +560,15 @@ function Disassembly() {
 
     } else {
       instruction.classList.add('instruction');
-      const parameters = field.p.map(x => x.text).join(", ");
-      instruction.innerText = field.text + (parameters ? " " + parameters : "") + "\t";
+      instruction.append(field.text);
+      let first = true;
+      const parameters = field.p.map(formatParameter);
+      for (const parameter of parameters) {
+        instruction.append(first ? ' ' : ', ');
+        instruction.append(parameter);
+        first = false;
+      }
+      instruction.append("\t");
 
       const bytes = document.createElement('span');
       bytes.classList.add('bytes');
@@ -539,6 +592,35 @@ function Disassembly() {
     li.onmouseup = () => setSelection({ address: field.address, isLabel: false });
 
     return li;
+  }
+
+  function formatParameter(parameter) {
+    if (!parameter.hasOwnProperty('address')) return parameter.text;
+
+    const address = banks.expandAddress(parameter.address);
+    const addressText = formatLongAddress(address);
+    const label = state.labels[addressText];
+
+    if (!label) return parameter.text;
+
+    const a = document.createElement('a');
+    a.href = '#' + encodeURIComponent(addressText);
+    a.innerText = parameter.indirect ? '(' + label + ')' : label;
+    a.addEventListener('click', () => jumpTo(address, () =>
+      setSelection({ address: address, isLabel: false })));
+    a.addEventListener('keydown', event => {
+      if (event.key === 'Enter') event.stopPropagation();
+    });
+
+    const info = document.createElement('div');
+    info.classList.add('info');
+    info.innerText = addressText;
+
+    const wrapper = document.createElement('span');
+    wrapper.style.position = 'relative';
+    wrapper.appendChild(a);
+    wrapper.appendChild(info);
+    return wrapper;
   }
 
   function jumpTo(address, continuation) {

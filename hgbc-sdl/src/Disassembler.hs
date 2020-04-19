@@ -69,16 +69,13 @@ data Parameter
   = Constant T.Text
   | Address Word16
   | AtAddress Word16
-  | RelativeAddress Word16
   deriving (Eq, Ord, Show)
 
 instance ToJSON Parameter where
   toJSON (Constant text   ) = object ["text" .= text]
   toJSON (Address  address) = object ["text" .= ('$' : formatHex address), "address" .= address]
   toJSON (AtAddress address) =
-    object ["text" .= ("($" ++ formatHex address ++ ")"), "atAddress" .= address]
-  toJSON (RelativeAddress relativeAddress) =
-    object ["text" .= ('$' : formatHex relativeAddress), "relAddress" .= relativeAddress]
+    object ["text" .= ("($" ++ formatHex address ++ ")"), "address" .= address, "indirect" .= True]
 
 instance ToJSON Field where
   toJSON (Field address bytes overlap fdata) =
@@ -457,10 +454,10 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   jphl = pure (Stop, Instruction1 "JP" (Constant "(HL)"))
   jpccnn cc nn = pure (Fork nn, Instruction2 "JP" (formatCC cc) (Address nn))
   jr i = do
-    address <- RelativeAddress <$> addCurrentPC (fromIntegral i)
+    address <- Address <$> addCurrentPC (fromIntegral i)
     pure (JumpRel i, Instruction1 "JR" address)
   jrcc cc i = do
-    address <- RelativeAddress <$> addCurrentPC (fromIntegral i)
+    address <- Address <$> addCurrentPC (fromIntegral i)
     pure (ForkRel i, Instruction2 "JR" (formatCC cc) address)
   call nn = pure (Fork nn, Instruction1 "CALL" (Address nn))
   callcc cc nn = pure (Fork nn, Instruction2 "CALL" (formatCC cc) (Address nn))
