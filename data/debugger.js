@@ -246,10 +246,12 @@ function Disassembly(banks) {
   };
   this.labelUpdated = function (label) {
     state.labels[formatLongAddress(label.address)] = label.text;
+    refreshLabels();
     refreshListing();
   };
   this.labelRemoved = function (address) {
     delete state.labels[formatLongAddress(address)];
+    refreshLabels();
     refreshListing();
   };
 
@@ -458,6 +460,16 @@ function Disassembly(banks) {
     }
   }
 
+  function refreshLabels() {
+    state.lines.forEach(line => {
+      if (line.hasOwnProperty('field') && line.field.text !== 'db') {
+        const instruction = line.li.querySelector('.instruction');
+        instruction.innerText = '';
+        setInstructionContent(instruction, line.field);
+      }
+    });
+  }
+
   function setScrollIndex(index) {
     state.scrollIndex = index;
     document.getElementById('disassemblyList').style.top =
@@ -560,15 +572,7 @@ function Disassembly(banks) {
 
     } else {
       instruction.classList.add('instruction');
-      instruction.append(field.text);
-      let first = true;
-      const parameters = field.p.map(formatParameter);
-      for (const parameter of parameters) {
-        instruction.append(first ? ' ' : ', ');
-        instruction.append(parameter);
-        first = false;
-      }
-      instruction.append("\t");
+      setInstructionContent(instruction, field);
 
       const bytes = document.createElement('span');
       bytes.classList.add('bytes');
@@ -592,6 +596,18 @@ function Disassembly(banks) {
     li.onmouseup = () => setSelection({ address: field.address, isLabel: false });
 
     return li;
+  }
+
+  function setInstructionContent(instruction, field) {
+    instruction.append(field.text);
+    let first = true;
+    const parameters = field.p.map(formatParameter);
+    for (const parameter of parameters) {
+      instruction.append(first ? ' ' : ', ');
+      instruction.append(parameter);
+      first = false;
+    }
+    instruction.append("\t");
   }
 
   function formatParameter(parameter) {
