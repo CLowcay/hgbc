@@ -18,23 +18,23 @@ window.onload = () => {
   eventSource.addEventListener('label-removed',
     event => disassembly.labelRemoved(JSON.parse(event.data)));
 
-  document.getElementById('run').onclick = () => httpPOST('/', 'run');
-  document.getElementById('step').onclick = () => httpPOST('/', 'step');
-  document.getElementById('stepOver').onclick = () => httpPOST('/', 'stepOver');
-  document.getElementById('stepOut').onclick = () => httpPOST('/', 'stepOut');
-  document.getElementById('restart').onclick = () => httpPOST('/', 'restart');
+  document.getElementById('run').onclick = () => postCommand('/', 'run');
+  document.getElementById('step').onclick = () => postCommand('/', 'step');
+  document.getElementById('stepOver').onclick = () => postCommand('/', 'stepOver');
+  document.getElementById('stepOut').onclick = () => postCommand('/', 'stepOut');
+  document.getElementById('restart').onclick = () => postCommand('/', 'restart');
 
   const globalKeymap = new KeyMap();
   document.addEventListener('keydown', globalKeymap.handleEvent);
 
   globalKeymap.override('control KeyG', () =>
     document.getElementById('disassemblyAddress').focus());
-  globalKeymap.override('control KeyI', () => httpPOST('/', 'step'));
-  globalKeymap.override('control KeyO', () => httpPOST('/', 'stepOut'));
-  globalKeymap.override('control KeyP', () => httpPOST('/', 'stepOver'));
-  globalKeymap.override('control shift KeyR', () => httpPOST('/', 'restart'));
-  globalKeymap.override('Pause', () => httpPOST('/', 'run'));
-  globalKeymap.override('control KeyR', () => httpPOST('/', 'run'));
+  globalKeymap.override('control KeyI', () => postCommand('/', 'step'));
+  globalKeymap.override('control KeyO', () => postCommand('/', 'stepOut'));
+  globalKeymap.override('control KeyP', () => postCommand('/', 'stepOver'));
+  globalKeymap.override('control shift KeyR', () => postCommand('/', 'restart'));
+  globalKeymap.override('Pause', () => postCommand('/', 'run'));
+  globalKeymap.override('control KeyR', () => postCommand('/', 'run'));
   globalKeymap.override('control Home', () => disassembly.revealPC());
 };
 
@@ -198,17 +198,15 @@ function Memory() {
     document.getElementById('addressLabels').innerText = labels.join('\n');
   }
 
-  function refresh(baseAddress) {
-    httpGET("memory?address=" + baseAddress.toString(16) + "&lines=" + LINES,
-      text => {
-        document.getElementById('memoryHex').innerText = text;
-        document.getElementById('memoryASCII').innerText =
-          text.split('\n')
-            .map(line => line.split(' ')
-              .map(c => decodeASCII(parseInt(c, 16)))
-              .join(''))
-            .join('\n');
-      });
+  async function refresh(baseAddress) {
+    const text = await fetchText("memory?address=" + baseAddress.toString(16) + "&lines=" + LINES);
+    document.getElementById('memoryHex').innerText = text;
+    document.getElementById('memoryASCII').innerText =
+      text.split('\n')
+        .map(line => line.split(' ')
+          .map(c => decodeASCII(parseInt(c, 16)))
+          .join(''))
+        .join('\n');
   }
 }
 
@@ -225,15 +223,15 @@ function Disassembly(banks) {
     maxScrollIndex: LINES,
     pc: { bank: 0, offset: 0 },
     selection: { isLabel: false, address: { bank: 0, offset: 0 } },
-    labels: {} // address => text
+    labels: new LongAddressMap()
   };
 
   let newestLabel = undefined;
 
   this.setPC = setPC;
-  this.revealPC = function () {
-    jumpTo(state.pc, () =>
-      setSelection({ address: state.pc, isLabel: false }));
+  this.revealPC = async () => {
+    await jumpTo(state.pc);
+    setSelection({ address: state.pc, isLabel: false });
   };
 
   this.breakPointAdded = function (address) {
@@ -245,28 +243,28 @@ function Disassembly(banks) {
     if (li) li.querySelector('input.breakpoint').classList.remove('set');
   };
   this.labelUpdated = function (label) {
-    state.labels[formatLongAddress(label.address)] = label.text;
+    state.labels.set(label.address, label.text);
     refreshLabels();
     refreshListing();
   };
   this.labelRemoved = function (address) {
-    delete state.labels[formatLongAddress(address)];
+    state.labels.delete(address);
     refreshLabels();
     refreshListing();
   };
 
   // Set up the disassembler buttons.
   document.getElementById('toPC').onclick = () => {
-    jumpTo(state.pc, () => setSelection({ address: state.pc, isLabel: false }));
+    jumpTo(state.pc).then(() => setSelection({ address: state.pc, isLabel: false }));
   }
   document.getElementById('runTo').onclick = () => runToAddress(state.selection.address);
   document.getElementById('breakpoint').onclick = () =>
-    jumpTo(state.selection.address, () =>
+    jumpTo(state.selection.address).then(() =>
       toggleBreakpointAtVisibleAddress(state.selection.address));
-  document.getElementById('label').onclick = () => {
+  document.getElementById('label').onclick = async () => {
     const address = state.selection.address;
+    await jumpTo(address);
     if (!newLabelAt(address)) {
-      jumpTo(address);
       const position = { address: address, isLabel: true };
       const text = getLI(position).firstChild;
       setSelection(position);
@@ -285,22 +283,25 @@ function Disassembly(banks) {
   disassemblyKeymap.override('PageDown', () => moveSelection(LINES));
   disassemblyKeymap.override('Enter', () => moveSelection(1));
   disassemblyKeymap.override('NumpadEnter', () => moveSelection(1));
-  disassemblyKeymap.add('shift Equal', () => newLabelAt(state.selection.address));
-  disassemblyKeymap.add('NumpadAdd', () => newLabelAt(state.selection.address));
+  disassemblyKeymap.add('shift Equal', () =>
+    jumpTo(state.selection.address).then(() => newLabelAt(state.selection.address)));
+  disassemblyKeymap.add('NumpadAdd', () =>
+    jumpTo(state.selection.address).then(() => newLabelAt(state.selection.address)));
   disassemblyKeymap.add('Home', handleFocusSelection);
   disassemblyKeymap.add('End', handleFocusSelection);
   disassemblyKeymap.add('ArrowLeft', handleFocusSelection);
   disassemblyKeymap.add('ArrowRight', handleFocusSelection);
   disassemblyKeymap.add('Space', handleFocusSelection);
   disassemblyKeymap.override('control KeyH', () => runToAddress(state.selection.address));
-  disassemblyKeymap.override('control KeyB', () => jumpTo(state.selection.address, () =>
-    toggleBreakpointAtVisibleAddress(state.selection.address)));
+  disassemblyKeymap.override('control KeyB', () =>
+    jumpTo(state.selection.address).then(() =>
+      toggleBreakpointAtVisibleAddress(state.selection.address)));
 
   const disassemblyAddress = document.getElementById('disassemblyAddress');
   disassemblyAddress.addEventListener('blur', () => refreshDisassemblyAddress());
   disassemblyAddress.addEventListener('input', () => {
     const address = parseLongAddress(state.lines[0].address, disassemblyAddress.value);
-    jumpTo(address, () => setSelection({ address: address, isLabel: false }));
+    jumpTo(address).then(() => setSelection({ address: address, isLabel: false }));
   });
 
   const disassemblyAddressKeymap = new KeyMap();
@@ -324,15 +325,13 @@ function Disassembly(banks) {
   });
 
   // initialize the labels
-  httpGET('labels', text => {
-    JSON.parse(text).forEach(label =>
-      state.labels[formatLongAddress(label.address)] = label.text);
+  fetchJSON('labels').then(labels => {
+    labels.forEach(label => state.labels.set(label.address, label.text));
     refreshListing();
   });
 
   function newLabelAt(address) {
-    if (state.labels[formatLongAddress(address)] === undefined) {
-      jumpTo(address);
+    if (!state.labels.has(address)) {
       newestLabel = address;
       postLabelUpdate(address, "newLabel");
       return true;
@@ -341,10 +340,10 @@ function Disassembly(banks) {
     }
   }
 
-  function handleFocusSelection(event) {
+  async function handleFocusSelection(event) {
     if (!event.target.classList.contains('label')) {
       event.preventDefault();
-      moveSelection(0);
+      await moveSelection(0);
       updateFocus();
     }
   }
@@ -352,7 +351,7 @@ function Disassembly(banks) {
   function postLabelUpdate(address, text) {
     const uri = "label?bank=" + address.bank.toString(16) +
       "&offset=" + address.offset.toString(16);
-    httpPOST(uri, "update=" + encodeURIComponent(text));
+    postCommand(uri, "update=" + encodeURIComponent(text));
   }
 
   function onWheel(event) {
@@ -412,9 +411,9 @@ function Disassembly(banks) {
     const uri = '/breakpoints?bank=' + address.bank.toString(16) +
       '&offset=' + address.offset.toString(16);
     if (button.classList.contains('set')) {
-      httpPOST(uri, 'unset');
+      postCommand(uri, 'unset');
     } else {
-      httpPOST(uri, 'set');
+      postCommand(uri, 'set');
     }
   }
 
@@ -422,7 +421,7 @@ function Disassembly(banks) {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      const label = state.labels[formatLongAddress(line.address)];
+      const label = state.labels.get(line.address);
       if (label === undefined) {
         if (line.label === undefined) {
           i += 1;
@@ -614,15 +613,14 @@ function Disassembly(banks) {
     if (!parameter.hasOwnProperty('address')) return parameter.text;
 
     const address = banks.expandAddress(parameter.address);
-    const addressText = formatLongAddress(address);
-    const label = state.labels[addressText];
-
+    const label = state.labels.get(address);
     if (!label) return parameter.text;
 
+    const addressText = formatLongAddress(address);
     const a = document.createElement('a');
     a.href = '#' + encodeURIComponent(addressText);
     a.innerText = parameter.indirect ? '(' + label + ')' : label;
-    a.addEventListener('click', () => jumpTo(address, () =>
+    a.addEventListener('click', () => jumpTo(address).then(() =>
       setSelection({ address: address, isLabel: false })));
     a.addEventListener('keydown', event => {
       if (event.key === 'Enter') event.stopPropagation();
@@ -639,44 +637,40 @@ function Disassembly(banks) {
     return wrapper;
   }
 
-  function jumpTo(address, continuation) {
-    if (isVisible({ address: address, isLabel: true })) {
-      if (continuation) continuation();
-      return;
-    };
-    httpGET(
+  async function jumpTo(address) {
+    if (isVisible({ address: address, isLabel: true })) return;
+
+    const disassembly = await fetchJSON(
       "disassembly?bank=" + address.bank.toString(16) +
       "&offset=" + address.offset.toString(16) +
-      "&n=" + LINES,
-      text => {
-        const disassembly = JSON.parse(text);
-        state.lines = disassembly.fields.slice(0, LINES).map(field => {
-          return {
-            address: field.address, field: field,
-            li: createField(field, disassembly.breakpoints)
-          };
-        })
+      "&n=" + LINES);
 
-        setScrollIndex(0);
-        refreshListing();
-        setPC(state.pc);
-        setSelection(state.selection);
-        if (continuation) continuation();
-      });
-  }
+    state.lines = disassembly.fields.slice(0, LINES).map(field => {
+      return {
+        address: field.address, field: field,
+        li: createField(field, disassembly.breakpoints)
+      };
+    })
 
-  function moveSelection(amount) {
+    setScrollIndex(0);
+    refreshListing();
+    setPC(state.pc);
+    setSelection(state.selection);
+  };
+
+  async function moveSelection(amount) {
     const i = positionToIndex(state.selection);
     if (i < state.scrollIndex || i >= state.scrollIndex + LINES) {
-      jumpTo(state.selection.address, () => moveSelection(amount));
+      await jumpTo(state.selection.address);
+      await moveSelection(amount);
     } else {
       const iNext = i + amount;
       if (iNext < state.scrollIndex) {
-        scroll(iNext - state.scrollIndex, () =>
-          setSelection(indexToPosition(state.scrollIndex)));
+        await scroll(iNext - state.scrollIndex);
+        setSelection(indexToPosition(state.scrollIndex));
       } else if (iNext >= state.scrollIndex + LINES) {
-        scroll(iNext - LINES - state.scrollIndex + 1, () =>
-          setSelection(indexToPosition(state.scrollIndex + LINES - 1)));
+        await scroll(iNext - LINES - state.scrollIndex + 1);
+        setSelection(indexToPosition(state.scrollIndex + LINES - 1));
       } else {
         setSelection(indexToPosition(iNext));
       }
@@ -685,97 +679,84 @@ function Disassembly(banks) {
 
   let isScrolling = false;
   let nextScrollAmount = 0;
-  function scroll(amount, continuation) {
-    if (!isScrolling) {
-      doScroll(amount);
-    } else {
-      nextScrollAmount += amount;
-    }
+  async function scroll(amount0) {
+    nextScrollAmount += amount0;
+    if (isScrolling) return;
 
-    function doNextScroll() {
-      if (nextScrollAmount === 0) {
-        isScrolling = false;
-      } else {
-        const total = nextScrollAmount;
+    isScrolling = true;
+    try {
+      while (nextScrollAmount !== 0) {
+        const amount = nextScrollAmount;
         nextScrollAmount = 0;
-        doScroll(total);
+        await doScroll(amount);
       }
+    } finally {
+      isScrolling = false;
     }
 
-    function doScroll(amount) {
-      isScrolling = true;
+    async function doScroll(amount) {
       const adjustedAmount = state.scrollIndex + amount;
       if (adjustedAmount >= 0 && adjustedAmount <= state.maxScrollIndex) {
-        setScrollIndex(adjustedAmount);
-        if (continuation) continuation();
-        doNextScroll();
-        return;
+        setScrollIndex(adjustedAmount); return;
       }
 
       const baseAddress = (adjustedAmount < 0
         ? state.lines[0]
         : state.lines[state.lines.length - 1]).address;
 
-      httpGET(
+      const disassembly = await fetchJSON(
         "disassembly?bank=" + baseAddress.bank.toString(16) +
         "&offset=" + baseAddress.offset.toString(16) +
-        "&n=" + adjustedAmount,
-        text => {
-          const disassembly = JSON.parse(text);
-          const newFields = disassembly.fields.slice(1)
-            .map(field => {
-              return {
-                address: field.address,
-                field: field,
-                li: createField(field, disassembly.breakpoints)
-              };
-            });
-
-          const ul = document.getElementById('disassemblyList');
-          if (adjustedAmount < 0) {
-            newFields.reverse();
-            updateLabels(newFields);
-            state.lines = newFields.concat(state.lines);
-            ul.prepend(...newFields.map(line => line.li));
-            setScrollIndex(Math.max(0, newFields.length + adjustedAmount));
-
-            let i0 = state.scrollIndex + 2 * LINES;
-            if (i0 < state.lines.length && state.lines[i0 - 1].hasOwnProperty('label')) {
-              i0 += 1;
-            }
-            state.lines.splice(i0).forEach(line => ul.removeChild(line.li));
-
-          } else {
-            updateLabels(newFields);
-            state.lines = state.lines.concat(newFields);
-            ul.append(...newFields.map(line => line.li));
-
-            let toTrim = adjustedAmount;
-            if (state.lines[toTrim - 1].hasOwnProperty('label')) {
-              toTrim -= 1;
-              setScrollIndex(1);
-            } else {
-              setScrollIndex(0);
-            }
-
-            state.lines.splice(0, toTrim).forEach(line => ul.removeChild(line.li));
-          }
-
-          updateMaxScrollIndex();
-          setPC(state.pc);
-          setSelection(state.selection);
-          if (continuation) continuation()
-          doNextScroll();
-        },
-        error => {
-          isScrolling = false;
-        }
+        "&n=" + adjustedAmount
       );
+
+      const newFields = disassembly.fields.slice(1)
+        .map(field => {
+          return {
+            address: field.address,
+            field: field,
+            li: createField(field, disassembly.breakpoints)
+          };
+        });
+
+      const ul = document.getElementById('disassemblyList');
+      if (adjustedAmount < 0) {
+        newFields.reverse();
+        updateLabels(newFields);
+        state.lines = newFields.concat(state.lines);
+        ul.prepend(...newFields.map(line => line.li));
+        setScrollIndex(Math.max(0, newFields.length + adjustedAmount));
+
+        let i0 = state.scrollIndex + 2 * LINES;
+        if (i0 < state.lines.length && state.lines[i0 - 1].hasOwnProperty('label')) {
+          i0 += 1;
+        }
+        state.lines.splice(i0).forEach(line => ul.removeChild(line.li));
+
+      } else {
+        updateLabels(newFields);
+        state.lines = state.lines.concat(newFields);
+        ul.append(...newFields.map(line => line.li));
+
+        let toTrim = adjustedAmount;
+        if (state.lines[toTrim - 1].hasOwnProperty('label')) {
+          toTrim -= 1;
+          setScrollIndex(1);
+        } else {
+          setScrollIndex(0);
+        }
+
+        state.lines.splice(0, toTrim).forEach(line => ul.removeChild(line.li));
+      }
+
+      updateMaxScrollIndex();
+      setPC(state.pc);
+      setSelection(state.selection);
     }
-  }
+  };
 
   function runToAddress(address) {
-    httpPOST('/', 'runTo=&bank=' +
+    postCommand('/', 'runTo=&bank=' +
       address.bank.toString(16) + '&offset=' + address.offset.toString(16));
   }
 }
@@ -818,6 +799,19 @@ function parseLongAddress(defaultAddress, address) {
     }
   } else {
     return defaultAddress;
+  }
+}
+
+function LongAddressMap() {
+  const map = new Map();
+  this.set = (key, value) => map.set(makeKey(key), value);
+  this.delete = key => map.delete(makeKey(key));
+  this.get = key => map.get(makeKey(key));
+  this.has = key => map.has(makeKey(key))
+  this.size = () => map.size();
+
+  function makeKey(address) {
+    return address.bank << 16 | address.offset;
   }
 }
 
@@ -869,26 +863,28 @@ function KeyMap() {
   }
 }
 
-function httpGET(uri, responseHandler, errorHandler) {
-  const xhr = new XMLHttpRequest();
-  if (errorHandler) xhr.onerror = errorHandler;
-  xhr.onreadystatechange = () => {
-    if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
-      responseHandler(xhr.responseText);
-    }
-  };
-
-  xhr.open("GET", uri, true);
-  xhr.send();
+async function fetchText(...args) {
+  const response = await fetch(...args);
+  if (!response.ok) {
+    throw new Error(`Fetch failed with ${response.status}`);
+  } else {
+    return response.text();
+  }
 }
 
-function httpPOST(uri, body) {
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", uri, true);
-  if (body) {
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.send(body);
+async function fetchJSON(...args) {
+  const response = await fetch(...args);
+  if (!response.ok) {
+    throw new Error(`Fetch failed with ${response.status}`);
   } else {
-    xhr.send();
+    return response.json();
   }
+}
+
+function postCommand(uri, command) {
+  fetch(uri, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: command
+  });
 }
