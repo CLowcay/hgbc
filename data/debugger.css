@@ -202,7 +202,7 @@ div.disassembly div.window {
 }
 div.disassembly span.instruction {
   display: inline-block;
-  width: 16ch;
+  width: 26ch;
 }
 div.disassembly span.bytes {
   display: inline-block;

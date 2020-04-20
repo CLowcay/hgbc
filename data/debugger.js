@@ -52,25 +52,38 @@ function BankStatus() {
     banks.wram = parseInt(status.svbk2_0, 16);
   }
 
-  this.expandAddress = function (offset) {
-    if (banks.pcBank === 0xFFFF) {
-      return { bank: 0xFFFF, offset: offset };
-    } else if (offset < 0x4000) {
-      return { bank: 0, offset: offset };
+  this.expandAddress = function (offset, relativeTo) {
+    if (offset < 0x4000) {
+      if (relativeTo.bank === 0xFFFF &&
+        (offset < 0x100 || (offset >= 0x200 && offset < 0x1000))) {
+        return { bank: 0xFFFF, offset: offset };
+      } else {
+        return { bank: 0, offset: offset };
+      }
     } else if (offset < 0x8000) {
-      return { bank: banks.rom, offset: offset };
+      return relativeTo.offset >= 0x4000 && relativeTo.offset < 0x8000 ?
+        { bank: relativeTo.bank, offset: offset } :
+        { bank: banks.rom, offset: offset };
     } else if (offset < 0xA000) {
-      return { bank: banks.vram, offset: offset };
+      return relativeTo.offset >= 0x8000 && relativeTo.offset < 0xA000 ?
+        { bank: relativeTo.bank, offset: offset } :
+        { bank: banks.vram, offset: offset };
     } else if (offset < 0xC000) {
-      return { bank: banks.ram, offset: offset };
+      return relativeTo.offset >= 0xA000 && relativeTo.offset < 0xC000 ?
+        { bank: relativeTo.bank, offset: offset } :
+        { bank: banks.ram, offset: offset };
     } else if (offset < 0xD000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xE000) {
-      return { bank: banks.wram, offset: offset };
+      return relativeTo.offset >= 0xD000 && relativeTo.offset < 0xE000 ?
+        { bank: relativeTo.bank, offset: offset } :
+        { bank: banks.wram, offset: offset };
     } else if (offset < 0xF000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xFE00) {
-      return { bank: banks.wram, offset: offset };
+      return relativeTo.offset >= 0xF000 && relativeTo.offset < 0xFE00 ?
+        { bank: relativeTo.bank, offset: offset } :
+        { bank: banks.wram, offset: offset };
     } else {
       return { bank: 0, offset: offset };
     }
@@ -129,7 +142,7 @@ function initStatus(eventSource, banks, memory, disassembly) {
       if (key === 'pcBank') continue;
       const value = data[key];
       const element = document.getElementById(key);
-      if (!element) console.log("bad key " + key);
+      if (!element) console.log(`bad key ${key}`);
       if (currentStatusData[key] !== value) {
         currentStatusData[key] = value;
         element.classList.add('changed');
@@ -242,8 +255,8 @@ function Disassembly(banks) {
     const li = getFieldLI(address);
     if (li) li.querySelector('input.breakpoint').classList.remove('set');
   };
-  this.labelUpdated = function (label) {
-    state.labels.set(label.address, label.text);
+  this.labelUpdated = function (labels) {
+    labels.forEach(label => state.labels.set(label.address, label.text));
     refreshLabels();
     refreshListing();
   };
@@ -367,14 +380,15 @@ function Disassembly(banks) {
   }
 
   function lineAt(position) {
-    return state.lines.find(line =>
-      (line.field ? addressInField(position.address, line.field) :
-        sameAddress(line.address, position.address)) &&
-      position.isLabel === line.hasOwnProperty('label'));
+    return state.lines[positionToIndex(position)];
   }
 
   function positionToIndex(position) {
-    return state.lines.findIndex(line =>
+    const r = state.lines.findIndex(line =>
+      (sameAddress(line.address, position.address)) &&
+      (line.hasOwnProperty('label') ? position.isLabel : true));
+
+    return r !== -1 ? r : state.lines.findIndex(line =>
       (line.field ? addressInField(position.address, line.field) :
         sameAddress(line.address, position.address)) &&
       (line.hasOwnProperty('label') ? position.isLabel : true));
@@ -582,9 +596,7 @@ function Disassembly(banks) {
     }
 
     if (field.overlap) {
-      instruction.innerText = '; ' + instruction.innerText;
       instruction.classList.add('overlapping');
-
       const overlapping = document.createElement('span');
       overlapping.classList.add('overlapping');
       overlapping.innerText = "\t(overlapping)";
@@ -598,6 +610,7 @@ function Disassembly(banks) {
   }
 
   function setInstructionContent(instruction, field) {
+    if (field.overlap) instruction.append('; ');
     instruction.append(field.text);
     let first = true;
     const parameters = field.p.map(formatParameter);
@@ -607,34 +620,34 @@ function Disassembly(banks) {
       first = false;
     }
     instruction.append("\t");
-  }
 
-  function formatParameter(parameter) {
-    if (!parameter.hasOwnProperty('address')) return parameter.text;
+    function formatParameter(parameter) {
+      if (!parameter.hasOwnProperty('address')) return parameter.text;
 
-    const address = banks.expandAddress(parameter.address);
-    const label = state.labels.get(address);
-    if (!label) return parameter.text;
+      const address = banks.expandAddress(parameter.address, field.address);
+      const label = state.labels.get(address);
+      if (!label) return parameter.text;
 
-    const addressText = formatLongAddress(address);
-    const a = document.createElement('a');
-    a.href = '#' + encodeURIComponent(addressText);
-    a.innerText = parameter.indirect ? '(' + label + ')' : label;
-    a.addEventListener('click', () => jumpTo(address).then(() =>
-      setSelection({ address: address, isLabel: false })));
-    a.addEventListener('keydown', event => {
-      if (event.key === 'Enter') event.stopPropagation();
-    });
+      const addressText = formatLongAddress(address);
+      const a = document.createElement('a');
+      a.href = '#' + encodeURIComponent(addressText);
+      a.innerText = parameter.indirect ? `(${label})` : label;
+      a.addEventListener('click', () => jumpTo(address).then(() =>
+        setSelection({ address: address, isLabel: false })));
+      a.addEventListener('keydown', event => {
+        if (event.key === 'Enter') event.stopPropagation();
+      });
 
-    const info = document.createElement('div');
-    info.classList.add('info');
-    info.innerText = addressText;
+      const info = document.createElement('div');
+      info.classList.add('info');
+      info.innerText = addressText;
 
-    const wrapper = document.createElement('span');
-    wrapper.style.position = 'relative';
-    wrapper.appendChild(a);
-    wrapper.appendChild(info);
-    return wrapper;
+      const wrapper = document.createElement('span');
+      wrapper.style.position = 'relative';
+      wrapper.appendChild(a);
+      wrapper.appendChild(info);
+      return wrapper;
+    }
   }
 
   async function jumpTo(address) {

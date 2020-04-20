@@ -8,6 +8,7 @@
 module Disassembler
   ( LongAddress(..)
   , Field(..)
+  , Labels
   , fieldAddress
   , fieldBytes
   , Disassembly
@@ -22,10 +23,9 @@ where
 
 import           Control.Category        hiding ( (.) )
 import           Control.Monad.Reader
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 import           Data.Aeson
 import           Data.Bits
-import           Data.ByteString.Short
 import           Data.Foldable
 import           Data.Function
 import           Data.Hashable
@@ -33,6 +33,7 @@ import           Data.Int
 import           Data.Maybe
 import           Data.String
 import           Data.Word
+import           Debugger.LabelGenerator
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
@@ -42,6 +43,7 @@ import qualified Data.ByteString.Short         as SB
 import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
 import qualified Data.Vector.Storable          as VS
+import           Data.Functor
 
 data LongAddress
   = LongAddress !Word16 !Word16
@@ -54,9 +56,12 @@ instance Hashable LongAddress where
 instance ToJSON LongAddress where
   toJSON (LongAddress bank address) = object ["offset" .= address, "bank" .= bank]
 
+addOffset :: Integral a => LongAddress -> a -> LongAddress
+addOffset (LongAddress bank offset0) offset = LongAddress bank (offset0 + fromIntegral offset)
+
 type Overlap = Bool
 data Field =
-  Field LongAddress ShortByteString Overlap Instruction
+  Field LongAddress SB.ShortByteString Overlap Instruction
   deriving (Eq, Ord, Show)
 
 data Instruction
@@ -92,7 +97,7 @@ instance ToJSON Field where
 fieldAddress :: Field -> LongAddress
 fieldAddress (Field address _ _ _) = address
 
-fieldBytes :: Field -> ShortByteString
+fieldBytes :: Field -> SB.ShortByteString
 fieldBytes (Field _ bytes _ _) = bytes
 
 data NextAction
@@ -106,6 +111,8 @@ data NextAction
 
 newtype Disassembly = Disassembly (IM.IntMap Field)
   deriving (Eq, Ord, Show, Semigroup, Monoid)
+
+type Labels = [(LongAddress, T.Text)]
 
 -- | Insert a new field into the disassembly. This is somewhat complicated since
 -- there may already be data fields that need to be split or truncated to
@@ -140,7 +147,6 @@ insert (Disassembly m) field = Disassembly
           Just v  -> v : overlappingBefore ++ overlappingAfter
 
   setOverlapping f = let Field a b _ fieldData = f in Field a b True fieldData
-  addOffset (LongAddress bank offset0) offset = LongAddress bank (offset0 + fromIntegral offset)
   minus (LongAddress _ offset0) (LongAddress _ offset1) =
     fromIntegral offset0 - fromIntegral offset1
   truncateField f =
@@ -177,17 +183,28 @@ lookup (Disassembly m) longAddress = IM.lookup (encodeAddress longAddress) m
 -- order (highest to lowest address). Again, if there is a field at the given
 -- address then it is included in the output.
 lookupN :: Disassembly -> Int -> LongAddress -> [Field]
-lookupN (Disassembly m) n startAddress | n == 0    = []
-                                       | n < 0     = consV (take (-n) leftList)
-                                       | otherwise = consV (take n rightList)
+lookupN (Disassembly m) n startAddress
+  | n == 0
+  = []
+  | n < 0
+  = let rest = take (-n) leftList
+    in  case mv of
+          Just v  -> v : rest
+          Nothing -> case rightList of
+            []      -> rest
+            (v : _) -> v : rest
+  | otherwise
+  = let rest = take n rightList
+    in  case mv of
+          Just v  -> v : rest
+          Nothing -> case leftList of
+            []      -> rest
+            (v : _) -> v : rest
  where
   key        = encodeAddress startAddress
   (l, mv, r) = IM.splitLookup key m
   leftList   = snd <$> IM.toDescList l
   rightList  = snd <$> IM.toAscList r
-  consV ls = case mv of
-    Nothing -> ls
-    Just v  -> v : ls
 
 data DisassemblyState = DisassemblyState {
     disassemblyPC          :: !Word16
@@ -207,23 +224,47 @@ disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disasse
       pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
 -- | Disassemble the ROM currently loaded in memory.
-disassembleROM :: Memory -> IO Disassembly
+disassembleROM :: Memory -> IO (Disassembly, Labels)
 disassembleROM memory0 =
-  disassemble entryPoint (bootSubstrate <> substrate)
-    >>= disassemble (romFrom 0x00)
-    >>= disassemble (romFrom 0x08)
-    >>= disassemble (romFrom 0x10)
-    >>= disassemble (romFrom 0x18)
-    >>= disassemble (romFrom 0x20)
-    >>= disassemble (romFrom 0x28)
-    >>= disassemble (romFrom 0x30)
-    >>= disassemble (romFrom 0x38)
-    >>= disassemble (romFrom 0x40)
-    >>= disassemble (romFrom 0x48)
-    >>= disassemble (romFrom 0x50)
-    >>= disassemble (romFrom 0x58)
-    >>= disassemble (romFrom 0x60)
+  flip runStateT defaultLabels
+    $   disassembleS entryPoint (bootSubstrate <> substrate)
+    >>= disassembleS (romFrom 0x00)
+    >>= disassembleS (romFrom 0x08)
+    >>= disassembleS (romFrom 0x10)
+    >>= disassembleS (romFrom 0x18)
+    >>= disassembleS (romFrom 0x20)
+    >>= disassembleS (romFrom 0x28)
+    >>= disassembleS (romFrom 0x30)
+    >>= disassembleS (romFrom 0x38)
+    >>= disassembleS (romFrom 0x40)
+    >>= disassembleS (romFrom 0x48)
+    >>= disassembleS (romFrom 0x50)
+    >>= disassembleS (romFrom 0x58)
+    >>= disassembleS (romFrom 0x60)
  where
+  disassembleS :: DisassemblyState -> Disassembly -> StateT Labels IO Disassembly
+  disassembleS state0 d0 = do
+    labels       <- get
+    (r, labels') <- liftIO (disassemble state0 d0)
+    put (labels' ++ labels)
+    pure r
+
+  defaultLabels =
+    [ (LongAddress 0 0x0 , "rst0")
+    , (LongAddress 0 0x8 , "rst1")
+    , (LongAddress 0 0x10, "rst2")
+    , (LongAddress 0 0x18, "rst3")
+    , (LongAddress 0 0x20, "rst4")
+    , (LongAddress 0 0x28, "rst5")
+    , (LongAddress 0 0x30, "rst6")
+    , (LongAddress 0 0x38, "rst7")
+    , (LongAddress 0 0x40, "int40_vblank")
+    , (LongAddress 0 0x48, "int48_lcd")
+    , (LongAddress 0 0x50, "int50_timer")
+    , (LongAddress 0 0x58, "int58_serial")
+    , (LongAddress 0 0x60, "int60_keypad")
+    ]
+
   romFrom origin = DisassemblyState origin True [] memory0
   entryPoint    = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
   bootSubstrate = case getBootROMData memory0 of
@@ -247,49 +288,61 @@ disassembleROM memory0 =
     go xs = let (r, rs) = splitAt n xs in r : go rs
 
 -- | Generate disassembly starting at a particular PC.
-disassembleFrom :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO Disassembly
+disassembleFrom :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO (Disassembly, Labels)
 disassembleFrom pc disassembly = do
   memory <- asks forMemory
   liftIO (disassemble (DisassemblyState pc False [] memory) disassembly)
 
 -- | Generate disassembly.
-disassemble :: DisassemblyState -> Disassembly -> IO Disassembly
-disassemble state0 disassembly = evalStateT (go disassembly) state0
+disassemble :: DisassemblyState -> Disassembly -> IO (Disassembly, Labels)
+disassemble state0 disassembly = evalStateT (go (disassembly, [])) state0
  where
-  go !accum = do
+  go (!accum, !labels) = do
     addressLong <- currentAddressLong
     (action, r) <- fetchAndExecute
     bs          <- takeAccumulatedBytes
     let oldDisassembly = lookup accum addressLong
     if noUpdateRequired oldDisassembly bs
-      then pure accum
+      then pure (accum, labels)
       else do
         let accum' = insert accum (Field addressLong bs False r)
         case action of
-          Continue   -> go accum'
-          Jump    nn -> modifyPC (const nn) >> go accum'
-          JumpRel i  -> modifyPC (+ fromIntegral i) >> go accum'
-          Fork    nn -> do
-            s <- get
-            liftIO (disassemble (s { disassemblyPC = nn }) accum') >>= go
+          Continue -> go (accum', labels)
+          Jump nn  -> do
+            label <- (,) <$> makeLongAddress nn <*> liftIO nextGlobalLabel
+            modifyPC (const nn)
+            go (accum', label : labels)
+          JumpRel i -> do
+            label <- (,) <$> (currentAddressLong <&> (`addOffset` i)) <*> liftIO (nextLocalLabel i)
+            modifyPC (+ fromIntegral i)
+            go (accum', label : labels)
+          Fork nn -> do
+            s                  <- get
+            label              <- (,) <$> makeLongAddress nn <*> liftIO nextGlobalLabel
+            (accum'', labels') <- liftIO (disassemble (s { disassemblyPC = nn }) accum')
+            go (accum'', label : labels' ++ labels)
           ForkRel i -> do
             s <- get
-            go =<< liftIO
+            label <- (,) <$> (currentAddressLong <&> (`addOffset` i)) <*> liftIO (nextLocalLabel i)
+            (accum'', labels') <- liftIO
               (disassemble (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
-          Stop -> pure accum'
+            go (accum'', label : labels' ++ labels)
+          Stop -> pure (accum', labels)
 
   noUpdateRequired Nothing                          _        = False
   noUpdateRequired (Just (Field _ _        _ Data)) _        = False
   noUpdateRequired (Just (Field _ oldBytes _ _   )) newBytes = oldBytes == newBytes
 
 currentAddressLong :: StateT DisassemblyState IO LongAddress
-currentAddressLong = do
-  s <- get
-  let pc = disassemblyPC s
-  bank <- if disassemblyBootLockout s && pc < 0x1000
+currentAddressLong = makeLongAddress =<< gets disassemblyPC
+
+makeLongAddress :: Word16 -> StateT DisassemblyState IO LongAddress
+makeLongAddress offset = do
+  s    <- get
+  bank <- if disassemblyBootLockout s && offset < 0x1000
     then pure 0
-    else liftIO (runReaderT (getBank pc) (disassemblyMemory s))
-  pure (LongAddress bank pc)
+    else liftIO (runReaderT (getBank offset) (disassemblyMemory s))
+  pure (LongAddress bank offset)
 
 -- | Take the disassembled bytes that have been accumulated in the
 -- DisassemblyState.
@@ -386,7 +439,10 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   ldDEa  = pure (Continue, Instruction2 "LD" (Constant "(DE)") (Constant "A"))
   ldHLIa = pure (Continue, Instruction2 "LD" (Constant "(HLI)") (Constant "A"))
   ldHLDa = pure (Continue, Instruction2 "LD" (Constant "(HLD)") (Constant "A"))
-  ldddnn dd nn = pure (Continue, Instruction2 "LD" (formatR16 dd) (Address nn))
+  ldddnn RegHL nn = pure (Continue, Instruction2 "LD" (Constant "HL") (Address nn))
+  ldddnn RegSP nn = pure (Continue, Instruction2 "LD" (Constant "SP") (Address nn))
+  ldddnn dd nn =
+    pure (Continue, Instruction2 "LD" (formatR16 dd) (Constant (T.pack (formatHex nn))))
   ldSPHL = pure (Continue, Instruction2 "LD" (Constant "SP") (Constant "HL"))
   push qq = pure (Continue, Instruction1 "PUSH" (formatRpp qq))
   pop qq = pure (Continue, Instruction1 "POP" (formatRpp qq))

@@ -33,6 +33,7 @@ import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
+import qualified Data.HashMap.Strict           as HM
 import qualified Data.HashTable.IO             as H
 import qualified Debugger
 import qualified Emulator
@@ -147,11 +148,14 @@ emulator rom allOptions@Config.Options {..} = do
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
   disassemblyRef <- newIORef mempty
-  when optionDebugMode $ writeIORef disassemblyRef =<< disassembleROM (memory emulatorState)
-
-  breakpoints <- H.new
-  labels      <- newIORef mempty
+  breakpoints    <- H.new
+  labelsRef      <- newIORef mempty
   let debugState = Debugger.DebugState { .. }
+
+  when optionDebugMode $ do
+    (disassembly, labels) <- disassembleROM (memory emulatorState)
+    writeIORef disassemblyRef disassembly
+    writeIORef labelsRef      (HM.fromList labels)
 
   debuggerChannel <- if optionDebugMode
     then
@@ -193,7 +197,13 @@ emulator rom allOptions@Config.Options {..} = do
               let address = LongAddress bank pc
               disassembly <- liftIO (readIORef disassemblyRef)
               r           <- disassemblyRequired address disassembly
-              when r $ liftIO . writeIORef disassemblyRef =<< disassembleFrom pc disassembly
+              when r $ do
+                (disassembly', newLabels) <- disassembleFrom pc disassembly
+                case debuggerChannel of
+                  Nothing      -> pure ()
+                  Just channel -> liftIO $ do
+                    writeIORef disassemblyRef disassembly'
+                    Debugger.addNewLabels debugState channel newLabels
               breakpoint <- liftIO $ H.lookup breakpoints address
               callDepth  <- getCPUCallDepth
               pure (Just address == runToAddress || isJust breakpoint || Just callDepth == level)

@@ -5,6 +5,7 @@
 module Debugger
   ( start
   , sendNotification
+  , addNewLabels
   , Notification(..)
   , DebuggerChannel
   , DebugState(..)
@@ -61,7 +62,7 @@ data Notification
   | EmulatorPaused
   | BreakPointAdded LongAddress
   | BreakPointRemoved LongAddress
-  | LabelUpdated LongAddress T.Text
+  | LabelUpdated Labels
   | LabelRemoved LongAddress
   deriving (Eq, Ord, Show)
 
@@ -73,7 +74,7 @@ sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan ch
 data DebugState = DebugState {
     disassemblyRef :: IORef Disassembly
   , breakpoints    :: H.BasicHashTable LongAddress ()
-  , labels         :: IORef (HM.HashMap LongAddress T.Text)
+  , labelsRef      :: IORef (HM.HashMap LongAddress T.Text)
 }
 
 logError :: Wai.Request -> String -> IO ()
@@ -88,6 +89,11 @@ logError req message = do
     <> (CB.unpack (Wai.rawPathInfo req) <> ": ")
     <> message
     )
+
+addNewLabels :: DebugState -> DebuggerChannel -> Labels -> IO ()
+addNewLabels debugState channel newLabels = do
+  modifyIORef' (labelsRef debugState) (HM.fromList newLabels `HM.union`)
+  sendNotification channel (LabelUpdated newLabels)
 
 start
   :: FilePath
@@ -217,7 +223,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         _ -> invalidCommand "breakpoints"
 
     ["labels"] -> whenMethodGET $ do
-      allLabels <- HM.toList <$> readIORef (labels debugState)
+      allLabels <- HM.toList <$> readIORef (labelsRef debugState)
       let labelsJSON =
             list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) allLabels
       pure
@@ -234,14 +240,14 @@ debugger channel romFileName emulator emulatorState debugState req respond =
           let text = T.filter (not . isSpace) . T.decodeUtf8With T.lenientDecode $ rawText
           if T.null text
             then do
-              modifyIORef' (labels debugState) (HM.delete address)
+              modifyIORef' (labelsRef debugState) (HM.delete address)
               sendNotification channel (LabelRemoved address)
             else do
-              modifyIORef' (labels debugState) (HM.insert address text)
-              sendNotification channel (LabelUpdated address text)
+              modifyIORef' (labelsRef debugState) (HM.insert address text)
+              sendNotification channel (LabelUpdated [(address, text)])
           pure emptyResponse
         [("delete", _)] -> do
-          modifyIORef' (labels debugState) (HM.delete address)
+          modifyIORef' (labelsRef debugState) (HM.delete address)
           sendNotification channel (LabelRemoved address)
           pure emptyResponse
         _ -> invalidCommand "label"
@@ -293,39 +299,38 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
   eventStream :: (BB.Builder -> IO ()) -> IO () -> IO ()
   eventStream write flush = do
     channel <- atomically (dupTChan writeChannel)
-    let continue isPaused = do
-          event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
-                              (atomically (readTChan channel))
-          case event of
-            Left () -> do
-              if isPaused then write ": keep-alive\n\n" >> flush else pushStatus
-              continue isPaused
-            Right EmulatorStarted -> do
-              write "event: started\ndata:\n\n" >> flush
-              continue False
-            Right EmulatorPaused -> do
-              pushPaused
-              continue True
-            Right (BreakPointAdded address) -> do
-              write "event: breakpoint-added\ndata:"
-              pushAddress address
-              continue isPaused
-            Right (BreakPointRemoved address) -> do
-              write "event: breakpoint-removed\ndata:"
-              pushAddress address
-              continue isPaused
-            Right (LabelUpdated address text) -> do
-              write
-                (  "event: label-added\ndata:"
-                <> fromEncoding (pairs ("address" .= address <> "text" .= text))
-                <> "\n\n"
-                )
-              flush
-              continue isPaused
-            Right (LabelRemoved address) -> do
-              write "event: label-removed\ndata:"
-              pushAddress address
-              continue isPaused
+    let
+      continue isPaused = do
+        event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay))
+                            (atomically (readTChan channel))
+        case event of
+          Left () -> do
+            if isPaused then write ": keep-alive\n\n" >> flush else pushStatus
+            continue isPaused
+          Right EmulatorStarted -> do
+            write "event: started\ndata:\n\n" >> flush
+            continue False
+          Right EmulatorPaused -> do
+            pushPaused
+            continue True
+          Right (BreakPointAdded address) -> do
+            write "event: breakpoint-added\ndata:"
+            pushAddress address
+            continue isPaused
+          Right (BreakPointRemoved address) -> do
+            write "event: breakpoint-removed\ndata:"
+            pushAddress address
+            continue isPaused
+          Right (LabelUpdated labels) -> do
+            let labelsJSON =
+                  list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) labels
+            write ("event: label-added\ndata:" <> fromEncoding labelsJSON <> "\n\n")
+            flush
+            continue isPaused
+          Right (LabelRemoved address) -> do
+            write "event: label-removed\ndata:"
+            pushAddress address
+            continue isPaused
 
     pushPaused >> continue True
 
