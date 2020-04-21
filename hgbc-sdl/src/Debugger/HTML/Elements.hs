@@ -8,6 +8,7 @@ module Debugger.HTML.Elements
   , meta
   , link
   , script
+  , inlineScript
   , body
   , h
   , nav
@@ -66,6 +67,9 @@ link rel href = "<link rel='" <> rel <> "' href='" <> href <> "'>"
 
 script :: BB.Builder -> BB.Builder
 script src = "<script src='" <> src <> "'></script>"
+
+inlineScript :: BB.Builder -> BB.Builder
+inlineScript src = "<script>" <> src <> "</script>"
 
 body :: [BB.Builder] -> BB.Builder
 body contents = "<body>" <> mconcat contents <> "</body>"
@@ -178,5 +182,6 @@ unused = "<span class=u>&nbsp;</span>"
 padding :: Int -> BB.Builder
 padding n = "<span class=padding>" <> mconcat (replicate n "&nbsp;") <> "</span>"
 
-button :: BB.Builder -> [BB.Builder] -> BB.Builder
-button name content = "<button id=" <> name <> ">" <> mconcat content <> "</button>"
+button :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
+button name tt content =
+  "<button id=" <> name <> " title='" <> tt <> "'>" <> mconcat content <> "</button>"

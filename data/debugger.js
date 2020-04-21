@@ -4,8 +4,8 @@ window.onload = () => {
   const eventSource = new EventSource('events');
   window.onbeforeunload = () => eventSource.close();
 
-  const banks = new BankStatus();
-  const memory = new Memory();
+  const banks = new BankStatus(window.bootROMLimit);
+  const memory = new Memory(banks);
   const disassembly = new Disassembly(banks);
   initStatus(eventSource, banks, memory, disassembly);
 
@@ -41,7 +41,7 @@ window.onload = () => {
 /*****************************************************************************
  * BANK STATUS
  *****************************************************************************/
-function BankStatus() {
+function BankStatus(bootROMLimit) {
   const banks = { pcBank: 0, rom: 0, ram: 0, vram: 0, wram: 0 };
 
   this.update = function (status) {
@@ -53,35 +53,36 @@ function BankStatus() {
   }
 
   this.expandAddress = function (offset, relativeTo) {
-    if (offset < 0x4000) {
-      if (relativeTo.bank === 0xFFFF &&
-        (offset < 0x100 || (offset >= 0x200 && offset < 0x1000))) {
+    if (offset < bootROMLimit && (offset < 0x100 || offset >= 0x200)) {
+      if (relativeTo ? relativeTo.bank === 0xFFFF : banks.pcBank === 0xFFFF) {
         return { bank: 0xFFFF, offset: offset };
       } else {
         return { bank: 0, offset: offset };
       }
+    } else if (offset < 0x4000) {
+      return { bank: 0, offset: offset };
     } else if (offset < 0x8000) {
-      return relativeTo.offset >= 0x4000 && relativeTo.offset < 0x8000 ?
+      return relativeTo && relativeTo.offset >= 0x4000 && relativeTo.offset < 0x8000 ?
         { bank: relativeTo.bank, offset: offset } :
         { bank: banks.rom, offset: offset };
     } else if (offset < 0xA000) {
-      return relativeTo.offset >= 0x8000 && relativeTo.offset < 0xA000 ?
+      return relativeTo && relativeTo.offset >= 0x8000 && relativeTo.offset < 0xA000 ?
         { bank: relativeTo.bank, offset: offset } :
         { bank: banks.vram, offset: offset };
     } else if (offset < 0xC000) {
-      return relativeTo.offset >= 0xA000 && relativeTo.offset < 0xC000 ?
+      return relativeTo && relativeTo.offset >= 0xA000 && relativeTo.offset < 0xC000 ?
         { bank: relativeTo.bank, offset: offset } :
         { bank: banks.ram, offset: offset };
     } else if (offset < 0xD000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xE000) {
-      return relativeTo.offset >= 0xD000 && relativeTo.offset < 0xE000 ?
+      return relativeTo && relativeTo.offset >= 0xD000 && relativeTo.offset < 0xE000 ?
         { bank: relativeTo.bank, offset: offset } :
         { bank: banks.wram, offset: offset };
     } else if (offset < 0xF000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xFE00) {
-      return relativeTo.offset >= 0xF000 && relativeTo.offset < 0xFE00 ?
+      return relativeTo && relativeTo.offset >= 0xF000 && relativeTo.offset < 0xFE00 ?
         { bank: relativeTo.bank, offset: offset } :
         { bank: banks.wram, offset: offset };
     } else {
@@ -135,7 +136,6 @@ function initStatus(eventSource, banks, memory, disassembly) {
   }
 
   function onUpdate(event) {
-    memory.refresh();
     const data = JSON.parse(event.data);
     banks.update(data);
     for (let key of Object.keys(data)) {
@@ -157,41 +157,66 @@ function initStatus(eventSource, banks, memory, disassembly) {
 /*****************************************************************************
  * MEMORY
  *****************************************************************************/
-function Memory() {
-  const LINES = 10;
-  const addressField = document.getElementById('address');
+function Memory(banks) {
+  const LINES = 20;
+  const WIDTH = 16;
 
   this.refresh = () => refresh(getAddress());
 
-  fillLabels(getAddress(), LINES);
+  const addressField = document.getElementById('address');
+  const memoryWindow = document.querySelector('div.memory div.window');
 
+  addressField.addEventListener('blur', () =>
+    addressField.value = formatShortAddress(addressField.value));
   addressField.addEventListener('input', () => {
     const address = getAddress();
-    fillLabels(address, LINES);
     refresh(address);
   });
   addressField.addEventListener('keydown', event => {
-    switch (event.code) {
-      case 'ArrowUp': return scroll(-8);
-      case 'ArrowDown': return scroll(8);
-      case 'PageUp': return scroll(-8 * LINES);
-      case 'PageDown': return scroll(8 * LINES);
+    switch (event.key) {
+      case 'ArrowUp': return scroll(-WIDTH);
+      case 'ArrowDown': return scroll(WIDTH);
+      case 'Enter': memoryWindow.focus();
     }
   });
-  document.getElementById('memoryHex').addEventListener('wheel', onWheel);
-  document.getElementById('memoryASCII').addEventListener('wheel', onWheel);
-  document.getElementById('addressLabels').addEventListener('wheel', onWheel);
+
+  const memoryKeyMap = new KeyMap();
+  memoryWindow.addEventListener('wheel', onWheel);
+  memoryWindow.addEventListener('keydown', memoryKeyMap.handleEvent);
+  memoryKeyMap.override('ArrowUp', () => scroll(-WIDTH));
+  memoryKeyMap.override('ArrowDown', () => scroll(WIDTH));
+  memoryKeyMap.override('PageUp', () => scroll(-WIDTH * LINES));
+  memoryKeyMap.override('PageDown', () => scroll(WIDTH * LINES));
 
   function onWheel(event) {
     event.preventDefault();
-    scroll(event.deltaY < 0 ? -8 : 8);
+    switch (event.deltaMode) {
+      case 0: // DOM_DELTA_PIXEL
+        return scroll(Math.round(WIDTH * event.deltaY / 16));
+      case 1: // DOM_DELTA_LINE
+        return scroll(Math.round(event.deltaY * WIDTH));
+      case 2: // DOM_DELTA_PAGE
+        return scroll(Math.round(event.deltaY * LINES * WIDTH));
+    }
   }
 
-  function scroll(amount) {
-    const v = (getAddress() + amount) & 0xFFFF;
-    addressField.value = formatShortAddress(v);
-    fillLabels(v, LINES);
-    refresh(v);
+  let scrollAmount = 0;
+  let scrolling = false;
+  async function scroll(amount) {
+    scrollAmount += amount;
+    if (!scrolling) {
+      try {
+        scrolling = true;
+        while (scrollAmount !== 0) {
+          const v = (getAddress() + scrollAmount) & 0xFFFF;
+          addressField.value = formatShortAddress(v);
+          scrollAmount = 0;
+          await refresh(v);
+        }
+      } finally {
+        scrolling = false;
+      }
+    }
   }
 
   function decodeASCII(c) {
@@ -206,18 +231,21 @@ function Memory() {
   function fillLabels(baseAddress, lines) {
     const labels = [];
     for (let i = 0; i < lines; i++) {
-      labels[i] = formatShortAddress(baseAddress + (8 * i) & 0xFFFF);
+      labels[i] = formatLongAddress(
+        banks.expandAddress(baseAddress + (WIDTH * i) & 0xFFFF));
     }
     document.getElementById('addressLabels').innerText = labels.join('\n');
   }
 
   async function refresh(baseAddress) {
     const text = await fetchText("memory?address=" + baseAddress.toString(16) + "&lines=" + LINES);
+
+    fillLabels(baseAddress, LINES);
     document.getElementById('memoryHex').innerText = text;
     document.getElementById('memoryASCII').innerText =
       text.split('\n')
         .map(line => line.split(' ')
-          .map(c => decodeASCII(parseInt(c, 16)))
+          .map(c => c === '' ? ' ' : decodeASCII(parseInt(c, 16)))
           .join(''))
         .join('\n');
   }
@@ -413,7 +441,11 @@ function Disassembly(banks) {
 
   function isVisible(position) {
     const i = positionToIndex(position);
-    return i >= state.scrollIndex && i < state.scrollIndex + LINES;
+    if (state.lines[i + 1] && sameAddress(state.lines[i + 1].address, position.address)) {
+      return i >= state.scrollIndex && i < state.scrollIndex + LINES - 1;
+    } else {
+      return i >= state.scrollIndex && i < state.scrollIndex + LINES;
+    }
   }
 
   function updateMaxScrollIndex() {
@@ -560,7 +592,7 @@ function Disassembly(banks) {
 
     const breakpoint = document.createElement('input');
     breakpoint.type = 'button';
-    breakpoint.title = 'Toggle break point';
+    breakpoint.title = 'Toggle breakpoint';
     breakpoint.classList.add('disassemblyButton', 'breakpoint');
     breakpoint.onclick = () => toggleBreakpointAtVisibleAddress(field.address);
     if (containsAddress(field.address, breakpoints)) {
@@ -751,8 +783,8 @@ function Disassembly(banks) {
         state.lines = state.lines.concat(newFields);
         ul.append(...newFields.map(line => line.li));
 
-        let toTrim = adjustedAmount;
-        if (state.lines[toTrim - 1].hasOwnProperty('label')) {
+        let toTrim = Math.min(adjustedAmount, state.lines.length - LINES);
+        if (toTrim > 0 && state.lines[toTrim - 1].hasOwnProperty('label')) {
           toTrim -= 1;
           setScrollIndex(1);
         } else {

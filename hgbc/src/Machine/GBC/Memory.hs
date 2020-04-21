@@ -8,6 +8,7 @@ module Machine.GBC.Memory
   , initMemory
   , initMemoryForROM
   , hasBootROM
+  , bootROMLength
   , getROMData
   , getBootROMData
   , getBank

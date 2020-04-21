@@ -11,6 +11,7 @@
 }
 
 body {
+  margin: 0;
   font-family: mono;
   font-size: small;
 }
@@ -32,7 +33,8 @@ iframe {
   visibility: hidden;
 }
 nav {
-  padding: 2px;
+  display: flex;
+  padding: 2px var(--padding);
   background-color: var(--value-background);
 }
 nav button {
@@ -45,7 +47,6 @@ nav button img {
   margin: 2px auto 0 auto;
 }
 nav.innerNav {
-  display: flex;
   padding: 2px var(--padding);
 }
 nav.innerNav span.leftRightSeparator {
@@ -58,7 +59,6 @@ nav.innerNav button img {
   display: inline-block;
   height: 20px;
   vertical-align: bottom;
-  margin-right: var(--padding);
 }
 
 .panel {
@@ -66,11 +66,18 @@ nav.innerNav button img {
   border: 2px solid black;
   background-color: var(--panel-background);
 }
+div.window {
+  position:relative;
+  overflow: hidden;
+  white-space: pre;
+  margin: 0 var(--padding) var(--padding);
+}
 
 #rootContainer {
   display: grid;
-  grid-template-columns: 40em 1fr;
+  grid-template-columns: 1fr 40em;
   grid-gap: var(--padding);
+  margin: 0 var(--padding);
 }
 div.sidebyside {
   display:flex;
@@ -104,7 +111,7 @@ div.value {
 div.info {
 	display: none;
 	position:absolute;
-	top: 95%; left: 50%;
+	top: 95%; right: 8px;
 	font-size:small;
   white-space: nowrap;
 	border: 1px solid black;
@@ -151,42 +158,25 @@ div.value span.u {
   background-size: 100% 100%;
 }
 
-div.memory {
-  flex-grow: 1;
-  display: grid;
-  grid-template-columns: 5em 15em 6em;
-  grid-auto-rows: 2.5em 1fr;
-  margin-left: var(--padding);
-}
-div.memory div.addressContainer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-end;
-  background: var(--value-background);
-}
-#address {
-  width: 3em;
-  font-size: small;
-  text-align: right;
-}
 div.memory div.addresses {
-  grid-row: 2;
-  padding: 4px;
+  display: inline-block;
+  width: 7em;
+  padding: 0 var(--padding);
+  padding-right: calc(1ch + 3 * var(--padding));
   background-color: var(--value-background);
   text-align: right;
 }
-div.memory div.ascii {
-  grid-row: 2;
-  border-left: 2px solid var(--value-background);
-  padding: 4px;
-  background-color: var(--active-background);
-  white-space: nowrap;
-}
 div.memory div.hex {
-  grid-row: 2;
-  padding: 4px;
+  display: inline-block;
+  padding: 0 var(--padding);
   background-color: var(--active-background);
-  white-space: nowrap;
+}
+div.memory div.ascii {
+  display: inline-block;
+  width: 100%;
+  border-left: 2px solid var(--value-background);
+  padding: 0 var(--padding);
+  background-color: var(--active-background);
 }
 
 div.disassembly {
@@ -194,11 +184,7 @@ div.disassembly {
   --n-lines: 20;
 }
 div.disassembly div.window {
-  position:relative;
-  overflow: hidden;
   height: calc(var(--line-height) * var(--n-lines));
-  white-space: pre;
-  margin: 0 var(--padding) var(--padding);
 }
 div.disassembly span.instruction {
   display: inline-block;

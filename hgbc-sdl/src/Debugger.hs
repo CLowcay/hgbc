@@ -32,10 +32,13 @@ import           Data.Word
 import           Debugger.HTML
 import           Debugger.Status
 import           Disassembler
-import           Machine.GBC                    ( EmulatorState )
+import           Machine.GBC                    ( EmulatorState
+                                                , memory
+                                                )
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( readChunk
                                                 , getBank
+                                                , bootROMLength
                                                 )
 import           Machine.GBC.Util               ( formatHex )
 import           System.IO
@@ -119,9 +122,10 @@ debugger channel romFileName emulator emulatorState debugState req respond =
   respond =<< case Wai.pathInfo req of
     [] -> case Wai.requestMethod req of
       "GET" -> pure
-        (Wai.responseLBS HTTP.status200
-                         [(HTTP.hContentType, "text/html")]
-                         (BB.toLazyByteString (debugHTML romFileName))
+        (Wai.responseLBS
+          HTTP.status200
+          [(HTTP.hContentType, "text/html")]
+          (BB.toLazyByteString (debugHTML romFileName (bootROMLength (memory emulatorState))))
         )
       "POST" -> do
         body <- Wai.lazyRequestBody req
@@ -371,7 +375,9 @@ debugJS = Wai.responseLBS
 
 getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
 getMemoryAt address memLines emulatorState = do
-  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (8 * i)) 8)
+  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (16 * i)) 16)
                        emulatorState
-  pure (LBC.intercalate "\n" (formatChunk <$> chunks))
-  where formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
+  pure (LBC.intercalate "\n" (formatSplitChunk <$> chunks))
+ where
+  formatSplitChunk s = let (a, b) = B.splitAt 8 s in formatChunk a <> "   " <> formatChunk b
+  formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
