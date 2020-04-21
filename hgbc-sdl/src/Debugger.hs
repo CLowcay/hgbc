@@ -77,7 +77,7 @@ sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan ch
 data DebugState = DebugState {
     disassemblyRef :: IORef Disassembly
   , breakpoints    :: H.BasicHashTable LongAddress ()
-  , labelsRef      :: IORef (HM.HashMap LongAddress T.Text)
+  , labelsRef      :: IORef (HM.HashMap LongAddress (T.Text, Bool))
 }
 
 logError :: Wai.Request -> String -> IO ()
@@ -228,13 +228,11 @@ debugger channel romFileName emulator emulatorState debugState req respond =
 
     ["labels"] -> whenMethodGET $ do
       allLabels <- HM.toList <$> readIORef (labelsRef debugState)
-      let labelsJSON =
-            list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) allLabels
       pure
         (Wai.responseLBS
           HTTP.status200
           [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
-          (BB.toLazyByteString (fromEncoding labelsJSON))
+          (BB.toLazyByteString (fromEncoding (labelsToJSON allLabels)))
         )
 
     ["label"] -> withAddress $ \address -> whenMethodPOST $ do
@@ -247,8 +245,10 @@ debugger channel romFileName emulator emulatorState debugState req respond =
               modifyIORef' (labelsRef debugState) (HM.delete address)
               sendNotification channel (LabelRemoved address)
             else do
-              modifyIORef' (labelsRef debugState) (HM.insert address text)
-              sendNotification channel (LabelUpdated [(address, text)])
+              labels <- readIORef (labelsRef debugState)
+              when (maybe False snd (HM.lookup address labels)) $ do
+                writeIORef (labelsRef debugState) $! HM.insert address (text, True) labels
+                sendNotification channel (LabelUpdated [(address, (text, True))])
           pure emptyResponse
         [("delete", _)] -> do
           modifyIORef' (labelsRef debugState) (HM.delete address)
@@ -326,9 +326,7 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
             pushAddress address
             continue isPaused
           Right (LabelUpdated labels) -> do
-            let labelsJSON =
-                  list (\(address, text) -> pairs ("address" .= address <> "text" .= text)) labels
-            write ("event: label-added\ndata:" <> fromEncoding labelsJSON <> "\n\n")
+            write ("event: label-added\ndata:" <> fromEncoding (labelsToJSON labels) <> "\n\n")
             flush
             continue isPaused
           Right (LabelRemoved address) -> do
@@ -360,6 +358,12 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
           )
         >> flush
     pushAddress address = write (BB.lazyByteString (encode address) <> "\n\n") >> flush
+
+labelsToJSON :: [(LongAddress, (T.Text, Editable))] -> Encoding
+labelsToJSON = list
+  (\(address, (text, isEditable)) ->
+    pairs ("address" .= address <> "text" .= text <> "isEditable" .= isEditable)
+  )
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS

@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE BangPatterns #-}
@@ -8,6 +9,7 @@
 module Disassembler
   ( LongAddress(..)
   , Field(..)
+  , Editable
   , Labels
   , fieldAddress
   , fieldBytes
@@ -28,6 +30,7 @@ import           Data.Aeson
 import           Data.Bits
 import           Data.Foldable
 import           Data.Function
+import           Data.Functor
 import           Data.Hashable
 import           Data.Int
 import           Data.Maybe
@@ -37,13 +40,13 @@ import           Debugger.LabelGenerator
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Memory
+import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
 import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
 import qualified Data.Vector.Storable          as VS
-import           Data.Functor
 
 data LongAddress
   = LongAddress !Word16 !Word16
@@ -112,7 +115,8 @@ data NextAction
 newtype Disassembly = Disassembly (IM.IntMap Field)
   deriving (Eq, Ord, Show, Semigroup, Monoid)
 
-type Labels = [(LongAddress, T.Text)]
+type Editable = Bool
+type Labels = [(LongAddress, (T.Text, Editable))]
 
 -- | Insert a new field into the disassembly. This is somewhat complicated since
 -- there may already be data fields that need to be split or truncated to
@@ -250,20 +254,88 @@ disassembleROM memory0 =
     pure r
 
   defaultLabels =
-    [ (LongAddress 0 0x0 , "rst0")
-    , (LongAddress 0 0x8 , "rst1")
-    , (LongAddress 0 0x10, "rst2")
-    , (LongAddress 0 0x18, "rst3")
-    , (LongAddress 0 0x20, "rst4")
-    , (LongAddress 0 0x28, "rst5")
-    , (LongAddress 0 0x30, "rst6")
-    , (LongAddress 0 0x38, "rst7")
-    , (LongAddress 0 0x40, "int40_vblank")
-    , (LongAddress 0 0x48, "int48_lcd")
-    , (LongAddress 0 0x50, "int50_timer")
-    , (LongAddress 0 0x58, "int58_serial")
-    , (LongAddress 0 0x60, "int60_keypad")
-    ]
+    [ (LongAddress 0 0x0  , ("rst0", False))
+      , (LongAddress 0 0x8  , ("rst1", False))
+      , (LongAddress 0 0x10 , ("rst2", False))
+      , (LongAddress 0 0x18 , ("rst3", False))
+      , (LongAddress 0 0x20 , ("rst4", False))
+      , (LongAddress 0 0x28 , ("rst5", False))
+      , (LongAddress 0 0x30 , ("rst6", False))
+      , (LongAddress 0 0x38 , ("rst7", False))
+      , (LongAddress 0 0x40 , ("int40_vblank", False))
+      , (LongAddress 0 0x48 , ("int48_lcd", False))
+      , (LongAddress 0 0x50 , ("int50_timer", False))
+      , (LongAddress 0 0x58 , ("int58_serial", False))
+      , (LongAddress 0 0x60 , ("int60_keypad", False))
+      , (LongAddress 0 0x100, ("rom_header", False))
+      , (LongAddress 0 P1   , ("P1", False))
+      , (LongAddress 0 SB   , ("SB", False))
+      , (LongAddress 0 SC   , ("SC", False))
+      , (LongAddress 0 DIV  , ("DIV", False))
+      , (LongAddress 0 TIMA , ("TIMA", False))
+      , (LongAddress 0 TMA  , ("TMA", False))
+      , (LongAddress 0 TAC  , ("TAC", False))
+      , (LongAddress 0 NR10 , ("NR10", False))
+      , (LongAddress 0 NR11 , ("NR11", False))
+      , (LongAddress 0 NR12 , ("NR12", False))
+      , (LongAddress 0 NR13 , ("NR13", False))
+      , (LongAddress 0 NR14 , ("NR14", False))
+      , (LongAddress 0 NR20 , ("NR20", False))
+      , (LongAddress 0 NR21 , ("NR21", False))
+      , (LongAddress 0 NR22 , ("NR22", False))
+      , (LongAddress 0 NR23 , ("NR23", False))
+      , (LongAddress 0 NR24 , ("NR24", False))
+      , (LongAddress 0 NR30 , ("NR30", False))
+      , (LongAddress 0 NR31 , ("NR31", False))
+      , (LongAddress 0 NR32 , ("NR32", False))
+      , (LongAddress 0 NR33 , ("NR33", False))
+      , (LongAddress 0 NR34 , ("NR34", False))
+      , (LongAddress 0 NR40 , ("NR40", False))
+      , (LongAddress 0 NR41 , ("NR41", False))
+      , (LongAddress 0 NR42 , ("NR42", False))
+      , (LongAddress 0 NR43 , ("NR43", False))
+      , (LongAddress 0 NR44 , ("NR44", False))
+      , (LongAddress 0 NR50 , ("NR50", False))
+      , (LongAddress 0 NR51 , ("NR51", False))
+      , (LongAddress 0 NR52 , ("NR52", False))
+      , (LongAddress 0 IF   , ("IF", False))
+      , (LongAddress 0 LCDC , ("LCDC", False))
+      , (LongAddress 0 STAT , ("STAT", False))
+      , (LongAddress 0 SCY  , ("SCY", False))
+      , (LongAddress 0 SCX  , ("SCX", False))
+      , (LongAddress 0 LY   , ("LY", False))
+      , (LongAddress 0 LYC  , ("LYC", False))
+      , (LongAddress 0 DMA  , ("DMA", False))
+      , (LongAddress 0 BGP  , ("BGP", False))
+      , (LongAddress 0 OBP0 , ("OBP0", False))
+      , (LongAddress 0 OBP1 , ("OBP1", False))
+      , (LongAddress 0 WY   , ("WY", False))
+      , (LongAddress 0 WX   , ("WX", False))
+      , (LongAddress 0 R4C  , ("R4C", False))
+      , (LongAddress 0 KEY1 , ("KEY1", False))
+      , (LongAddress 0 VBK  , ("VBK", False))
+      , (LongAddress 0 BLCK , ("BLCK", False))
+      , (LongAddress 0 HDMA1, ("HDMA1", False))
+      , (LongAddress 0 HDMA2, ("HDMA2", False))
+      , (LongAddress 0 HDMA3, ("HDMA3", False))
+      , (LongAddress 0 HDMA4, ("HDMA4", False))
+      , (LongAddress 0 HDMA5, ("HDMA5", False))
+      , (LongAddress 0 RP   , ("RP", False))
+      , (LongAddress 0 BCPS , ("BCPS", False))
+      , (LongAddress 0 BCPD , ("BCPD", False))
+      , (LongAddress 0 OCPS , ("OCPS", False))
+      , (LongAddress 0 OCPD , ("OCPD", False))
+      , (LongAddress 0 R6C  , ("R6C", False))
+      , (LongAddress 0 SVBK , ("SVBK", False))
+      , (LongAddress 0 R72  , ("R72", False))
+      , (LongAddress 0 R73  , ("R73", False))
+      , (LongAddress 0 R74  , ("R74", False))
+      , (LongAddress 0 R75  , ("R75", False))
+      , (LongAddress 0 PCM12, ("PCM12", False))
+      , (LongAddress 0 PCM34, ("PCM34", False))
+      , (LongAddress 0 IE   , ("IE", False))
+      ]
+      <> [ (LongAddress 0 (0xFE00 + i * 4), ("OBJ" <> T.pack (show i), False)) | i <- [0 .. 39] ]
 
   romFrom origin = DisassemblyState origin True [] memory0
   entryPoint    = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
@@ -309,21 +381,27 @@ disassemble state0 disassembly = evalStateT (go (disassembly, [])) state0
         case action of
           Continue -> go (accum', labels)
           Jump nn  -> do
-            label <- (,) <$> makeLongAddress nn <*> liftIO nextGlobalLabel
+            label <- (,) <$> makeLongAddress nn <*> (liftIO nextGlobalLabel <&> (, True))
             modifyPC (const nn)
             go (accum', label : labels)
           JumpRel i -> do
-            label <- (,) <$> (currentAddressLong <&> (`addOffset` i)) <*> liftIO (nextLocalLabel i)
+            label <-
+              (,)
+              <$> (currentAddressLong <&> (`addOffset` i))
+              <*> (liftIO (nextLocalLabel i) <&> (, True))
             modifyPC (+ fromIntegral i)
             go (accum', label : labels)
           Fork nn -> do
-            s                  <- get
-            label              <- (,) <$> makeLongAddress nn <*> liftIO nextGlobalLabel
+            s <- get
+            label <- (,) <$> makeLongAddress nn <*> (liftIO nextGlobalLabel <&> (, True))
             (accum'', labels') <- liftIO (disassemble (s { disassemblyPC = nn }) accum')
             go (accum'', label : labels' ++ labels)
           ForkRel i -> do
-            s <- get
-            label <- (,) <$> (currentAddressLong <&> (`addOffset` i)) <*> liftIO (nextLocalLabel i)
+            s     <- get
+            label <-
+              (,)
+              <$> (currentAddressLong <&> (`addOffset` i))
+              <*> (liftIO (nextLocalLabel i) <&> (, True))
             (accum'', labels') <- liftIO
               (disassemble (s { disassemblyPC = disassemblyPC s + fromIntegral i }) accum')
             go (accum'', label : labels' ++ labels)

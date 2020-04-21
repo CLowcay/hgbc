@@ -6,7 +6,7 @@ window.onload = () => {
 
   const banks = new BankStatus(window.bootROMLimit);
   const memory = new Memory(banks);
-  const disassembly = new Disassembly(banks);
+  const disassembly = new Disassembly(banks, memory);
   initStatus(eventSource, banks, memory, disassembly);
 
   eventSource.addEventListener('breakpoint-added',
@@ -162,6 +162,10 @@ function Memory(banks) {
   const WIDTH = 16;
 
   this.refresh = () => refresh(getAddress());
+  this.jumpTo = function (address) {
+    addressField.value = formatShortAddress(address.offset);
+    refresh(address.offset);
+  };
 
   const addressField = document.getElementById('address');
   const memoryWindow = document.querySelector('div.memory div.window');
@@ -254,7 +258,7 @@ function Memory(banks) {
 /*****************************************************************************
  * Disassembly
  *****************************************************************************/
-function Disassembly(banks) {
+function Disassembly(banks, memory) {
   const LINES = 20;
   const LINE_HEIGHT = 1.5;
 
@@ -284,7 +288,7 @@ function Disassembly(banks) {
     if (li) li.querySelector('input.breakpoint').classList.remove('set');
   };
   this.labelUpdated = function (labels) {
-    labels.forEach(label => state.labels.set(label.address, label.text));
+    labels.forEach(label => state.labels.set(label.address, label));
     refreshLabels();
     refreshListing();
   };
@@ -367,7 +371,7 @@ function Disassembly(banks) {
 
   // initialize the labels
   fetchJSON('labels').then(labels => {
-    labels.forEach(label => state.labels.set(label.address, label.text));
+    labels.forEach(label => state.labels.set(label.address, label));
     refreshListing();
   });
 
@@ -483,7 +487,7 @@ function Disassembly(banks) {
           });
         } else if (line.li.firstChild.innerText !== label) {
           line.label = label;
-          line.li.firstChild.innerText = label;
+          line.li.firstChild.innerText = label.text;
         }
         i += 2;
       }
@@ -537,7 +541,7 @@ function Disassembly(banks) {
   function updateFocus() {
     if (state.selection.isLabel) {
       const li = getLI(state.selection);
-      if (li && window.getSelection().isCollapsed) {
+      if (li && li.getAttribute('data-editable') === 'true' && window.getSelection().isCollapsed) {
         const span = li.firstChild;
         span.contentEditable = true;
         span.focus();
@@ -563,11 +567,13 @@ function Disassembly(banks) {
     }
   }
 
-  function createLabel(address, labelText) {
+  function createLabel(address, label) {
     const li = document.createElement('li');
+    li.setAttribute('data-editable', label.isEditable);
+
     const text = document.createElement('span');
     text.spellcheck = false;
-    text.innerText = labelText;
+    text.innerText = label.text;
     text.classList.add('label');
 
     const keymap = new KeyMap();
@@ -663,9 +669,15 @@ function Disassembly(banks) {
       const addressText = formatLongAddress(address);
       const a = document.createElement('a');
       a.href = '#' + encodeURIComponent(addressText);
-      a.innerText = parameter.indirect ? `(${label})` : label;
-      a.addEventListener('click', () => jumpTo(address).then(() =>
-        setSelection({ address: address, isLabel: false })));
+      a.innerText = label.text;
+      a.addEventListener('click', () => {
+        if (field.text === 'JP' || field.text === 'JR' || field.text === 'CALL') {
+          jumpTo(address).then(() =>
+            setSelection({ address: address, isLabel: false }))
+        } else {
+          memory.jumpTo(address);
+        }
+      });
       a.addEventListener('keydown', event => {
         if (event.key === 'Enter') event.stopPropagation();
       });
@@ -676,7 +688,13 @@ function Disassembly(banks) {
 
       const wrapper = document.createElement('span');
       wrapper.style.position = 'relative';
-      wrapper.appendChild(a);
+      if (parameter.indirect) {
+        wrapper.append('(');
+        wrapper.append(a);
+        wrapper.append(')');
+      } else {
+        wrapper.appendChild(a);
+      }
       wrapper.appendChild(info);
       return wrapper;
     }

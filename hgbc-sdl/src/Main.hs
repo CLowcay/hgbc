@@ -33,7 +33,6 @@ import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
-import qualified Data.HashMap.Strict           as HM
 import qualified Data.HashTable.IO             as H
 import qualified Debugger
 import qualified Emulator
@@ -152,11 +151,6 @@ emulator rom allOptions@Config.Options {..} = do
   labelsRef      <- newIORef mempty
   let debugState = Debugger.DebugState { .. }
 
-  when optionDebugMode $ do
-    (disassembly, labels) <- disassembleROM (memory emulatorState)
-    writeIORef disassemblyRef disassembly
-    writeIORef labelsRef      (HM.fromList labels)
-
   debuggerChannel <- if optionDebugMode
     then
       Just
@@ -166,6 +160,13 @@ emulator rom allOptions@Config.Options {..} = do
                            emulatorState
                            debugState
     else pure Nothing
+
+  case debuggerChannel of
+    Nothing      -> pure ()
+    Just channel -> do
+      (disassembly, labels) <- disassembleROM (memory emulatorState)
+      writeIORef disassemblyRef disassembly
+      Debugger.addNewLabels debugState channel labels
 
   let pauseAudio  = maybe (pure ()) Audio.pause audio
   let resumeAudio = maybe (pure ()) Audio.resume audio
