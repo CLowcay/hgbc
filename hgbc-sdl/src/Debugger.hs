@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -6,6 +7,9 @@ module Debugger
   ( start
   , sendNotification
   , addNewLabels
+  , restoreLabels
+  , recordDisassemblyRoot
+  , readDisassemblyRoots
   , Notification(..)
   , DebuggerChannel
   , DebugState(..)
@@ -14,13 +18,18 @@ where
 
 import           Control.Concurrent
 import           Control.Concurrent.STM
+import           Control.Exception              ( bracket )
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Data.Aeson
 import           Data.Aeson.Encoding            ( list )
+import           Data.Bifunctor
 import           Data.Char
+import           Data.Either
 import           Data.FileEmbed
+import           Data.Foldable
+import           Data.Functor
 import           Data.Functor.Identity
 import           Data.IORef
 import           Data.Maybe
@@ -41,6 +50,8 @@ import           Machine.GBC.Memory             ( readChunk
                                                 , bootROMLength
                                                 )
 import           Machine.GBC.Util               ( formatHex )
+import           System.Directory
+import           System.FilePath
 import           System.IO
 import           Text.Read
 import qualified Config
@@ -55,6 +66,7 @@ import qualified Data.HashTable.IO             as H
 import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as T
 import qualified Data.Text.Encoding.Error      as T
+import qualified Data.Text.IO                  as T
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -78,6 +90,8 @@ data DebugState = DebugState {
     disassemblyRef :: IORef Disassembly
   , breakpoints    :: H.BasicHashTable LongAddress ()
   , labelsRef      :: IORef (HM.HashMap LongAddress (T.Text, Bool))
+  , bootDebuggerPath :: Maybe FilePath
+  , romDebuggerPath  :: FilePath
 }
 
 logError :: Wai.Request -> String -> IO ()
@@ -92,11 +106,6 @@ logError req message = do
     <> (CB.unpack (Wai.rawPathInfo req) <> ": ")
     <> message
     )
-
-addNewLabels :: DebugState -> DebuggerChannel -> Labels -> IO ()
-addNewLabels debugState channel newLabels = do
-  modifyIORef' (labelsRef debugState) (HM.fromList newLabels `HM.union`)
-  sendNotification channel (LabelUpdated newLabels)
 
 start
   :: FilePath
@@ -243,15 +252,18 @@ debugger channel romFileName emulator emulatorState debugState req respond =
           if T.null text
             then do
               modifyIORef' (labelsRef debugState) (HM.delete address)
+              saveAllLabels debugState
               sendNotification channel (LabelRemoved address)
             else do
               labels <- readIORef (labelsRef debugState)
               when (maybe False snd (HM.lookup address labels)) $ do
                 writeIORef (labelsRef debugState) $! HM.insert address (text, True) labels
+                saveAllLabels debugState
                 sendNotification channel (LabelUpdated [(address, (text, True))])
           pure emptyResponse
         [("delete", _)] -> do
           modifyIORef' (labelsRef debugState) (HM.delete address)
+          saveAllLabels debugState
           sendNotification channel (LabelRemoved address)
           pure emptyResponse
         _ -> invalidCommand "label"
@@ -385,3 +397,96 @@ getMemoryAt address memLines emulatorState = do
  where
   formatSplitChunk s = let (a, b) = B.splitAt 8 s in formatChunk a <> "   " <> formatChunk b
   formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
+
+disassemblyRootsFileName :: FilePath
+disassemblyRootsFileName = "disassemblyRoots"
+
+labelsFileName :: FilePath
+labelsFileName = "labels"
+
+recordDisassemblyRoot :: DebugState -> LongAddress -> IO ()
+recordDisassemblyRoot debugState (LongAddress bank offset) = if bank /= 0xFFFF
+  then recordRoot (romDebuggerPath debugState)
+  else case bootDebuggerPath debugState of
+    Nothing   -> pure ()
+    Just path -> recordRoot path
+ where
+  recordRoot path =
+    appendFile (path </> disassemblyRootsFileName) (show bank <> " " <> show offset <> "\n")
+
+readDisassemblyRoots :: DebugState -> IO [LongAddress]
+readDisassemblyRoots debugState = do
+  romRoots <- readRoots (romDebuggerPath debugState)
+  case bootDebuggerPath debugState of
+    Nothing  -> pure romRoots
+    Just path -> do
+      bootRoots <- readRoots path
+      pure (romRoots <> bootRoots)
+ where
+  readRoots path = withFile (path </> disassemblyRootsFileName)
+                            ReadMode
+                            (fmap (mapMaybe parseRoot . lines) . hGetContents)
+  parseRoot line = case words line of
+    [bankRaw, offsetRaw] -> LongAddress <$> readMaybe bankRaw <*> readMaybe offsetRaw
+    _                    -> Nothing
+
+addNewLabels :: DebugState -> DebuggerChannel -> Labels -> IO ()
+addNewLabels debugState channel newLabels = do
+  modifyIORef' (labelsRef debugState) (`HM.union` HM.fromList newLabels)
+  saveAllLabels debugState
+  sendNotification channel (LabelUpdated newLabels)
+
+saveAllLabels :: DebugState -> IO ()
+saveAllLabels debugState = do
+  labels <- readIORef (labelsRef debugState)
+  saveLabels (romDebuggerPath debugState) labels (\(LongAddress bank _) -> bank /= 0xFFFF)
+  case bootDebuggerPath debugState of
+    Nothing   -> pure ()
+    Just path -> saveLabels path labels (\(LongAddress bank _) -> bank == 0xFFFF)
+ where
+  saveLabels labelsPath labels addressFilter = do
+    createDirectoryIfMissing True labelsPath
+    withTempFile labelsPath (labelsFileName <> ".tmp") $ \(file, handle) -> do
+      for_ (filter (addressFilter . fst) (HM.toList labels))
+        $ \(LongAddress bank offset, (text, isEditable)) -> when isEditable $ do
+            hPutStr handle (show bank <> " " <> show offset <> " ")
+            T.hPutStrLn handle text
+      hClose handle
+      renamePath file (labelsPath </> labelsFileName)
+
+restoreLabels :: DebugState -> IO ()
+restoreLabels debugState = do
+  readLabelsFile (romDebuggerPath debugState </> "labels")
+  case bootDebuggerPath debugState of
+    Nothing   -> pure ()
+    Just path -> readLabelsFile (path </> "labels")
+ where
+  readLabelsFile path = do
+    exists <- doesFileExist path
+    if not exists
+      then pure ()
+      else withFile path ReadMode $ \handle -> do
+        contents <- hGetContents handle
+        case parseLines contents of
+          Left errors -> do
+            putStrLn ("WARNING: Cannot read " <> path)
+            for_ errors $ \e -> putStrLn ("  " <> e)
+          Right labels -> modifyIORef' (labelsRef debugState) (HM.fromList labels `HM.union`)
+  parseLines contents =
+    case partitionEithers $ writeError . second parseLine <$> [1 ..] `zip` lines contents of
+      ([]    , labels) -> Right labels
+      (errors, _     ) -> Left errors
+  parseLine line = case words line of
+    [bankRaw, offsetRaw, label] ->
+      (LongAddress <$> readMaybe bankRaw <*> readMaybe offsetRaw) <&> (, (T.pack label, True))
+    _ -> Nothing
+  writeError (i, Nothing) = Left ("error on line " <> show (i :: Int))
+  writeError (_, Just a ) = Right a
+
+withTempFile :: FilePath -> String -> ((FilePath, Handle) -> IO a) -> IO a
+withTempFile path template = bracket (openTempFile path template) cleanup
+ where
+  cleanup (file, handle) = do
+    hClose handle
+    exists <- doesFileExist file
+    when exists $ removeFile file

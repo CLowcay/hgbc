@@ -89,6 +89,9 @@ getROMPaths romFile = do
   let romRTCFile  = romDir </> "rtc"
   pure ROMPaths { .. }
 
+getLabelsPath :: FilePath -> IO FilePath
+getLabelsPath romFile = hgbcBaseDir <&> (</> "rom" </> takeBaseName romFile)
+
 readBootROMFile :: Maybe FilePath -> IO (Maybe B.ByteString)
 readBootROMFile Nothing            = pure Nothing
 readBootROMFile (Just bootROMFile) = do
@@ -146,24 +149,22 @@ emulator rom allOptions@Config.Options {..} = do
   audio <- if optionNoSound then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
-  disassemblyRef <- newIORef mempty
-  breakpoints    <- H.new
-  labelsRef      <- newIORef mempty
+  let romFileName = takeBaseName optionFilename
+  disassemblyRef   <- newIORef mempty
+  breakpoints      <- H.new
+  labelsRef        <- newIORef mempty
+  bootDebuggerPath <- traverse getLabelsPath (Config.bootROM config)
+  romDebuggerPath  <- getLabelsPath romFileName
   let debugState = Debugger.DebugState { .. }
 
   debuggerChannel <- if optionDebugMode
-    then
-      Just
-        <$> Debugger.start (takeBaseName optionFilename)
-                           config
-                           emulatorChannel
-                           emulatorState
-                           debugState
+    then Just <$> Debugger.start romFileName config emulatorChannel emulatorState debugState
     else pure Nothing
 
   case debuggerChannel of
     Nothing      -> pure ()
     Just channel -> do
+      Debugger.restoreLabels debugState
       (disassembly, labels) <- disassembleROM (memory emulatorState)
       writeIORef disassemblyRef disassembly
       Debugger.addNewLabels debugState channel labels
