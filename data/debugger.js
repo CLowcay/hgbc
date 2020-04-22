@@ -36,6 +36,14 @@ window.onload = () => {
   globalKeymap.override('Pause', () => postCommand('/', 'run'));
   globalKeymap.override('control KeyR', () => postCommand('/', 'run'));
   globalKeymap.override('control Home', () => disassembly.revealPC());
+
+  document.querySelectorAll('label').forEach(label =>
+    label.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        label.control.checked = true;
+      }
+    }));
 };
 
 /*****************************************************************************

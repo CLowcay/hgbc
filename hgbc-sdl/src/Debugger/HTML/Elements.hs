@@ -38,6 +38,7 @@ module Debugger.HTML.Elements
   , unused
   , padding
   , button
+  , tabs
   )
 where
 
@@ -185,3 +186,21 @@ padding n = "<span class=padding>" <> mconcat (replicate n "&nbsp;") <> "</span>
 button :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
 button name tt content =
   "<button id=" <> name <> " title='" <> tt <> "'>" <> mconcat content <> "</button>"
+
+tabs :: BB.Builder -> BB.Builder -> [(BB.Builder, [BB.Builder])] -> BB.Builder
+tabs _         _            []       = divclass "tabs" []
+tabs groupName contentClass (t : ts) = divclassid
+  groupName
+  ["tabs"]
+  (tab True (0, t) : (tab False <$> ([1 ..] `zip` ts)))
+ where
+  tab checked (i, (name, content)) =
+    let tid = groupName <> "-" <> BB.intDec i
+    in  divclass
+          "tab"
+          [ "<input type=radio name=" <> groupName <> " id=" <> tid <> if checked
+            then " checked>"
+            else ">"
+          , "<label tabindex=0 for=" <> tid <> ">" <> name <> "</label>"
+          , divclass ("'tab-content " <> contentClass <> "'") content
+          ]

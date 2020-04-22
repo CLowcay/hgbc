@@ -39,7 +39,14 @@ debugHTML romFileName bootROMLimit = html [header, main]
     , divclassid
       "rootContainer"
       []
-      [div [disassembly, memory], div [cpuRegisters, systemRegisters, lcdRegisters, soundRegisters]]
+      [ div [disassembly, memory]
+      , div
+        [ divclass "sideBySide" [cpuRegisters, listViews]
+        , systemRegisters
+        , lcdRegisters
+        , soundRegisters
+        ]
+      ]
     ]
 
 disassembly :: BB.Builder
@@ -67,3 +74,8 @@ memory = divclass
     , divclassid "memoryASCII"   ["ascii"]     []
     ]
   ]
+
+listViews :: BB.Builder
+listViews = tabs "list-views"
+                 "panel"
+                 [("Labels", ["Labels go here"]), ("Break points", ["Break points go here"])]
