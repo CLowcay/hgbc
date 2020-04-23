@@ -202,5 +202,5 @@ tabs groupName contentClass (t : ts) = divclassid
             then " checked>"
             else ">"
           , "<label tabindex=0 for=" <> tid <> ">" <> name <> "</label>"
-          , divclass ("'tab-content " <> contentClass <> "'") content
+          , divclass ("'tabContent " <> contentClass <> "'") content
           ]

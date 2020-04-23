@@ -67,10 +67,17 @@ nav.innerNav button img {
   background-color: var(--panel-background);
 }
 div.window {
-  position:relative;
+  position: relative;
   overflow: hidden;
   white-space: pre;
   margin: 0 var(--padding) var(--padding);
+}
+div.autoWindow {
+  position: relative;
+  overflow: auto;
+  white-space: pre;
+  height: 100%;
+  background-color: var(--active-background);
 }
 
 #rootContainer {
@@ -88,9 +95,21 @@ div.sideBySide {
   flex-grow: 1;
   margin-left: var(--padding);
 }
+#list-views ul {
+  margin: 0;
+  padding: var(--padding) 2em;
+}
+#list-views ul ul {
+  padding-top: 0;
+  padding-right: 0;
+}
+#list-views li span.address {
+  float: right;
+}
 
 div.tabs {
   position: relative;   
+  margin-top: var(--padding);
   min-height: 100px;
   clear: both;
 }
@@ -100,8 +119,7 @@ div.tab {
 div.tab label {                                                                         
   cursor: pointer;
   position: relative;
-  top: calc(6px + var(--padding));
-  height: 2em;
+  top: 6px; height: 2em;
   font-weight: bold;
   margin-right: var(--padding);
   border: 2px solid black;
@@ -112,18 +130,19 @@ div.tab label {
 div.tab>[type=radio] {
   display: none;   
 }
-div.tab-content {
+div.tabContent {
   position: absolute;
-  top:calc(var(--padding) + 2em + 3px);
+  top:calc(2em + 3px);
   left: 0; right: 0;  bottom: 0;
   margin: 0;
+  padding: var(--padding);
 }
 div.tab>[type=radio]:checked ~ label {
   background: var(--panel-background);
   border-bottom: none;
   z-index: 2;
 }
-div.tab>[type=radio]:checked ~ div.tab-content {
+div.tab>[type=radio]:checked ~ div.tabContent {
   z-index: 1;
 }
 

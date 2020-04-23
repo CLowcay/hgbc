@@ -6,7 +6,8 @@ window.onload = () => {
 
   const banks = new BankStatus(window.bootROMLimit);
   const memory = new Memory(banks);
-  const disassembly = new Disassembly(banks, memory);
+  const outline = new Outline();
+  const disassembly = new Disassembly(banks, outline, memory);
   initStatus(eventSource, banks, memory, disassembly);
 
   eventSource.addEventListener('breakpoint-added',
@@ -163,6 +164,107 @@ function initStatus(eventSource, banks, memory, disassembly) {
 }
 
 /*****************************************************************************
+ * OUTLINE
+ *****************************************************************************/
+function Outline() {
+  const labels = new LongAddressMap();
+  const breakpoints = new LongAddressMap();
+  const jumpToHandlers = [];
+
+  const labelsList = document.getElementById('labels-list');
+  const breakpointsList = document.getElementById('breakpoints-list');
+
+  this.addJumpToHandler = function (handler) {
+    jumpToHandlers.push(handler);
+  };
+
+  this.addBreakpoint = function (address) {
+    breakpoints.set(address, address);
+    refreshBreakpoints();
+  };
+  this.removeBreakpoint = function (address) {
+    breakpoints.delete(address);
+    refreshBreakpoints();
+  };
+  this.hasBreakpoint = function (address) {
+    return breakpoints.has(address);
+  }
+
+  this.addLabels = function (newLabels) {
+    newLabels.forEach(label => labels.set(label.address, label));
+    refreshLabels();
+  };
+  this.removeLabel = function (address) {
+    labels.delete(address);
+    refreshLabels();
+  };
+  this.hasLabel = function (address) {
+    return labels.has(address);
+  };
+  this.getLabel = function (address) {
+    return labels.get(address);
+  };
+
+  function refreshLabels() {
+    refreshBreakpoints();
+
+    labelsList.innerHTML = '';
+    let parent = labelsList;
+    let parentReady = false;
+    labels.forEach(label => {
+      const li = document.createElement('li');
+      li.appendChild(makeLink(label, label.address));
+      const l = document.createElement('span');
+      l.classList.add('address');
+      l.innerText = ` ${formatLongAddress(label.address)}`;
+      li.appendChild(l);
+
+      const char0 = label.text.toUpperCase().charCodeAt(0);
+      if (char0 >= 0x41 && char0 <= 0x5A) {
+        labelsList.appendChild(li);
+        parent = li;
+        parentReady = false;
+      } else if (parentReady) {
+        parent.appendChild(li);
+      } else {
+        const ul = document.createElement('ul');
+        ul.appendChild(li);
+        parent.appendChild(ul);
+        parent = ul;
+        parentReady = true;
+      }
+    });
+  }
+
+  function refreshBreakpoints() {
+    breakpointsList.innerHTML = '';
+    breakpoints.forEach(address => {
+      const li = document.createElement('li');
+      const label = labels.get(address);
+      const link = makeLink(label, address);
+      li.appendChild(link);
+      if (label) {
+        const l = document.createElement('span');
+        l.classList.add('address');
+        l.innerText = ` (${formatLongAddress(address)})`;
+        li.appendChild(l);
+      }
+      breakpointsList.appendChild(li);
+    });
+  }
+
+  function makeLink(label, address) {
+    const a = document.createElement('a');
+    const addressText = formatLongAddress(address);
+    a.href = '#' + addressText;
+    a.title = addressText;
+    a.addEventListener('click', () => jumpToHandlers.forEach(handler => handler(address)));
+    a.innerText = label ? label.text : addressText;
+    return a;
+  }
+}
+
+/*****************************************************************************
  * MEMORY
  *****************************************************************************/
 function Memory(banks) {
@@ -266,7 +368,7 @@ function Memory(banks) {
 /*****************************************************************************
  * Disassembly
  *****************************************************************************/
-function Disassembly(banks, memory) {
+function Disassembly(banks, outline, memory) {
   const LINES = 20;
   const LINE_HEIGHT = 1.5;
 
@@ -276,32 +378,38 @@ function Disassembly(banks, memory) {
     maxScrollIndex: LINES,
     pc: { bank: 0, offset: 0 },
     selection: { isLabel: false, address: { bank: 0, offset: 0 } },
-    labels: new LongAddressMap()
   };
+
+  outline.addJumpToHandler(address => {
+    setSelection({ address: address, isLabel: false });
+    jumpTo(address);
+  });
 
   let newestLabel = undefined;
 
   this.setPC = setPC;
-  this.revealPC = async () => {
-    await jumpTo(state.pc);
+  this.revealPC = () => {
     setSelection({ address: state.pc, isLabel: false });
+    jumpTo(state.pc);
   };
 
   this.breakPointAdded = function (address) {
     const li = getFieldLI(address);
+    outline.addBreakpoint(address);
     if (li) li.querySelector('input.breakpoint').classList.add('set');
   };
   this.breakPointRemoved = function (address) {
     const li = getFieldLI(address);
+    outline.removeBreakpoint(address);
     if (li) li.querySelector('input.breakpoint').classList.remove('set');
   };
   this.labelUpdated = function (labels) {
-    labels.forEach(label => state.labels.set(label.address, label));
+    outline.addLabels(labels);
     refreshLabels();
     refreshListing();
   };
   this.labelRemoved = function (address) {
-    state.labels.delete(address);
+    outline.removeLabel(address);
     refreshLabels();
     refreshListing();
   };
@@ -379,12 +487,21 @@ function Disassembly(banks, memory) {
 
   // initialize the labels
   fetchJSON('labels').then(labels => {
-    labels.forEach(label => state.labels.set(label.address, label));
+    outline.addLabels(labels);
     refreshListing();
   });
 
+  // initialize the breakpoints
+  fetchJSON('breakpoints').then(breakpoints => {
+    breakpoints.forEach(address => {
+      const li = getFieldLI(address);
+      outline.addBreakpoint(address);
+      if (li) li.querySelector('input.breakpoint').classList.add('set');
+    });
+  });
+
   function newLabelAt(address) {
-    if (!state.labels.has(address)) {
+    if (!outline.hasLabel(address)) {
       newestLabel = address;
       postLabelUpdate(address, "newLabel");
       return true;
@@ -479,7 +596,7 @@ function Disassembly(banks, memory) {
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      const label = state.labels.get(line.address);
+      const label = outline.getLabel(line.address);
       if (label === undefined) {
         if (line.label === undefined) {
           i += 1;
@@ -601,7 +718,7 @@ function Disassembly(banks, memory) {
     return li;
   }
 
-  function createField(field, breakpoints) {
+  function createField(field) {
     const li = document.createElement('li');
 
     const breakpoint = document.createElement('input');
@@ -609,7 +726,7 @@ function Disassembly(banks, memory) {
     breakpoint.title = 'Toggle breakpoint';
     breakpoint.classList.add('disassemblyButton', 'breakpoint');
     breakpoint.onclick = () => toggleBreakpointAtVisibleAddress(field.address);
-    if (containsAddress(field.address, breakpoints)) {
+    if (outline.hasBreakpoint(field.address)) {
       breakpoint.classList.add('set');
     }
 
@@ -671,13 +788,14 @@ function Disassembly(banks, memory) {
       if (!parameter.hasOwnProperty('address')) return parameter.text;
 
       const address = banks.expandAddress(parameter.address, field.address);
-      const label = state.labels.get(address);
+      const label = outline.getLabel(address);
       if (!label) return parameter.text;
 
       const addressText = formatLongAddress(address);
       const a = document.createElement('a');
       a.href = '#' + encodeURIComponent(addressText);
       a.innerText = label.text;
+      a.title = addressText;
       a.addEventListener('click', () => {
         if (field.text === 'JP' || field.text === 'JR' || field.text === 'CALL') {
           jumpTo(address).then(() =>
@@ -690,21 +808,15 @@ function Disassembly(banks, memory) {
         if (event.key === 'Enter') event.stopPropagation();
       });
 
-      const info = document.createElement('div');
-      info.classList.add('info');
-      info.innerText = addressText;
-
-      const wrapper = document.createElement('span');
-      wrapper.style.position = 'relative';
       if (parameter.indirect) {
+        const wrapper = document.createElement('span');
         wrapper.append('(');
         wrapper.append(a);
         wrapper.append(')');
+        return wrapper;
       } else {
-        wrapper.appendChild(a);
+        return a;
       }
-      wrapper.appendChild(info);
-      return wrapper;
     }
   }
 
@@ -716,12 +828,12 @@ function Disassembly(banks, memory) {
       "&offset=" + address.offset.toString(16) +
       "&n=" + LINES);
 
-    state.lines = disassembly.fields.slice(0, LINES).map(field => {
+    state.lines = disassembly.slice(0, LINES).map(field => {
       return {
         address: field.address, field: field,
-        li: createField(field, disassembly.breakpoints)
+        li: createField(field)
       };
-    })
+    });
 
     setScrollIndex(0);
     refreshListing();
@@ -781,12 +893,12 @@ function Disassembly(banks, memory) {
         "&n=" + adjustedAmount
       );
 
-      const newFields = disassembly.fields.slice(1)
+      const newFields = disassembly.slice(1)
         .map(field => {
           return {
             address: field.address,
             field: field,
-            li: createField(field, disassembly.breakpoints)
+            li: createField(field)
           };
         });
 
@@ -873,17 +985,80 @@ function parseLongAddress(defaultAddress, address) {
   }
 }
 
+/** A simple radix tree for efficient insertion, lookup, and in-order traversal. */
 function LongAddressMap() {
-  const map = new Map();
-  this.set = (key, value) => map.set(makeKey(key), value);
-  this.delete = key => map.delete(makeKey(key));
-  this.get = key => map.get(makeKey(key));
-  this.has = key => map.has(makeKey(key))
-  this.size = () => map.size();
+  let nElements = 0;
+  const sections = new Array(8);
 
-  function makeKey(address) {
-    return address.bank << 16 | address.offset;
+  this.size = () => nElements;
+
+  this.forEach = f => sections.forEach(section =>
+    section.forEach(bank => bank.forEach(offset1 => offset1.forEach(f))));
+
+  this.set = function (key, value) {
+    const i = key.offset & 0xFF;
+    const banks = getOrCreate(sections, section(key));
+    const offset1 = getOrCreate(banks, bankIndex(key.bank));
+    const offset2 = getOrCreate(offset1, key.offset >>> 8);
+    if (offset2[i] === undefined) nElements += 1;
+    offset2[i] = value;
+  };
+
+  this.delete = function (key) {
+    const i = key.offset & 0xFF;
+    const banks = sections[section(key)];
+    if (banks === undefined) return undefined;
+    const offset1 = banks[bankIndex(key.bank)];
+    if (offset1 === undefined) return undefined;
+    const offset2 = offset1[key.offset >>> 8];
+    if (offset2 === undefined) return undefined;
+    const r = offset2[i];
+    delete offset2[i];
+    return r;
+  };
+
+  this.get = function (key) {
+    const i = key.offset & 0xFF;
+    const banks = sections[section(key)];
+    if (banks === undefined) return undefined;
+    const offset1 = banks[bankIndex(key.bank)];
+    if (offset1 === undefined) return undefined;
+    const offset2 = offset1[key.offset >>> 8];
+    if (offset2 === undefined) return undefined;
+    return offset2[i];
+  };
+
+  this.has = function (key) {
+    const i = key.offset & 0xFF;
+    const banks = sections[section(key)];
+    if (banks === undefined) return false;
+    const offset1 = banks[bankIndex(key.bank)];
+    if (offset1 === undefined) return false;
+    const offset2 = offset1[key.offset >>> 8];
+    if (offset2 === undefined) return false;
+    return offset2[i] !== undefined;
+  };
+
+  function getOrCreate(array, i) {
+    const r = array[i];
+    if (r === undefined) {
+      const n = new Array();
+      array[i] = n;
+      return n;
+    } else {
+      return r;
+    }
+  };
+
+  function bankIndex(bank) {
+    return bank === 0xFFFF ? 0 : bank;
   }
+
+  function section(address) {
+    return address.offset < 0x8000 ?
+      (address.bank === 0xFFFF ? 0 : 1) :
+      address.offset >>> 13;
+  };
 }
 
 function KeyMap() {

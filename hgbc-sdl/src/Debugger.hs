@@ -207,33 +207,37 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             Just (address, n) -> do
               disassembly <- readIORef (disassemblyRef debugState)
               let fields = lookupN disassembly n address
-              breakpoints <- filterM (fmap isJust . H.lookup (breakpoints debugState))
-                                     (fieldAddress <$> fields)
               pure
                 (Wai.responseLBS
                   HTTP.status200
                   [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
-                  ( BB.toLazyByteString
-                  . fromEncoding
-                  . pairs
-                  . mconcat
-                  $ ["fields" .= fields, "breakpoints" .= breakpoints]
-                  )
+                  (encode fields)
                 )
       _ -> invalidQuery
 
-    ["breakpoints"] -> withAddress $ \address -> whenMethodPOST $ do
-      body <- Wai.lazyRequestBody req
-      case HTTP.parseQuery (LB.toStrict body) of
-        [("set", _)] -> do
-          H.insert (breakpoints debugState) address ()
-          sendNotification channel (BreakPointAdded address)
-          pure emptyResponse
-        [("unset", _)] -> do
-          H.delete (breakpoints debugState) address
-          sendNotification channel (BreakPointRemoved address)
-          pure emptyResponse
-        _ -> invalidCommand "breakpoints"
+    ["breakpoints"] -> case Wai.requestMethod req of
+      "GET" -> do
+        bps <- H.toList (breakpoints debugState)
+        pure
+          (Wai.responseLBS
+            HTTP.status200
+            [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
+            (encode (fst <$> bps))
+          )
+
+      "POST" -> withAddress $ \address -> do
+        body <- Wai.lazyRequestBody req
+        case HTTP.parseQuery (LB.toStrict body) of
+          [("set", _)] -> do
+            H.insert (breakpoints debugState) address ()
+            sendNotification channel (BreakPointAdded address)
+            pure emptyResponse
+          [("unset", _)] -> do
+            H.delete (breakpoints debugState) address
+            sendNotification channel (BreakPointRemoved address)
+            pure emptyResponse
+          _ -> invalidCommand "breakpoints"
+      _ -> badMethod
 
     ["labels"] -> whenMethodGET $ do
       allLabels <- HM.toList <$> readIORef (labelsRef debugState)
@@ -256,7 +260,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
               sendNotification channel (LabelRemoved address)
             else do
               labels <- readIORef (labelsRef debugState)
-              when (maybe False snd (HM.lookup address labels)) $ do
+              when (maybe True snd (HM.lookup address labels)) $ do
                 writeIORef (labelsRef debugState) $! HM.insert address (text, True) labels
                 saveAllLabels debugState
                 sendNotification channel (LabelUpdated [(address, (text, True))])
@@ -418,7 +422,7 @@ readDisassemblyRoots :: DebugState -> IO [LongAddress]
 readDisassemblyRoots debugState = do
   romRoots <- readRoots (romDebuggerPath debugState)
   case bootDebuggerPath debugState of
-    Nothing  -> pure romRoots
+    Nothing   -> pure romRoots
     Just path -> do
       bootRoots <- readRoots path
       pure (romRoots <> bootRoots)

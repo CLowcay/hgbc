@@ -76,6 +76,9 @@ memory = divclass
   ]
 
 listViews :: BB.Builder
-listViews = tabs "list-views"
-                 "panel"
-                 [("Labels", ["Labels go here"]), ("Break points", ["Break points go here"])]
+listViews = tabs
+  "list-views"
+  "panel"
+  [ ("Labels"      , [divclass "autoWindow" [ulid "labels-list" []]])
+  , ("Break points", [divclass "autoWindow" [ulid "breakpoints-list" []]])
+  ]
