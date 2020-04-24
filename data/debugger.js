@@ -8,7 +8,9 @@ window.onload = () => {
   const memory = new Memory(banks);
   const outline = new Outline();
   const disassembly = new Disassembly(banks, outline, memory);
-  initStatus(eventSource, banks, memory, disassembly);
+  const stack = new Stack(banks);
+  const backtrace = new Backtrace(outline, disassembly);
+  initStatus(eventSource, banks, stack, backtrace, memory, disassembly);
 
   eventSource.addEventListener('breakpoint-added',
     event => disassembly.breakPointAdded(JSON.parse(event.data)));
@@ -103,9 +105,10 @@ function BankStatus(bootROMLimit) {
 /*****************************************************************************
  * STATUS
  *****************************************************************************/
-function initStatus(eventSource, banks, memory, disassembly) {
+function initStatus(eventSource, banks, stack, backtrace, memory, disassembly) {
   let currentStatus = "";
   let currentStatusData = {};
+  let sp = 0;
 
   eventSource.addEventListener('started', onRun);
   eventSource.addEventListener('paused', onPause);
@@ -131,6 +134,8 @@ function initStatus(eventSource, banks, memory, disassembly) {
     const data = JSON.parse(event.data);
 
     memory.refresh();
+    stack.refresh();
+    backtrace.refresh();
     disassembly.setPC(data);
     disassembly.revealPC();
 
@@ -147,8 +152,9 @@ function initStatus(eventSource, banks, memory, disassembly) {
   function onUpdate(event) {
     const data = JSON.parse(event.data);
     banks.update(data);
+    stack.update(data);
     for (let key of Object.keys(data)) {
-      if (key === 'pcBank') continue;
+      if (key === 'pcBank' || key === 'sp') continue;
       const value = data[key];
       const element = document.getElementById(key);
       if (!element) console.log(`bad key ${key}`);
@@ -268,8 +274,8 @@ function Outline() {
  * MEMORY
  *****************************************************************************/
 function Memory(banks) {
-  const LINES = 20;
-  const WIDTH = 16;
+  const LINES = 18;
+  const WIDTH = 8;
 
   this.refresh = () => refresh(getAddress());
   this.jumpTo = function (address) {
@@ -366,6 +372,68 @@ function Memory(banks) {
 }
 
 /*****************************************************************************
+ * STACK
+ *****************************************************************************/
+function Stack(banks) {
+  const LINES = 18;
+  const stackWindow = document.getElementById('stack');
+
+  let sp = 0;
+  let offset = 0;
+
+  this.refresh = () => refresh();
+  this.update = function (data) {
+    sp = data.sp;
+    if (sp >= offset + LINES) {
+      offset = (sp - LINES + 1) & 0xFFFF;
+    } else if (sp < offset) {
+      offset = sp;
+    }
+  }
+
+  async function refresh() {
+    const text = await fetchText('stack?offset=' + offset.toString(16) + '&n=' + LINES);
+    stackWindow.innerHTML = '';
+    let currentOffset = (offset + LINES - 1) & 0xFFFF;
+    text.split('\n').forEach(line => {
+      const li = document.createElement('li');
+      const address = banks.expandAddress(currentOffset);
+      const bytes = line.split(' ');
+      li.setAttribute('data-address', formatLongAddress(address));
+      li.innerText = bytes[0] + ' ' + bytes[1] + bytes[0];
+      if (sp === currentOffset) li.classList.add('sp');
+      stackWindow.appendChild(li);
+      currentOffset = (currentOffset - 1) & 0xFFFF;
+    });
+  }
+}
+
+/*****************************************************************************
+ * Backtrace
+ *****************************************************************************/
+function Backtrace(outline, disassembly) {
+  this.refresh = () => refresh();
+  const backtraceWindow = document.getElementById('backtrace');
+
+  async function refresh() {
+    const backtrace = await fetchJSON('backtrace');
+    backtraceWindow.innerHTML = '';
+    backtrace.forEach(address => {
+      const addressText = formatLongAddress(address);
+      const li = document.createElement('li');
+      const label = outline.getLabel(address);
+      const a = document.createElement('a');
+      a.href = '#' + addressText;
+      a.title = addressText;
+      a.innerText = label ? label.text : addressText;
+      a.addEventListener('click', () => disassembly.jumpTo(address));
+      li.appendChild(a);
+      backtraceWindow.appendChild(li);
+    });
+  }
+}
+
+/*****************************************************************************
  * Disassembly
  *****************************************************************************/
 function Disassembly(banks, outline, memory) {
@@ -391,6 +459,10 @@ function Disassembly(banks, outline, memory) {
   this.revealPC = () => {
     setSelection({ address: state.pc, isLabel: false });
     jumpTo(state.pc);
+  };
+  this.jumpTo = function(address) {
+    setSelection({ address: address, isLabel: false });
+    jumpTo(address);
   };
 
   this.breakPointAdded = function (address) {

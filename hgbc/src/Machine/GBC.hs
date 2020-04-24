@@ -12,6 +12,8 @@ module Machine.GBC
   , step
   , keyUp
   , keyDown
+  , getCPUCallDepth 
+  , getCPUBacktrace
   , ROMPaths(..)
   , ROM(..)
   , ColorCorrection(..)

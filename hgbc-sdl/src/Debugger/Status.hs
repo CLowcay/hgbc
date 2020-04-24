@@ -122,15 +122,16 @@ getStatus emulatorState =
     let (rPCH, rPCL) = highlow pc
     pure ["rPCH" .= rPCH, "rPCL" .= rPCL, "pcBank" .= formatHex bank]
   rSP = do
-    (rSPH, rSPL) <- highlow <$> readR16 RegSP
-    pure ["rSPH" .= rSPH, "rSPL" .= rSPL]
+    sp <- readR16 RegSP
+    let (rSPH, rSPL) = highlow sp 
+    pure ["rSPH" .= rSPH, "rSPL" .= rSPL, "sp" .= sp]
   flags = do
     i           <- testIME <&> \ime -> if ime then 'I' else 'i'
     r           <- readF
     currentMode <- getMode <&> \case
       ModeHalt   -> ("HALT" :: String)
       ModeStop   -> "STOP"
-      ModeNormal -> "\xA0RUN"
+      ModeNormal -> "RUN"
     pure
       [ "i" .= i
       , "z" .= if isFlagSet flagZ r then 'Z' else 'z'

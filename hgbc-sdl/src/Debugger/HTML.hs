@@ -39,7 +39,7 @@ debugHTML romFileName bootROMLimit = html [header, main]
     , divclassid
       "rootContainer"
       []
-      [ div [disassembly, memory]
+      [ div [disassembly, divclass "sideBySide" [memory, backtrace, stack]]
       , div
         [ divclass "sideBySide" [cpuRegisters, listViews]
         , systemRegisters
@@ -82,3 +82,10 @@ listViews = tabs
   [ ("Labels"      , [divclass "autoWindow" [ulid "labels-list" []]])
   , ("Break points", [divclass "autoWindow" [ulid "breakpoints-list" []]])
   ]
+
+stack :: BB.Builder
+stack = divclass "panel" [h 4 "Stack", focusDiv "window" [ulid "stack" []]]
+
+backtrace :: BB.Builder
+backtrace =
+  divclass "panel" [h 4 "Backtrace", divclass "'window backtraceWindow'" [ulid "backtrace" []]]

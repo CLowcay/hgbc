@@ -16,6 +16,7 @@ module Machine.GBC.CPU
   , getCPUCycleClocks
   , setCPUCycleClocks
   , getCPUCallDepth
+  , getCPUBacktrace
   , reset
   , getRegisterFile
   , readR8
@@ -65,6 +66,7 @@ import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable.Mutable  as VSM
+import qualified Machine.GBC.CPU.Backtrace     as Backtrace
 
 -- | The register file.
 data RegisterFile = RegisterFile {
@@ -145,6 +147,7 @@ data CPUState = CPUState {
   , cpuMode        :: !(IORef CPUMode)
   , cpuCycleClocks :: !(UnboxedRef Int)
   , cpuCallDepth   :: !(UnboxedRef Int)
+  , cpuBacktrace   :: !Backtrace.Backtrace
   , haltBug        :: !(IORef Bool)
 }
 
@@ -161,6 +164,7 @@ initCPU portIF portIE cpuType busCatchup = do
   cpuMode        <- newIORef ModeNormal
   cpuCycleClocks <- newUnboxedRef 4
   cpuCallDepth   <- newUnboxedRef 0
+  cpuBacktrace   <- Backtrace.new 8
   haltBug        <- newIORef False
   pure CPUState { .. }
 
@@ -557,9 +561,7 @@ cpuStep = do
   handleInterrupt interrupts = do
     -- Handle an interrupt
     let nextInterrupt = getNextInterrupt interrupts
-    pc <- readPC
-    push16 pc
-    writePC (interruptVector nextInterrupt)
+    doCall (interruptVector nextInterrupt)
     clearIME
     CPUState {..} <- asks forCPUState
     liftIO $ clearInterrupt portIF nextInterrupt
@@ -583,21 +585,29 @@ getCPUCallDepth = do
   CPUState {..} <- asks forCPUState
   liftIO (readUnboxedRef cpuCallDepth)
 
-{-# INLINE incrementCPUCallDepth #-}
-incrementCPUCallDepth :: HasCPU env => ReaderT env IO ()
-incrementCPUCallDepth = do
+getCPUBacktrace :: HasCPU env => ReaderT env IO [(Word16, Word16)]
+getCPUBacktrace = do
   CPUState {..} <- asks forCPUState
+  liftIO (Backtrace.toList cpuBacktrace)
+
+{-# INLINE callStackPushed #-}
+callStackPushed :: HasCPU env => Word16 -> ReaderT env IO ()
+callStackPushed offset = do
+  CPUState {..} <- asks forCPUState
+  bank <- getBank offset
   liftIO $ do
     d <- readUnboxedRef cpuCallDepth
     writeUnboxedRef cpuCallDepth (d + 1)
+    Backtrace.push cpuBacktrace bank offset
 
-{-# INLINE decrementCPUCallDepth #-}
-decrementCPUCallDepth :: HasCPU env => ReaderT env IO ()
-decrementCPUCallDepth = do
+{-# INLINE callStackPopped #-}
+callStackPopped :: HasCPU env => ReaderT env IO ()
+callStackPopped = do
   CPUState {..} <- asks forCPUState
   liftIO $ do
     d <- readUnboxedRef cpuCallDepth
     writeUnboxedRef cpuCallDepth (d - 1)
+    Backtrace.pop cpuBacktrace
 
 {-# SPECIALIZE table0 :: HasCPU env => V.Vector (CPUM env Int) #-}
 {-# SPECIALIZE table1 :: HasCPU env => V.Vector (CPUM env Int) #-}
@@ -1033,41 +1043,28 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
         writePC (pc + fromIntegral e)
         pure 3
       else pure 2
-  call nn = CPUM $ do
-    incrementCPUCallDepth
-    push16 =<< readPC
-    writePC nn
-    pure 6
+  call nn = 6 <$ CPUM (doCall nn)
   callcc cc nn = CPUM $ do
     shouldJump <- testCondition cc
-    if shouldJump
-      then do
-        incrementCPUCallDepth
-        push16 =<< readPC
-        writePC nn
-        pure 6
-      else pure 3
+    if shouldJump then 6 <$ doCall nn else pure 3
   ret = CPUM $ do
-    decrementCPUCallDepth
+    callStackPopped
     writePC =<< pop16
     pure 4
   reti = CPUM $ do
+    callStackPopped
     writePC =<< pop16
     setIME
     pure 4
   retcc cc = CPUM $ do
-    decrementCPUCallDepth
     shouldJump <- testCondition cc
     if shouldJump
       then do
+        callStackPopped
         writePC =<< pop16
         pure 5
       else pure 2
-  rst t = CPUM $ do
-    incrementCPUCallDepth
-    push16 =<< readPC
-    writePC $ 8 * fromIntegral t
-    pure 4
+  rst t = 4 <$ CPUM (doCall (8 * fromIntegral t))
   daa = CPUM $ do
     flags <- readF
     a     <- readR8 RegA
@@ -1132,6 +1129,13 @@ instance HasCPU env => MonadGMBZ80 (CPUM env) where
       else setMode ModeStop
     pure 1
   invalid b = liftIO (throwIO (InvalidInstruction b))
+
+{-# INLINE doCall #-}
+doCall :: HasCPU env => Word16 -> ReaderT env IO ()
+doCall nn = do
+  callStackPushed nn
+  push16 =<< readPC
+  writePC nn
 
 {-# INLINE push16 #-}
 push16 :: HasCPU env => Word16 -> ReaderT env IO ()

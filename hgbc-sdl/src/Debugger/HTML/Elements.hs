@@ -33,10 +33,9 @@ module Debugger.HTML.Elements
   , value
   , field
   , fieldGroup
-  , desc
+  , descField
   , enableDisable
   , unused
-  , padding
   , button
   , tabs
   )
@@ -168,20 +167,18 @@ value = divclass "value"
 fieldGroup :: [BB.Builder] -> BB.Builder
 fieldGroup contents = "<span class=group>" <> mconcat contents <> "</span>"
 
-field :: BB.Builder -> BB.Builder -> BB.Builder
-field fid iv = "<span id=" <> fid <> ">" <> iv <> "</span>"
+field :: Int -> BB.Builder -> BB.Builder -> BB.Builder
+field w fid iv = "<span id=" <> fid <> " class='value w" <> BB.intDec w <> "'>" <> iv <> "</span>"
 
-desc :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
-desc iv name description = iv <> divclass "info" (h 3 name : description)
+descField :: BB.Builder -> [BB.Builder] -> [BB.Builder] -> BB.Builder
+descField name description content =
+  spanclass "hasInfo" (divclass "info" (h 3 name : description) : content)
 
 enableDisable :: [BB.Builder]
 enableDisable = [ul ["0: Disable", "1: Enable"]]
 
 unused :: BB.Builder
 unused = "<span class=u>&nbsp;</span>"
-
-padding :: Int -> BB.Builder
-padding n = "<span class=padding>" <> mconcat (replicate n "&nbsp;") <> "</span>"
 
 button :: BB.Builder -> BB.Builder -> [BB.Builder] -> BB.Builder
 button name tt content =

@@ -43,6 +43,7 @@ import           Debugger.Status
 import           Disassembler
 import           Machine.GBC                    ( EmulatorState
                                                 , memory
+                                                , getCPUBacktrace
                                                 )
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( readChunk
@@ -194,6 +195,34 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             Wai.responseLBS HTTP.status200
                             [(HTTP.hContentType, "text/plain"), (HTTP.hCacheControl, "no-cache")]
               <$> getMemoryAt address memLines emulatorState
+      _ -> invalidQuery
+
+    ["backtrace"] -> whenMethodGET $ do
+      backtrace <- runReaderT getCPUBacktrace emulatorState
+      pure
+        (Wai.responseLBS
+          HTTP.status200
+          [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
+          (encode (uncurry LongAddress <$> backtrace))
+        )
+
+    ["stack"] -> whenMethodGET $ case Wai.queryString req of
+      [("offset", Just offsetText), ("n", Just linesText)] ->
+        case (,) <$> readMaybeHexText offsetText <*> readMaybeText linesText of
+          Nothing          -> invalidQuery
+          Just (offset, n) -> do
+            bytes <-
+              fmap formatHex . B.unpack <$> runReaderT (readChunk offset (n + 1)) emulatorState
+            pure
+              (   Wai.responseLBS
+                  HTTP.status200
+                  [(HTTP.hContentType, "text/plain"), (HTTP.hCacheControl, "no-cache")]
+              .   LBC.intercalate "\n"
+              .   reverse
+              $   fromString
+              <$> zipWith (\a b -> a <> " " <> b) bytes (tail bytes)
+              )
+
       _ -> invalidQuery
 
     ["disassembly"] -> whenMethodGET $ case Wai.queryString req of
@@ -393,14 +422,18 @@ debugJS = Wai.responseLBS
   [(HTTP.hContentType, "application/javascript")]
   (LB.fromStrict $(embedOneFileOf ["data/debugger.js","../data/debugger.js"]))
 
+memoryChunkWidth :: Int
+memoryChunkWidth = 8
+
 getMemoryAt :: Word16 -> Word16 -> EmulatorState -> IO LBC.ByteString
 getMemoryAt address memLines emulatorState = do
-  chunks <- runReaderT (for [0 .. (memLines - 1)] $ \i -> readChunk (address + (16 * i)) 16)
-                       emulatorState
-  pure (LBC.intercalate "\n" (formatSplitChunk <$> chunks))
- where
-  formatSplitChunk s = let (a, b) = B.splitAt 8 s in formatChunk a <> "   " <> formatChunk b
-  formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
+  chunks <- runReaderT
+    ( for [0 .. (memLines - 1)]
+    $ \i -> readChunk (address + (fromIntegral memoryChunkWidth * i)) memoryChunkWidth
+    )
+    emulatorState
+  pure (LBC.intercalate "\n" (formatChunk <$> chunks))
+  where formatChunk s = LBC.intercalate " " $ LBC.pack . formatHex <$> B.unpack s
 
 disassemblyRootsFileName :: FilePath
 disassemblyRootsFileName = "disassemblyRoots"

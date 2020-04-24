@@ -20,9 +20,7 @@ import           Data.IORef
 import           Data.Maybe
 import           Disassembler
 import           Machine.GBC
-import           Machine.GBC.CPU                ( readPC
-                                                , getCPUCallDepth
-                                                )
+import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( getBank )
 import           Machine.GBC.ROM
 import           Machine.GBC.Util
@@ -240,11 +238,12 @@ emulator rom allOptions@Config.Options {..} = do
         Emulator.StepNotification     -> step >> pauseLoop
         Emulator.StepOverNotification -> do
           callDepth0 <- getCPUCallDepth
-          step
+          notifyResumed >> step
           callDepth1 <- getCPUCallDepth
           if callDepth1 > callDepth0 then emulatorLoop Nothing (Just callDepth0) else pauseLoop
         Emulator.StepOutNotification -> do
           callDepth <- getCPUCallDepth
+          notifyResumed
           emulatorLoop Nothing (Just (callDepth - 1))
         Emulator.RestartNotification -> reset >> pauseLoop
 
