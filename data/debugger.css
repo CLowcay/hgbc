@@ -130,9 +130,10 @@ div.sideBySide>*:not(:last-child) {
 #stack li.sp::before {
   content: attr(data-address) ' ⮕';
 }
-.backtraceWindow {
+div.backtraceWindow {
   overflow: auto;
-  min-width: 8em;
+  min-width: 10em;
+  height: calc(18 * var(--line-height));
 }
 #backtrace {
   margin: 0; padding: 0;
@@ -278,9 +279,6 @@ div.value span:not(.padding) {
 }
 div.value span:last-child {
   border-right: none;
-}
-div.value span.changed {
-  background-color: var(--value-changed);
 }
 div.value span.group {
 	padding: 0;

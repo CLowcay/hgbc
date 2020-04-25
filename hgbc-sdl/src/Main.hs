@@ -192,18 +192,8 @@ emulator rom allOptions@Config.Options {..} = do
           step
           breakRequired <- if optionDebugMode
             then do
-              pc   <- readPC
-              bank <- getBank pc
-              let address = LongAddress bank pc
-              disassembly <- liftIO (readIORef disassemblyRef)
-              r           <- disassemblyRequired address disassembly
-              when r $ do
-                (disassembly', newLabels) <- disassembleFrom pc disassembly
-                case debuggerChannel of
-                  Nothing      -> pure ()
-                  Just channel -> liftIO $ do
-                    writeIORef disassemblyRef disassembly'
-                    Debugger.addNewLabels debugState channel newLabels
+              address <- getCurrentAddress
+              updateDisassembly address
               breakpoint <- liftIO $ H.lookup breakpoints address
               callDepth  <- getCPUCallDepth
               pure (Just address == runToAddress || isJust breakpoint || Just callDepth == level)
@@ -235,10 +225,10 @@ emulator rom allOptions@Config.Options {..} = do
         Emulator.RunNotification   -> resumeAudio >> notifyResumed >> emulatorLoop Nothing Nothing
         Emulator.RunToNotification address ->
           resumeAudio >> notifyResumed >> emulatorLoop (Just address) Nothing
-        Emulator.StepNotification     -> step >> pauseLoop
+        Emulator.StepNotification     -> singleStep >> pauseLoop
         Emulator.StepOverNotification -> do
           callDepth0 <- getCPUCallDepth
-          notifyResumed >> step
+          notifyResumed >> singleStep
           callDepth1 <- getCPUCallDepth
           if callDepth1 > callDepth0 then emulatorLoop Nothing (Just callDepth0) else pauseLoop
         Emulator.StepOutNotification -> do
@@ -247,11 +237,30 @@ emulator rom allOptions@Config.Options {..} = do
           emulatorLoop Nothing (Just (callDepth - 1))
         Emulator.RestartNotification -> reset >> pauseLoop
 
+    singleStep = step >> getCurrentAddress >>= updateDisassembly
+
+    updateDisassembly address@(LongAddress _ pc) = do
+      disassembly <- liftIO (readIORef disassemblyRef)
+      r           <- disassemblyRequired address disassembly
+      when r $ do
+        (disassembly', newLabels) <- disassembleFrom pc disassembly
+        case debuggerChannel of
+          Nothing      -> pure ()
+          Just channel -> liftIO $ do
+            writeIORef disassemblyRef disassembly'
+            Debugger.addNewLabels debugState channel newLabels
+
   runReaderT
     (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop Nothing Nothing)
     emulatorState
 
  where
+  getCurrentAddress :: ReaderT EmulatorState IO LongAddress
+  getCurrentAddress = do
+    pc   <- readPC
+    bank <- getBank pc
+    pure (LongAddress bank pc)
+
   printPerformanceStats :: Int -> Double -> ReaderT EmulatorState IO ()
   printPerformanceStats emulatorClock now = do
     now'           <- liftIO SDL.time

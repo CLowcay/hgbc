@@ -124,10 +124,14 @@ type Labels = [(LongAddress, (T.Text, Editable))]
 insert :: Disassembly -> Field -> Disassembly
 insert (Disassembly m) field = Disassembly
   ( m
-  & (   deleteAll overlappingDataFields
-    >>> insertAll (concat (truncateField <$> overlappingDataFields))
-    >>> IM.insert (key field)
-                  (if not (all isData overlappingFields) then setOverlapping field else field)
+  & (   deleteAll obsoleteFields
+    >>> insertAll (concat (truncateField <$> obsoleteFields))
+    >>> IM.insert
+          (key field)
+          (if length overlappingFields /= length obsoleteFields
+            then setOverlapping field
+            else field
+          )
     )
   )
  where
@@ -138,10 +142,16 @@ insert (Disassembly m) field = Disassembly
   key f = let Field a _ _ _ = f in encodeAddress a
   isData (Field _ _ _ Data) = True
   isData _                  = False
+  bytesChanged (Field a b _ _) =
+    let diff                 = a `minus` address
+        (bytesOld, bytesNew) = if diff > 0
+          then (SB.unpack b, drop diff (SB.unpack bytes))
+          else (drop (-diff) (SB.unpack b), SB.unpack bytes)
+    in  or (zipWith (/=) bytesOld bytesNew)
   isOverlapping (Field fAddress fBytes _ _) =
     let fNextAddress = fAddress `addOffset` SB.length fBytes
     in  not (nextAddress <= fAddress || fNextAddress <= address)
-  overlappingDataFields = filter isData overlappingFields
+  obsoleteFields = filter (\f -> isData f || bytesChanged f) overlappingFields
   overlappingFields =
     let (before, mv, after) = IM.splitLookup (key field) m
         overlappingBefore   = takeWhile isOverlapping (snd <$> IM.toDescList before)
