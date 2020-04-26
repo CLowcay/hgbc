@@ -110,6 +110,21 @@ div.sideBySide>*:not(:last-child) {
   float: right;
 }
 
+#breakpoints-list {
+  list-style: none;
+}
+#breakpoints-list li::before{
+  content: '\A0\A0';
+  background-image: url('svg/breakpoint');
+  background-repeat: no-repeat;
+  background-position: center;
+  margin-right: var(--padding);
+  margin-left: calc(var(--padding) - 2em);
+}
+#breakpoints-list li.disabled::before {
+  background-image: url('svg/breakpoint_disabled');
+}
+
 #stack {
   list-style: none;
   margin: 0; padding: 0;
@@ -210,6 +225,9 @@ div.value {
   border-radius: 4px;
   background-color:var(--value-background);
   white-space: nowrap;
+}
+div.value>span.changed, div.value>span:not(:hover)>span.changed {
+  background-color: var(--value-changed);
 }
 div.info {
 	display: none;
@@ -396,6 +414,9 @@ input.breakpoint {
 input.breakpoint.set {
   visibility: visible;
   opacity: 1;
+}
+input.breakpoint.disabled {
+  background-image: url('svg/breakpoint_disabled');
 }
 input.runTo {
   background-image: url('svg/runto');

@@ -17,7 +17,6 @@ import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
-import           Data.Maybe
 import           Disassembler
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
@@ -31,6 +30,7 @@ import qualified Audio
 import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
+import qualified Data.HashMap.Lazy             as HM
 import qualified Data.HashTable.IO             as H
 import qualified Debugger
 import qualified Emulator
@@ -150,7 +150,7 @@ emulator rom allOptions@Config.Options {..} = do
   let romFileName = takeBaseName optionFilename
   disassemblyRef   <- newIORef mempty
   breakpoints      <- H.new
-  labelsRef        <- newIORef mempty
+  labelsRef        <- newIORef (HM.fromList initialLabels)
   bootDebuggerPath <- traverse getLabelsPath (Config.bootROM config)
   romDebuggerPath  <- getLabelsPath romFileName
   let debugState = Debugger.DebugState { .. }
@@ -162,8 +162,10 @@ emulator rom allOptions@Config.Options {..} = do
   case debuggerChannel of
     Nothing      -> pure ()
     Just channel -> do
+      Debugger.restoreBreakpoints debugState
       Debugger.restoreLabels debugState
-      (disassembly, labels) <- disassembleROM (memory emulatorState)
+      restoredLabels        <- readIORef labelsRef
+      (disassembly, labels) <- disassembleROM (memory emulatorState) (HM.keys restoredLabels)
       writeIORef disassemblyRef disassembly
       Debugger.addNewLabels debugState channel labels
 
@@ -196,7 +198,8 @@ emulator rom allOptions@Config.Options {..} = do
               updateDisassembly address
               breakpoint <- liftIO $ H.lookup breakpoints address
               callDepth  <- getCPUCallDepth
-              pure (Just address == runToAddress || isJust breakpoint || Just callDepth == level)
+              pure
+                (Just address == runToAddress || breakpoint == Just True || Just callDepth == level)
             else pure True
 
           if breakRequired

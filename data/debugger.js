@@ -14,6 +14,8 @@ window.onload = () => {
 
   eventSource.addEventListener('breakpoint-added',
     event => disassembly.breakPointAdded(JSON.parse(event.data)));
+  eventSource.addEventListener('breakpoint-disabled',
+    event => disassembly.breakPointDisabled(JSON.parse(event.data)));
   eventSource.addEventListener('breakpoint-removed',
     event => disassembly.breakPointRemoved(JSON.parse(event.data)));
   eventSource.addEventListener('label-added',
@@ -185,7 +187,11 @@ function Outline() {
   };
 
   this.addBreakpoint = function (address) {
-    breakpoints.set(address, address);
+    breakpoints.set(address, { address: address, isEnabled: true });
+    refreshBreakpoints();
+  };
+  this.disableBreakpoint = function (address) {
+    breakpoints.set(address, { address: address, isEnabled: false });
     refreshBreakpoints();
   };
   this.removeBreakpoint = function (address) {
@@ -195,6 +201,10 @@ function Outline() {
   this.hasBreakpoint = function (address) {
     return breakpoints.has(address);
   }
+  this.breakpointDisabled = function (address) {
+    const bp = breakpoints.get(address);
+    return bp && !bp.isEnabled;
+  };
 
   this.addLabels = function (newLabels) {
     newLabels.forEach(label => labels.set(label.address, label));
@@ -244,15 +254,16 @@ function Outline() {
 
   function refreshBreakpoints() {
     breakpointsList.innerHTML = '';
-    breakpoints.forEach(address => {
+    breakpoints.forEach(bp => {
       const li = document.createElement('li');
-      const label = labels.get(address);
-      const link = makeLink(label, address);
+      if (!bp.isEnabled) li.classList.add('disabled');
+      const label = labels.get(bp.address);
+      const link = makeLink(label, bp.address);
       li.appendChild(link);
       if (label) {
         const l = document.createElement('span');
         l.classList.add('address');
-        l.innerText = ` (${formatLongAddress(address)})`;
+        l.innerText = ` (${formatLongAddress(bp.address)})`;
         li.appendChild(l);
       }
       breakpointsList.appendChild(li);
@@ -460,7 +471,7 @@ function Disassembly(banks, outline, memory) {
     setSelection({ address: state.pc, isLabel: false });
     jumpTo(state.pc);
   };
-  this.jumpTo = function(address) {
+  this.jumpTo = function (address) {
     setSelection({ address: address, isLabel: false });
     jumpTo(address);
   };
@@ -468,12 +479,25 @@ function Disassembly(banks, outline, memory) {
   this.breakPointAdded = function (address) {
     const li = getFieldLI(address);
     outline.addBreakpoint(address);
-    if (li) li.querySelector('input.breakpoint').classList.add('set');
+    if (li) {
+      const classList = li.querySelector('input.breakpoint').classList;
+      classList.add('set');
+      classList.remove('disabled');
+    }
   };
+  this.breakPointDisabled = function (address) {
+    const li = getFieldLI(address);
+    outline.disableBreakpoint(address);
+    if (li) li.querySelector('input.breakpoint').classList.add('disabled');
+  }
   this.breakPointRemoved = function (address) {
     const li = getFieldLI(address);
     outline.removeBreakpoint(address);
-    if (li) li.querySelector('input.breakpoint').classList.remove('set');
+    if (li) {
+      const classList = li.querySelector('input.breakpoint').classList;
+      classList.remove('set');
+      classList.remove('disabled');
+    }
   };
   this.labelUpdated = function (labels) {
     outline.addLabels(labels);
@@ -565,10 +589,15 @@ function Disassembly(banks, outline, memory) {
 
   // initialize the breakpoints
   fetchJSON('breakpoints').then(breakpoints => {
-    breakpoints.forEach(address => {
-      const li = getFieldLI(address);
-      outline.addBreakpoint(address);
-      if (li) li.querySelector('input.breakpoint').classList.add('set');
+    breakpoints.forEach(bp => {
+      const li = getFieldLI(bp.address);
+      outline.addBreakpoint(bp.address);
+      if (!bp.isEnabled) outline.disableBreakpoint(bp.address);
+      if (li) {
+        const classList = li.querySelector('input.breakpoint').classList;
+        classList.add('set');
+        if (!bp.isEnabled) classList.add('disabled');
+      }
     });
   });
 
@@ -657,8 +686,10 @@ function Disassembly(banks, outline, memory) {
     const button = getFieldLI(state.selection.address).querySelector('input.breakpoint');
     const uri = '/breakpoints?bank=' + address.bank.toString(16) +
       '&offset=' + address.offset.toString(16);
-    if (button.classList.contains('set')) {
+    if (button.classList.contains('disabled')) {
       postCommand(uri, 'unset');
+    } else if (button.classList.contains('set')) {
+      postCommand(uri, 'disable');
     } else {
       postCommand(uri, 'set');
     }
@@ -800,6 +831,7 @@ function Disassembly(banks, outline, memory) {
     breakpoint.onclick = () => toggleBreakpointAtVisibleAddress(field.address);
     if (outline.hasBreakpoint(field.address)) {
       breakpoint.classList.add('set');
+      if (outline.breakpointDisabled(field.address)) breakpoint.classList.add('disabled');
     }
 
     const runTo = document.createElement('input');

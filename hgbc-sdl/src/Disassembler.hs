@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -18,7 +19,9 @@ module Disassembler
   , lookupN
   , disassemblyRequired
   , disassembleROM
+  , initialLabels
   , disassembleFrom
+  , disassembleFromRoots
   , disassemble
   )
 where
@@ -220,12 +223,49 @@ lookupN (Disassembly m) n startAddress
   leftList   = snd <$> IM.toDescList l
   rightList  = snd <$> IM.toAscList r
 
+data Banks = Banks {
+    bankBootLimit :: !Word16  -- First address that is not in BOOT ROM (excluding hole at 0x100~0x200)
+  , bankROM  :: !Word16
+  , bankRAM  :: !Word16
+  , bankWRAM :: !Word16
+  , bankVRAM :: !Word16
+} deriving (Eq, Show)
+
 data DisassemblyState = DisassemblyState {
     disassemblyPC          :: !Word16
-  , disassemblyBootLockout :: !Bool
+  , disassemblyBanks       :: !Banks
   , disassemblyBytes       :: ![Word8]
   , disassemblyMemory      :: !Memory
 }
+
+-- | Get the current memory bank numbers.
+getBanks :: HasMemory env => ReaderT env IO Banks
+getBanks = do
+  bankBootLimit <- bootLimit
+  bankROM       <- getBank 0x4000
+  bankRAM       <- getBank 0xA000
+  bankWRAM      <- getBank 0xD000
+  bankVRAM      <- getBank 0x8000
+  pure Banks { .. }
+ where
+  bootLimit = do
+    memory0       <- asks forMemory
+    isBootEnabled <- getBank 0x0000 <&> (== 0xFFFF)
+    pure (if isBootEnabled then fromIntegral (bootROMLength memory0) else 0)
+
+-- | Get the current bank associated with an address.
+lookupBank :: Word16 -> Banks -> Word16
+lookupBank offset Banks {..}
+  | offset < bankBootLimit && (offset < 0x100 || offset >= 0x200) = 0xFFFF
+  | offset < 0x4000 = 0
+  | offset < 0x8000 = bankROM
+  | offset < 0xA000 = bankVRAM
+  | offset < 0xC000 = bankRAM
+  | offset < 0xD000 = 0
+  | offset < 0xE000 = bankWRAM
+  | offset < 0xF000 = 0
+  | offset < 0xFE00 = bankWRAM
+  | otherwise       = 0
 
 -- | Check if more disassembly is required at the given address.
 disassemblyRequired :: HasMemory env => LongAddress -> Disassembly -> ReaderT env IO Bool
@@ -238,117 +278,20 @@ disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disasse
       pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
 -- | Disassemble the ROM currently loaded in memory.
-disassembleROM :: Memory -> IO (Disassembly, Labels)
-disassembleROM memory0 =
-  flip runStateT defaultLabels
-    $   disassembleS entryPoint (bootSubstrate <> substrate)
-    >>= disassembleS (romFrom 0x00)
-    >>= disassembleS (romFrom 0x08)
-    >>= disassembleS (romFrom 0x10)
-    >>= disassembleS (romFrom 0x18)
-    >>= disassembleS (romFrom 0x20)
-    >>= disassembleS (romFrom 0x28)
-    >>= disassembleS (romFrom 0x30)
-    >>= disassembleS (romFrom 0x38)
-    >>= disassembleS (romFrom 0x40)
-    >>= disassembleS (romFrom 0x48)
-    >>= disassembleS (romFrom 0x50)
-    >>= disassembleS (romFrom 0x58)
-    >>= disassembleS (romFrom 0x60)
+disassembleROM :: Memory -> [LongAddress] -> IO (Disassembly, Labels)
+disassembleROM memory0 extraRoots = runReaderT
+  (disassembleFromRoots
+    (bootSubstrate <> substrate)
+    (  (if hasBootROM memory0 then LongAddress 0xFFFF 0 else LongAddress 0 0x100)
+    :  (   LongAddress 0
+       <$> [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60]
+       )
+    <> extraRoots
+    )
+  )
+  memory0
+
  where
-  disassembleS :: DisassemblyState -> Disassembly -> StateT Labels IO Disassembly
-  disassembleS state0 d0 = do
-    labels       <- get
-    (r, labels') <- liftIO (disassemble state0 d0)
-    put (labels' ++ labels)
-    pure r
-
-  defaultLabels =
-    [ (LongAddress 0 0x0  , ("rst0", False))
-      , (LongAddress 0 0x8  , ("rst1", False))
-      , (LongAddress 0 0x10 , ("rst2", False))
-      , (LongAddress 0 0x18 , ("rst3", False))
-      , (LongAddress 0 0x20 , ("rst4", False))
-      , (LongAddress 0 0x28 , ("rst5", False))
-      , (LongAddress 0 0x30 , ("rst6", False))
-      , (LongAddress 0 0x38 , ("rst7", False))
-      , (LongAddress 0 0x40 , ("int40_vblank", False))
-      , (LongAddress 0 0x48 , ("int48_lcd", False))
-      , (LongAddress 0 0x50 , ("int50_timer", False))
-      , (LongAddress 0 0x58 , ("int58_serial", False))
-      , (LongAddress 0 0x60 , ("int60_keypad", False))
-      , (LongAddress 0 0x100, ("rom_header", False))
-      , (LongAddress 0 P1   , ("P1", False))
-      , (LongAddress 0 SB   , ("SB", False))
-      , (LongAddress 0 SC   , ("SC", False))
-      , (LongAddress 0 DIV  , ("DIV", False))
-      , (LongAddress 0 TIMA , ("TIMA", False))
-      , (LongAddress 0 TMA  , ("TMA", False))
-      , (LongAddress 0 TAC  , ("TAC", False))
-      , (LongAddress 0 NR10 , ("NR10", False))
-      , (LongAddress 0 NR11 , ("NR11", False))
-      , (LongAddress 0 NR12 , ("NR12", False))
-      , (LongAddress 0 NR13 , ("NR13", False))
-      , (LongAddress 0 NR14 , ("NR14", False))
-      , (LongAddress 0 NR20 , ("NR20", False))
-      , (LongAddress 0 NR21 , ("NR21", False))
-      , (LongAddress 0 NR22 , ("NR22", False))
-      , (LongAddress 0 NR23 , ("NR23", False))
-      , (LongAddress 0 NR24 , ("NR24", False))
-      , (LongAddress 0 NR30 , ("NR30", False))
-      , (LongAddress 0 NR31 , ("NR31", False))
-      , (LongAddress 0 NR32 , ("NR32", False))
-      , (LongAddress 0 NR33 , ("NR33", False))
-      , (LongAddress 0 NR34 , ("NR34", False))
-      , (LongAddress 0 NR40 , ("NR40", False))
-      , (LongAddress 0 NR41 , ("NR41", False))
-      , (LongAddress 0 NR42 , ("NR42", False))
-      , (LongAddress 0 NR43 , ("NR43", False))
-      , (LongAddress 0 NR44 , ("NR44", False))
-      , (LongAddress 0 NR50 , ("NR50", False))
-      , (LongAddress 0 NR51 , ("NR51", False))
-      , (LongAddress 0 NR52 , ("NR52", False))
-      , (LongAddress 0 IF   , ("IF", False))
-      , (LongAddress 0 LCDC , ("LCDC", False))
-      , (LongAddress 0 STAT , ("STAT", False))
-      , (LongAddress 0 SCY  , ("SCY", False))
-      , (LongAddress 0 SCX  , ("SCX", False))
-      , (LongAddress 0 LY   , ("LY", False))
-      , (LongAddress 0 LYC  , ("LYC", False))
-      , (LongAddress 0 DMA  , ("DMA", False))
-      , (LongAddress 0 BGP  , ("BGP", False))
-      , (LongAddress 0 OBP0 , ("OBP0", False))
-      , (LongAddress 0 OBP1 , ("OBP1", False))
-      , (LongAddress 0 WY   , ("WY", False))
-      , (LongAddress 0 WX   , ("WX", False))
-      , (LongAddress 0 R4C  , ("R4C", False))
-      , (LongAddress 0 KEY1 , ("KEY1", False))
-      , (LongAddress 0 VBK  , ("VBK", False))
-      , (LongAddress 0 BLCK , ("BLCK", False))
-      , (LongAddress 0 HDMA1, ("HDMA1", False))
-      , (LongAddress 0 HDMA2, ("HDMA2", False))
-      , (LongAddress 0 HDMA3, ("HDMA3", False))
-      , (LongAddress 0 HDMA4, ("HDMA4", False))
-      , (LongAddress 0 HDMA5, ("HDMA5", False))
-      , (LongAddress 0 RP   , ("RP", False))
-      , (LongAddress 0 BCPS , ("BCPS", False))
-      , (LongAddress 0 BCPD , ("BCPD", False))
-      , (LongAddress 0 OCPS , ("OCPS", False))
-      , (LongAddress 0 OCPD , ("OCPD", False))
-      , (LongAddress 0 R6C  , ("R6C", False))
-      , (LongAddress 0 SVBK , ("SVBK", False))
-      , (LongAddress 0 R72  , ("R72", False))
-      , (LongAddress 0 R73  , ("R73", False))
-      , (LongAddress 0 R74  , ("R74", False))
-      , (LongAddress 0 R75  , ("R75", False))
-      , (LongAddress 0 PCM12, ("PCM12", False))
-      , (LongAddress 0 PCM34, ("PCM34", False))
-      , (LongAddress 0 IE   , ("IE", False))
-      ]
-      <> [ (LongAddress 0 (0xFE00 + i * 4), ("OBJ" <> T.pack (show i), False)) | i <- [0 .. 39] ]
-
-  romFrom origin = DisassemblyState origin True [] memory0
-  entryPoint    = DisassemblyState (if hasBootROM memory0 then 0 else 0x100) False [] memory0
   bootSubstrate = case getBootROMData memory0 of
     Nothing      -> mempty
     Just bootROM -> Disassembly
@@ -369,11 +312,123 @@ disassembleROM memory0 =
     go [] = []
     go xs = let (r, rs) = splitAt n xs in r : go rs
 
+-- | The defualt set of labels that are relevant to all GBC programs.
+initialLabels :: Labels
+initialLabels =
+  [ (LongAddress 0 0x0  , ("rst0", False))
+    , (LongAddress 0 0x8  , ("rst1", False))
+    , (LongAddress 0 0x10 , ("rst2", False))
+    , (LongAddress 0 0x18 , ("rst3", False))
+    , (LongAddress 0 0x20 , ("rst4", False))
+    , (LongAddress 0 0x28 , ("rst5", False))
+    , (LongAddress 0 0x30 , ("rst6", False))
+    , (LongAddress 0 0x38 , ("rst7", False))
+    , (LongAddress 0 0x40 , ("int40_vblank", False))
+    , (LongAddress 0 0x48 , ("int48_lcd", False))
+    , (LongAddress 0 0x50 , ("int50_timer", False))
+    , (LongAddress 0 0x58 , ("int58_serial", False))
+    , (LongAddress 0 0x60 , ("int60_keypad", False))
+    , (LongAddress 0 0x100, ("rom_header", False))
+    , (LongAddress 0 P1   , ("P1", False))
+    , (LongAddress 0 SB   , ("SB", False))
+    , (LongAddress 0 SC   , ("SC", False))
+    , (LongAddress 0 DIV  , ("DIV", False))
+    , (LongAddress 0 TIMA , ("TIMA", False))
+    , (LongAddress 0 TMA  , ("TMA", False))
+    , (LongAddress 0 TAC  , ("TAC", False))
+    , (LongAddress 0 NR10 , ("NR10", False))
+    , (LongAddress 0 NR11 , ("NR11", False))
+    , (LongAddress 0 NR12 , ("NR12", False))
+    , (LongAddress 0 NR13 , ("NR13", False))
+    , (LongAddress 0 NR14 , ("NR14", False))
+    , (LongAddress 0 NR20 , ("NR20", False))
+    , (LongAddress 0 NR21 , ("NR21", False))
+    , (LongAddress 0 NR22 , ("NR22", False))
+    , (LongAddress 0 NR23 , ("NR23", False))
+    , (LongAddress 0 NR24 , ("NR24", False))
+    , (LongAddress 0 NR30 , ("NR30", False))
+    , (LongAddress 0 NR31 , ("NR31", False))
+    , (LongAddress 0 NR32 , ("NR32", False))
+    , (LongAddress 0 NR33 , ("NR33", False))
+    , (LongAddress 0 NR34 , ("NR34", False))
+    , (LongAddress 0 NR40 , ("NR40", False))
+    , (LongAddress 0 NR41 , ("NR41", False))
+    , (LongAddress 0 NR42 , ("NR42", False))
+    , (LongAddress 0 NR43 , ("NR43", False))
+    , (LongAddress 0 NR44 , ("NR44", False))
+    , (LongAddress 0 NR50 , ("NR50", False))
+    , (LongAddress 0 NR51 , ("NR51", False))
+    , (LongAddress 0 NR52 , ("NR52", False))
+    , (LongAddress 0 IF   , ("IF", False))
+    , (LongAddress 0 LCDC , ("LCDC", False))
+    , (LongAddress 0 STAT , ("STAT", False))
+    , (LongAddress 0 SCY  , ("SCY", False))
+    , (LongAddress 0 SCX  , ("SCX", False))
+    , (LongAddress 0 LY   , ("LY", False))
+    , (LongAddress 0 LYC  , ("LYC", False))
+    , (LongAddress 0 DMA  , ("DMA", False))
+    , (LongAddress 0 BGP  , ("BGP", False))
+    , (LongAddress 0 OBP0 , ("OBP0", False))
+    , (LongAddress 0 OBP1 , ("OBP1", False))
+    , (LongAddress 0 WY   , ("WY", False))
+    , (LongAddress 0 WX   , ("WX", False))
+    , (LongAddress 0 R4C  , ("R4C", False))
+    , (LongAddress 0 KEY1 , ("KEY1", False))
+    , (LongAddress 0 VBK  , ("VBK", False))
+    , (LongAddress 0 BLCK , ("BLCK", False))
+    , (LongAddress 0 HDMA1, ("HDMA1", False))
+    , (LongAddress 0 HDMA2, ("HDMA2", False))
+    , (LongAddress 0 HDMA3, ("HDMA3", False))
+    , (LongAddress 0 HDMA4, ("HDMA4", False))
+    , (LongAddress 0 HDMA5, ("HDMA5", False))
+    , (LongAddress 0 RP   , ("RP", False))
+    , (LongAddress 0 BCPS , ("BCPS", False))
+    , (LongAddress 0 BCPD , ("BCPD", False))
+    , (LongAddress 0 OCPS , ("OCPS", False))
+    , (LongAddress 0 OCPD , ("OCPD", False))
+    , (LongAddress 0 R6C  , ("R6C", False))
+    , (LongAddress 0 SVBK , ("SVBK", False))
+    , (LongAddress 0 R72  , ("R72", False))
+    , (LongAddress 0 R73  , ("R73", False))
+    , (LongAddress 0 R74  , ("R74", False))
+    , (LongAddress 0 R75  , ("R75", False))
+    , (LongAddress 0 PCM12, ("PCM12", False))
+    , (LongAddress 0 PCM34, ("PCM34", False))
+    , (LongAddress 0 IE   , ("IE", False))
+    ]
+    <> [ (LongAddress 0 (0xFE00 + i * 4), ("OBJ" <> T.pack (show i), False)) | i <- [0 .. 39] ]
+
 -- | Generate disassembly starting at a particular PC.
 disassembleFrom :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO (Disassembly, Labels)
 disassembleFrom pc disassembly = do
   memory <- asks forMemory
-  liftIO (disassemble (DisassemblyState pc False [] memory) disassembly)
+  banks  <- getBanks
+  liftIO (disassemble (DisassemblyState pc banks [] memory) disassembly)
+
+-- | Disassemble starting from a list of root addresses.
+disassembleFromRoots
+  :: HasMemory env => Disassembly -> [LongAddress] -> ReaderT env IO (Disassembly, Labels)
+disassembleFromRoots disassembly0 roots = do
+  memory <- asks forMemory
+  liftIO (runStateT (foldM (disassembleS memory) disassembly0 roots) [])
+ where
+  disassembleS :: Memory -> Disassembly -> LongAddress -> StateT Labels IO Disassembly
+  disassembleS memory d0 (LongAddress bank pc) = do
+    labels       <- get
+    (r, labels') <- liftIO (disassemble state0 d0)
+    put (labels' ++ labels)
+    pure r
+   where
+    state0 = DisassemblyState
+      pc
+      Banks { bankBootLimit = if bank == 0xFFFF then fromIntegral (bootROMLength memory) else 0
+            , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 0
+            , bankRAM       = 0
+            , bankWRAM      = 0
+            , bankVRAM      = 0
+            }
+      []
+      memory
 
 -- | Generate disassembly.
 disassemble :: DisassemblyState -> Disassembly -> IO (Disassembly, Labels)
@@ -426,10 +481,7 @@ currentAddressLong = makeLongAddress =<< gets disassemblyPC
 
 makeLongAddress :: Word16 -> StateT DisassemblyState IO LongAddress
 makeLongAddress offset = do
-  s    <- get
-  bank <- if disassemblyBootLockout s && offset < 0x1000
-    then pure 0
-    else liftIO (runReaderT (getBank offset) (disassemblyMemory s))
+  bank <- lookupBank offset <$> gets disassemblyBanks
   pure (LongAddress bank offset)
 
 -- | Take the disassembled bytes that have been accumulated in the
@@ -490,18 +542,18 @@ addCurrentPC address = (address +) <$> gets disassemblyPC
 
 instance MonadFetch (StateT DisassemblyState IO) where
   nextByte = do
-    s <- get
-    let pc  = disassemblyPC s
-    let pc' = disassemblyPC s + 1
-    byte <- liftIO
-      (runReaderT
-        (if pc < 0x1000 && disassemblyBootLockout s then readByteLong 0 pc else readByte pc)
-        (disassemblyMemory s)
-      )
+    s@DisassemblyState {..} <- get
+    let pc   = disassemblyPC
+    let pc'  = pc + 1
+    let bank = lookupBank pc disassemblyBanks
+    let banks' = if pc' == 0x100 && bankBootLimit disassemblyBanks /= 0
+          then disassemblyBanks { bankBootLimit = 0 }
+          else disassemblyBanks
+    byte <- liftIO (runReaderT (readByteLong bank pc) disassemblyMemory)
     put
-      (s { disassemblyPC          = pc'
-         , disassemblyBootLockout = disassemblyBootLockout s || pc' == 0x100
-         , disassemblyBytes       = byte : disassemblyBytes s
+      (s { disassemblyPC    = pc'
+         , disassemblyBanks = banks'
+         , disassemblyBytes = byte : disassemblyBytes
          }
       )
     pure byte
@@ -527,10 +579,7 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   ldDEa  = pure (Continue, Instruction2 "LD" (Constant "(DE)") (Constant "A"))
   ldHLIa = pure (Continue, Instruction2 "LD" (Constant "(HLI)") (Constant "A"))
   ldHLDa = pure (Continue, Instruction2 "LD" (Constant "(HLD)") (Constant "A"))
-  ldddnn RegHL nn = pure (Continue, Instruction2 "LD" (Constant "HL") (Address nn))
-  ldddnn RegSP nn = pure (Continue, Instruction2 "LD" (Constant "SP") (Address nn))
-  ldddnn dd nn =
-    pure (Continue, Instruction2 "LD" (formatR16 dd) (Constant (T.pack (formatHex nn))))
+  ldddnn dd nn = pure (Continue, Instruction2 "LD" (formatR16 dd) (Address nn))
   ldSPHL = pure (Continue, Instruction2 "LD" (Constant "SP") (Constant "HL"))
   push qq = pure (Continue, Instruction1 "PUSH" (formatRpp qq))
   pop qq = pure (Continue, Instruction1 "POP" (formatRpp qq))

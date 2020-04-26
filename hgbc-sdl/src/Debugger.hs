@@ -8,6 +8,7 @@ module Debugger
   , sendNotification
   , addNewLabels
   , restoreLabels
+  , restoreBreakpoints
   , recordDisassemblyRoot
   , readDisassemblyRoots
   , Notification(..)
@@ -76,7 +77,8 @@ import qualified Network.Wai.Handler.Warp      as Warp
 data Notification
   = EmulatorStarted
   | EmulatorPaused
-  | BreakPointAdded LongAddress
+  | BreakPointSet LongAddress
+  | BreakPointDisabled LongAddress
   | BreakPointRemoved LongAddress
   | LabelUpdated Labels
   | LabelRemoved LongAddress
@@ -89,7 +91,7 @@ sendNotification (DebuggerChannel channel) = liftIO . atomically . writeTChan ch
 
 data DebugState = DebugState {
     disassemblyRef :: IORef Disassembly
-  , breakpoints    :: H.BasicHashTable LongAddress ()
+  , breakpoints    :: H.BasicHashTable LongAddress Bool
   , labelsRef      :: IORef (HM.HashMap LongAddress (T.Text, Bool))
   , bootDebuggerPath :: Maybe FilePath
   , romDebuggerPath  :: FilePath
@@ -182,6 +184,10 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       getSVG (LB.fromStrict $(embedOneFileOf ["data/runto.svg", "../data/runto.svg"]))
     ["svg", "breakpoint"] ->
       getSVG (LB.fromStrict $(embedOneFileOf ["data/breakpoint.svg", "../data/breakpoint.svg"]))
+    ["svg", "breakpoint_disabled"] -> getSVG
+      (LB.fromStrict
+        $(embedOneFileOf ["data/breakpoint_disabled.svg", "../data/breakpoint_disabled.svg"])
+      )
     ["svg", "home"] ->
       getSVG (LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"]))
     ["svg", "label"] ->
@@ -251,18 +257,28 @@ debugger channel romFileName emulator emulatorState debugState req respond =
           (Wai.responseLBS
             HTTP.status200
             [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
-            (encode (fst <$> bps))
+            (BB.toLazyByteString . fromEncoding $ list
+              (\(address, isEnabled) -> pairs ("address" .= address <> "isEnabled" .= isEnabled))
+              bps
+            )
           )
 
       "POST" -> withAddress $ \address -> do
         body <- Wai.lazyRequestBody req
         case HTTP.parseQuery (LB.toStrict body) of
           [("set", _)] -> do
-            H.insert (breakpoints debugState) address ()
-            sendNotification channel (BreakPointAdded address)
+            H.insert (breakpoints debugState) address True
+            saveBreakpoints debugState
+            sendNotification channel (BreakPointSet address)
+            pure emptyResponse
+          [("disable", _)] -> do
+            H.insert (breakpoints debugState) address False
+            saveBreakpoints debugState
+            sendNotification channel (BreakPointDisabled address)
             pure emptyResponse
           [("unset", _)] -> do
             H.delete (breakpoints debugState) address
+            saveBreakpoints debugState
             sendNotification channel (BreakPointRemoved address)
             pure emptyResponse
           _ -> invalidCommand "breakpoints"
@@ -362,8 +378,12 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
           Right EmulatorPaused -> do
             pushPaused
             continue True
-          Right (BreakPointAdded address) -> do
+          Right (BreakPointSet address) -> do
             write "event: breakpoint-added\ndata:"
+            pushAddress address
+            continue isPaused
+          Right (BreakPointDisabled address) -> do
+            write "event: breakpoint-disabled\ndata:"
             pushAddress address
             continue isPaused
           Right (BreakPointRemoved address) -> do
@@ -516,6 +536,46 @@ restoreLabels debugState = do
   parseLine line = case words line of
     [bankRaw, offsetRaw, label] ->
       (LongAddress <$> readMaybe bankRaw <*> readMaybe offsetRaw) <&> (, (T.pack label, True))
+    _ -> Nothing
+  writeError (i, Nothing) = Left ("error on line " <> show (i :: Int))
+  writeError (_, Just a ) = Right a
+
+breakpointsFileName :: FilePath
+breakpointsFileName = "breakpoints"
+
+saveBreakpoints :: DebugState -> IO ()
+saveBreakpoints debugState = do
+  breakpoints <- H.toList (breakpoints debugState)
+  let path = romDebuggerPath debugState
+  createDirectoryIfMissing True path
+  withTempFile path (breakpointsFileName <> ".tmp") $ \(file, handle) -> do
+    for_ breakpoints $ \(LongAddress bank offset, isEnabled) ->
+      hPutStrLn handle (show bank <> " " <> show offset <> " " <> show isEnabled)
+    hClose handle
+    renamePath file (path </> breakpointsFileName)
+
+restoreBreakpoints :: DebugState -> IO ()
+restoreBreakpoints debugState = do
+  let path = romDebuggerPath debugState </> breakpointsFileName
+  exists <- doesFileExist path
+  if not exists
+    then pure ()
+    else withFile path ReadMode $ \handle -> do
+      contents <- hGetContents handle
+      case parseLines contents of
+        Left errors -> do
+          putStrLn ("WARNING: Cannot read " <> path)
+          for_ errors $ \e -> putStrLn ("  " <> e)
+        Right bps -> for_ bps $ uncurry (H.insert (breakpoints debugState))
+
+ where
+  parseLines contents =
+    case partitionEithers $ writeError . second parseLine <$> [1 ..] `zip` lines contents of
+      ([]    , labels) -> Right labels
+      (errors, _     ) -> Left errors
+  parseLine line = case words line of
+    [bankRaw, offsetRaw, isEnabled] ->
+      (,) <$> (LongAddress <$> readMaybe bankRaw <*> readMaybe offsetRaw) <*> readMaybe isEnabled
     _ -> Nothing
   writeError (i, Nothing) = Left ("error on line " <> show (i :: Int))
   writeError (_, Just a ) = Right a
