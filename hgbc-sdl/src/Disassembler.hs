@@ -19,6 +19,7 @@ module Disassembler
   , lookupN
   , disassemblyRequired
   , disassembleROM
+  , generateOutput
   , initialLabels
   , disassembleFrom
   , disassembleFromRoots
@@ -30,12 +31,14 @@ import           Control.Category        hiding ( (.) )
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
 import           Data.Aeson
+import           Data.Bifunctor
 import           Data.Bits
 import           Data.Foldable
 import           Data.Function
 import           Data.Functor
 import           Data.Hashable
 import           Data.Int
+import           Data.List                      ( intersperse )
 import           Data.Maybe
 import           Data.String
 import           Data.Word
@@ -47,9 +50,13 @@ import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
+import qualified Data.HashMap.Strict           as HM
 import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
+import qualified Data.Text.Lazy                as LT
+import qualified Data.Text.Lazy.Builder        as TB
 import qualified Data.Vector.Storable          as VS
+import           Data.Char
 
 data LongAddress
   = LongAddress !Word16 !Word16
@@ -78,15 +85,16 @@ data Instruction
   deriving (Eq, Ord, Show)
 data Parameter
   = Constant T.Text
-  | Address Word16
-  | AtAddress Word16
+  | Address LongAddress
+  | AtAddress LongAddress
   deriving (Eq, Ord, Show)
 
 instance ToJSON Parameter where
-  toJSON (Constant text   ) = object ["text" .= text]
-  toJSON (Address  address) = object ["text" .= ('$' : formatHex address), "address" .= address]
-  toJSON (AtAddress address) =
-    object ["text" .= ("($" ++ formatHex address ++ ")"), "address" .= address, "indirect" .= True]
+  toJSON (Constant text) = object ["text" .= text]
+  toJSON (Address address@(LongAddress _ offset)) =
+    object ["text" .= ('$' : formatHex offset), "address" .= address]
+  toJSON (AtAddress address@(LongAddress _ offset)) =
+    object ["text" .= ("($" ++ formatHex offset ++ ")"), "address" .= address, "indirect" .= True]
 
 instance ToJSON Field where
   toJSON (Field address bytes overlap fdata) =
@@ -222,6 +230,45 @@ lookupN (Disassembly m) n startAddress
   (l, mv, r) = IM.splitLookup key m
   leftList   = snd <$> IM.toDescList l
   rightList  = snd <$> IM.toAscList r
+
+-- | Generate disassembly.
+generateOutput :: Disassembly -> HM.HashMap LongAddress (T.Text, Bool) -> LT.Text
+generateOutput (Disassembly disassembly) labels =
+  TB.toLazyText
+    . mconcat
+    $ map ((<> "\n") . generateLine)
+    . filter (both . bimap inROMRange (not . isOverlapping))
+    . map (first decodeAddress)
+    $ IM.toList disassembly
+ where
+  generateLine (address, Field _ bytesString _ instruction) =
+    let bytes = SB.unpack bytesString
+    in  generateHeader address <> generateLabel address <> "  " <> case instruction of
+          Data ->
+            mconcat ("db " : intersperse ", " (TB.fromString . ('$' :) . formatHex <$> bytes))
+          Instruction0 t    -> TB.fromText t
+          Instruction1 t p1 -> TB.fromText t <> " " <> generateParameter p1
+          Instruction2 t p1 p2 ->
+            TB.fromText t <> " " <> generateParameter p1 <> ", " <> generateParameter p2
+  generateParameter p = case p of
+    Constant  t       -> TB.fromText t
+    Address   address -> generateAddressParameter address
+    AtAddress address -> "(" <> generateAddressParameter address <> ")"
+  generateAddressParameter address@(LongAddress _ offset) =
+    maybe (TB.fromString ('$' : formatHex offset)) (TB.fromText . fst) (HM.lookup address labels)
+  generateLabel address = case HM.lookup address labels of
+    Nothing         -> ""
+    Just (label, _) -> case T.uncons label of
+      Nothing -> ""
+      Just (c1, _) ->
+        (if isAlphaNum c1 || c1 == '_' then "\n" else "") <> TB.fromText label <> ":\n"
+  generateHeader (LongAddress bank offset) =
+    if offset == 0x4000 then "\n Bank $" <> TB.fromString (formatHex bank) <> "\n" else ""
+  decodeAddress key =
+    LongAddress (fromIntegral ((key .>>. 16) .&. 0xFFFF)) (fromIntegral (key .&. 0xFFFF))
+  inROMRange (LongAddress bank offset) = offset < 0x8000 && bank /= 0xFFFF
+  isOverlapping (Field _ _ overlapping _) = overlapping
+  both (l, r) = l && r
 
 data Banks = Banks {
     bankBootLimit :: !Word16  -- First address that is not in BOOT ROM (excluding hole at 0x100~0x200)
@@ -535,10 +582,13 @@ formatI8 :: Int8 -> Parameter
 formatI8 i = Constant (fromString (show i))
 
 formatA8 :: Word8 -> Parameter
-formatA8 w = AtAddress (0xFF00 .|. fromIntegral w)
+formatA8 w = AtAddress (LongAddress 0 (0xFF00 .|. fromIntegral w))
 
 addCurrentPC :: Word16 -> StateT DisassemblyState IO Word16
 addCurrentPC address = (address +) <$> gets disassemblyPC
+
+lookupCurrentBank :: Word16 -> StateT DisassemblyState IO Word16
+lookupCurrentBank offset = lookupBank offset <$> gets disassemblyBanks
 
 instance MonadFetch (StateT DisassemblyState IO) where
   nextByte = do
@@ -571,20 +621,28 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   ldCa  = pure (Continue, Instruction2 "LD" (Constant "(C)") (Constant "A"))
   ldan n = pure (Continue, Instruction2 "LD" (Constant "A") (formatA8 n))
   ldna n = pure (Continue, Instruction2 "LD" (formatA8 n) (Constant "A"))
-  ldann nn = pure (Continue, Instruction2 "LD" (Constant "A") (AtAddress nn))
-  ldnna nn = pure (Continue, Instruction2 "LD" (AtAddress nn) (Constant "A"))
+  ldann nn = do
+    bank <- lookupCurrentBank nn
+    pure (Continue, Instruction2 "LD" (Constant "A") (AtAddress (LongAddress bank nn)))
+  ldnna nn = do
+    bank <- lookupCurrentBank nn
+    pure (Continue, Instruction2 "LD" (AtAddress (LongAddress bank nn)) (Constant "A"))
   ldaHLI = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(HLI)"))
   ldaHLD = pure (Continue, Instruction2 "LD" (Constant "A") (Constant "(HLD)"))
   ldBCa  = pure (Continue, Instruction2 "LD" (Constant "(BC)") (Constant "A"))
   ldDEa  = pure (Continue, Instruction2 "LD" (Constant "(DE)") (Constant "A"))
   ldHLIa = pure (Continue, Instruction2 "LD" (Constant "(HLI)") (Constant "A"))
   ldHLDa = pure (Continue, Instruction2 "LD" (Constant "(HLD)") (Constant "A"))
-  ldddnn dd nn = pure (Continue, Instruction2 "LD" (formatR16 dd) (Address nn))
+  ldddnn dd nn = do
+    bank <- lookupCurrentBank nn
+    pure (Continue, Instruction2 "LD" (formatR16 dd) (Address (LongAddress bank nn)))
   ldSPHL = pure (Continue, Instruction2 "LD" (Constant "SP") (Constant "HL"))
   push qq = pure (Continue, Instruction1 "PUSH" (formatRpp qq))
   pop qq = pure (Continue, Instruction1 "POP" (formatRpp qq))
   ldhl i = pure (Continue, Instruction2 "LDHL" (Constant "SP") (formatI8 i))
-  ldnnSP nn = pure (Continue, Instruction2 "LD" (AtAddress nn) (Constant "SP"))
+  ldnnSP nn = do
+    bank <- lookupCurrentBank nn
+    pure (Continue, Instruction2 "LD" (AtAddress (LongAddress bank nn)) (Constant "SP"))
   addr r = pure (Continue, Instruction2 "ADD" (Constant "A") (formatR8 r))
   addn w = pure (Continue, Instruction2 "ADD" (Constant "A") (formatW8 w))
   addhl = pure (Continue, Instruction2 "ADD" (Constant "A") (Constant "(HL)"))
@@ -643,17 +701,27 @@ instance MonadGMBZ80 (StateT DisassemblyState IO) where
   sethl i = pure (Continue, Instruction2 "SET" (formatB8 i) (Constant "(HL)"))
   resr r i = pure (Continue, Instruction2 "RES" (formatB8 i) (formatR8 r))
   reshl i = pure (Continue, Instruction2 "RES" (formatB8 i) (Constant "(HL)"))
-  jpnn nn = pure (Jump nn, Instruction1 "JP" (Address nn))
+  jpnn nn = do
+    bank <- lookupCurrentBank nn
+    pure (Jump nn, Instruction1 "JP" (Address (LongAddress bank nn)))
   jphl = pure (Stop, Instruction1 "JP" (Constant "(HL)"))
-  jpccnn cc nn = pure (Fork nn, Instruction2 "JP" (formatCC cc) (Address nn))
+  jpccnn cc nn = do
+    bank <- lookupCurrentBank nn
+    pure (Fork nn, Instruction2 "JP" (formatCC cc) (Address (LongAddress bank nn)))
   jr i = do
-    address <- Address <$> addCurrentPC (fromIntegral i)
-    pure (JumpRel i, Instruction1 "JR" address)
+    offset <- addCurrentPC (fromIntegral i)
+    bank   <- lookupCurrentBank offset
+    pure (JumpRel i, Instruction1 "JR" (Address (LongAddress bank offset)))
   jrcc cc i = do
-    address <- Address <$> addCurrentPC (fromIntegral i)
-    pure (ForkRel i, Instruction2 "JR" (formatCC cc) address)
-  call nn = pure (Fork nn, Instruction1 "CALL" (Address nn))
-  callcc cc nn = pure (Fork nn, Instruction2 "CALL" (formatCC cc) (Address nn))
+    offset <- addCurrentPC (fromIntegral i)
+    bank   <- lookupCurrentBank offset
+    pure (ForkRel i, Instruction2 "JR" (formatCC cc) (Address (LongAddress bank offset)))
+  call nn = do
+    bank <- lookupCurrentBank nn
+    pure (Fork nn, Instruction1 "CALL" (Address (LongAddress bank nn)))
+  callcc cc nn = do
+    bank <- lookupCurrentBank nn
+    pure (Fork nn, Instruction2 "CALL" (formatCC cc) (Address (LongAddress bank nn)))
   ret  = pure (Stop, Instruction0 "RET")
   reti = pure (Stop, Instruction0 "RETI")
   retcc cc = pure (Continue, Instruction1 "RET " (formatCC cc))

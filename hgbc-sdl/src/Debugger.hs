@@ -69,6 +69,7 @@ import qualified Data.Text                     as T
 import qualified Data.Text.Encoding            as T
 import qualified Data.Text.Encoding.Error      as T
 import qualified Data.Text.IO                  as T
+import qualified Data.Text.Lazy.Encoding       as LT
 import qualified Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
@@ -194,8 +195,6 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       getSVG (LB.fromStrict $(embedOneFileOf ["data/label.svg", "../data/label.svg"]))
     ["svg", "download"] ->
       getSVG (LB.fromStrict $(embedOneFileOf ["data/download.svg", "../data/download.svg"]))
-    ["svg", "goto"] ->
-      getSVG (LB.fromStrict $(embedOneFileOf ["data/goto.svg", "../data/goto.svg"]))
 
     ["memory"] -> whenMethodGET $ case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->
@@ -236,6 +235,21 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       _ -> invalidQuery
 
     ["disassembly"] -> whenMethodGET $ case Wai.queryString req of
+      [] -> do
+        disassembly <- readIORef (disassemblyRef debugState)
+        labels      <- readIORef (labelsRef debugState)
+        pure
+          (Wai.responseLBS
+            HTTP.status200
+            [ (HTTP.hContentType    , "text/plain; charset=UTF-8")
+            , ("Content-Disposition", "attachment")
+            , (HTTP.hCacheControl   , "no-cache")
+            ]
+            (";; " <> fromString romFileName <> "\n\n" <> LT.encodeUtf8
+              (generateOutput disassembly labels)
+            )
+          )
+
       [("bank", Just bank), ("offset", Just offset), ("n", Just linesText)] ->
         case
             (,)

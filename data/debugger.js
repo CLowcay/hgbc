@@ -67,39 +67,25 @@ function BankStatus(bootROMLimit) {
     banks.wram = parseInt(status.svbk2_0, 16);
   }
 
-  this.expandAddress = function (offset, relativeTo) {
+  this.expandAddress = function (offset) {
     if (offset < bootROMLimit && (offset < 0x100 || offset >= 0x200)) {
-      if (relativeTo ? relativeTo.bank === 0xFFFF : banks.pcBank === 0xFFFF) {
-        return { bank: 0xFFFF, offset: offset };
-      } else {
-        return { bank: 0, offset: offset };
-      }
+      return { bank: banks.pcBank, offset: offset };
     } else if (offset < 0x4000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0x8000) {
-      return relativeTo && relativeTo.offset >= 0x4000 && relativeTo.offset < 0x8000 ?
-        { bank: relativeTo.bank, offset: offset } :
-        { bank: banks.rom, offset: offset };
+      return { bank: banks.rom, offset: offset };
     } else if (offset < 0xA000) {
-      return relativeTo && relativeTo.offset >= 0x8000 && relativeTo.offset < 0xA000 ?
-        { bank: relativeTo.bank, offset: offset } :
-        { bank: banks.vram, offset: offset };
+      return { bank: banks.vram, offset: offset };
     } else if (offset < 0xC000) {
-      return relativeTo && relativeTo.offset >= 0xA000 && relativeTo.offset < 0xC000 ?
-        { bank: relativeTo.bank, offset: offset } :
-        { bank: banks.ram, offset: offset };
+      return { bank: banks.ram, offset: offset };
     } else if (offset < 0xD000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xE000) {
-      return relativeTo && relativeTo.offset >= 0xD000 && relativeTo.offset < 0xE000 ?
-        { bank: relativeTo.bank, offset: offset } :
-        { bank: banks.wram, offset: offset };
+      return { bank: banks.wram, offset: offset };
     } else if (offset < 0xF000) {
       return { bank: 0, offset: offset };
     } else if (offset < 0xFE00) {
-      return relativeTo && relativeTo.offset >= 0xF000 && relativeTo.offset < 0xFE00 ?
-        { bank: relativeTo.bank, offset: offset } :
-        { bank: banks.wram, offset: offset };
+      return { bank: banks.wram, offset: offset };
     } else {
       return { bank: 0, offset: offset };
     }
@@ -117,14 +103,14 @@ function initStatus(eventSource, banks, stack, backtrace, memory, disassembly) {
   eventSource.addEventListener('paused', onPause);
   eventSource.addEventListener('status', onUpdate);
 
-  onPress(document.getElementById('gotoHL'), () =>
-    memory.jumpTo({ offset: parseInt(currentStatusData.rH + currentStatusData.rL, 16) }));
-  onPress(document.getElementById('gotoBC'), () =>
-    memory.jumpTo({ offset: parseInt(currentStatusData.rB + currentStatusData.rC, 16) }));
-  onPress(document.getElementById('gotoDE'), () =>
-    memory.jumpTo({ offset: parseInt(currentStatusData.rD + currentStatusData.rE, 16) }));
-  onPress(document.getElementById('gotoC'), () =>
-    memory.jumpTo({ offset: parseInt('FF' + currentStatusData.rC, 16) }));
+  document.getElementById('gotoHL').onclick = () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rH + currentStatusData.rL, 16) });
+  document.getElementById('gotoBC').onclick = () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rB + currentStatusData.rC, 16) });
+  document.getElementById('gotoDE').onclick = () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rD + currentStatusData.rE, 16) });
+  document.getElementById('gotoC').onclick = () =>
+    memory.jumpTo({ offset: parseInt('FF' + currentStatusData.rC, 16) });
 
   const runButton = document.getElementById('run');
   const stepButton = document.getElementById('step');
@@ -285,7 +271,7 @@ function Outline() {
     const addressText = formatLongAddress(address);
     a.href = '#' + addressText;
     a.title = addressText;
-    onPress(a, () => jumpToHandlers.forEach(handler => handler(address)));
+    onActivate(a, () => jumpToHandlers.forEach(handler => handler(address)));
     a.innerText = label ? label.text : addressText;
     return a;
   }
@@ -321,11 +307,11 @@ function Memory(banks) {
     }
   });
 
-  onPress(document.getElementById('align'), () => {
+  document.getElementById('align').onclick = () => {
     const v = parseInt(addressField.value, 16) & 0xFFF8;
     addressField.value = formatShortAddress(v);
     refresh(v);
-  });
+  };
 
   const memoryKeyMap = new KeyMap();
   memoryWindow.addEventListener('wheel', onWheel);
@@ -412,10 +398,10 @@ function Stack(banks) {
   this.refresh = () => refresh();
   this.update = data => update(data.sp);
 
-  onPress(document.getElementById('gotoSP'), () => {
+  document.getElementById('gotoSP').onclick = () => {
     update(sp);
     refresh();
-  });
+  };
 
   const keymap = new KeyMap();
   stackWindow.addEventListener('wheel', onWheel);
@@ -499,7 +485,7 @@ function Backtrace(outline, disassembly) {
       a.href = '#' + addressText;
       a.title = addressText;
       a.innerText = label ? label.text : addressText;
-      onPress(a, () => disassembly.jumpTo(address));
+      onActivate(a, () => disassembly.jumpTo(address));
       li.appendChild(a);
       backtraceWindow.appendChild(li);
     });
@@ -573,9 +559,8 @@ function Disassembly(banks, outline, memory) {
   };
 
   // Set up the disassembler buttons.
-  document.getElementById('toPC').onclick = () => {
+  document.getElementById('toPC').onclick = () =>
     jumpTo(state.pc).then(() => setSelection({ address: state.pc, isLabel: false }));
-  }
   document.getElementById('runTo').onclick = () => runToAddress(state.selection.address);
   document.getElementById('breakpoint').onclick = () =>
     jumpTo(state.selection.address).then(() =>
@@ -589,7 +574,9 @@ function Disassembly(banks, outline, memory) {
       setSelection(position);
       window.getSelection().setBaseAndExtent(text, 0, text, 1);
     }
-  }
+  };
+  document.getElementById('downloadDisassembly').onclick = () =>
+    window.location = "disassembly";
 
   const disassemblyKeymap = new KeyMap();
   const disassemblyWindow = document.querySelector('div.disassembly div.window');
@@ -953,7 +940,7 @@ function Disassembly(banks, outline, memory) {
     function formatParameter(parameter) {
       if (!parameter.hasOwnProperty('address')) return parameter.text;
 
-      const address = banks.expandAddress(parameter.address, field.address);
+      const address = parameter.address;
       const label = outline.getLabel(address);
       if (!label) return parameter.text;
 
@@ -962,7 +949,7 @@ function Disassembly(banks, outline, memory) {
       a.href = '#' + encodeURIComponent(addressText);
       a.innerText = label.text;
       a.title = addressText;
-      onPress(a, () => {
+      onActivate(a, () => {
         if (field.text === 'JP' || field.text === 'JR' || field.text === 'CALL') {
           jumpTo(address).then(() =>
             setSelection({ address: address, isLabel: false }))
@@ -1275,7 +1262,7 @@ function KeyMap() {
   }
 }
 
-function onPress(button, action) {
+function onActivate(button, action) {
   button.addEventListener('click', action);
   button.addEventListener('keydown', event => {
     if (event.key === 'Enter') action();
