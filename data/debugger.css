@@ -61,8 +61,23 @@ nav.innerNav button img {
   height: 20px;
   vertical-align: bottom;
 }
+nav.innerNav input[type=text] {
+  text-align: right;
+}
+
+#gotoSP {
+  position: absolute;
+  top: 4px; left: var(--padding);
+  padding: 0;
+}
+#gotoSP img {
+  height: 20px;
+  vertical-align: middle;
+  padding: 1px;
+}
 
 .panel {
+  position: relative;
   margin-top: var(--padding);
   border: 2px solid black;
   background-color: var(--panel-background);

@@ -84,8 +84,10 @@ innerNav :: [BB.Builder] -> [BB.Builder] -> BB.Builder
 innerNav contentsLeft contentsRight =
   "<nav class=innerNav>"
     <> mconcat contentsLeft
-    <> "<span class=leftRightSeparator>&nbsp;</span>"
-    <> mconcat contentsRight
+    <> (if null contentsRight
+         then ""
+         else "<span class=leftRightSeparator></span>" <> mconcat contentsRight
+       )
     <> "</nav>"
 
 br :: BB.Builder

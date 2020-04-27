@@ -34,6 +34,8 @@ window.onload = () => {
 
   globalKeymap.override('control KeyG', () =>
     document.getElementById('disassemblyAddress').focus());
+  globalKeymap.override('control KeyM', () =>
+    document.getElementById('address').focus());
   globalKeymap.override('control KeyI', () => postCommand('/', 'step'));
   globalKeymap.override('control KeyO', () => postCommand('/', 'stepOut'));
   globalKeymap.override('control KeyP', () => postCommand('/', 'stepOver'));
@@ -44,7 +46,7 @@ window.onload = () => {
 
   document.querySelectorAll('label').forEach(label =>
     label.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
+      if (event.key === 'Enter') {
         event.preventDefault();
         label.control.checked = true;
       }
@@ -110,11 +112,19 @@ function BankStatus(bootROMLimit) {
 function initStatus(eventSource, banks, stack, backtrace, memory, disassembly) {
   let currentStatus = "";
   let currentStatusData = {};
-  let sp = 0;
 
   eventSource.addEventListener('started', onRun);
   eventSource.addEventListener('paused', onPause);
   eventSource.addEventListener('status', onUpdate);
+
+  onPress(document.getElementById('gotoHL'), () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rH + currentStatusData.rL, 16) }));
+  onPress(document.getElementById('gotoBC'), () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rB + currentStatusData.rC, 16) }));
+  onPress(document.getElementById('gotoDE'), () =>
+    memory.jumpTo({ offset: parseInt(currentStatusData.rD + currentStatusData.rE, 16) }));
+  onPress(document.getElementById('gotoC'), () =>
+    memory.jumpTo({ offset: parseInt('FF' + currentStatusData.rC, 16) }));
 
   const runButton = document.getElementById('run');
   const stepButton = document.getElementById('step');
@@ -275,7 +285,7 @@ function Outline() {
     const addressText = formatLongAddress(address);
     a.href = '#' + addressText;
     a.title = addressText;
-    a.addEventListener('click', () => jumpToHandlers.forEach(handler => handler(address)));
+    onPress(a, () => jumpToHandlers.forEach(handler => handler(address)));
     a.innerText = label ? label.text : addressText;
     return a;
   }
@@ -309,6 +319,12 @@ function Memory(banks) {
       case 'ArrowDown': return scroll(WIDTH);
       case 'Enter': memoryWindow.focus();
     }
+  });
+
+  onPress(document.getElementById('align'), () => {
+    const v = parseInt(addressField.value, 16) & 0xFFF8;
+    addressField.value = formatShortAddress(v);
+    refresh(v);
   });
 
   const memoryKeyMap = new KeyMap();
@@ -387,14 +403,42 @@ function Memory(banks) {
  *****************************************************************************/
 function Stack(banks) {
   const LINES = 18;
-  const stackWindow = document.getElementById('stack');
+  const stackUL = document.getElementById('stack');
+  const stackWindow = document.querySelector('#stackPanel div.window');
 
   let sp = 0;
   let offset = 0;
 
   this.refresh = () => refresh();
-  this.update = function (data) {
-    sp = data.sp;
+  this.update = data => update(data.sp);
+
+  onPress(document.getElementById('gotoSP'), () => {
+    update(sp);
+    refresh();
+  });
+
+  const keymap = new KeyMap();
+  stackWindow.addEventListener('wheel', onWheel);
+  stackWindow.addEventListener('keydown', keymap.handleEvent);
+  keymap.override('ArrowUp', () => scroll(1));
+  keymap.override('ArrowDown', () => scroll(-1));
+  keymap.override('PageUp', () => scroll(LINES));
+  keymap.override('PageDown', () => scroll(-LINES));
+
+  function onWheel(event) {
+    event.preventDefault();
+    switch (event.deltaMode) {
+      case 0: // DOM_DELTA_PIXEL
+        return scroll(Math.round(-event.deltaY / 16));
+      case 1: // DOM_DELTA_LINE
+        return scroll(Math.round(-event.deltaY));
+      case 2: // DOM_DELTA_PAGE
+        return scroll(Math.round(-event.deltaY * LINES));
+    }
+  }
+
+  function update(newSP) {
+    sp = newSP;
     if (sp >= offset + LINES) {
       offset = (sp - LINES + 1) & 0xFFFF;
     } else if (sp < offset) {
@@ -402,9 +446,27 @@ function Stack(banks) {
     }
   }
 
+  let scrollAmount = 0;
+  let scrolling = false;
+  async function scroll(amount) {
+    scrollAmount += amount;
+    if (!scrolling) {
+      try {
+        scrolling = true;
+        while (scrollAmount !== 0) {
+          offset = (offset + scrollAmount) & 0xFFFF;
+          scrollAmount = 0;
+          await refresh();
+        }
+      } finally {
+        scrolling = false;
+      }
+    }
+  }
+
   async function refresh() {
     const text = await fetchText('stack?offset=' + offset.toString(16) + '&n=' + LINES);
-    stackWindow.innerHTML = '';
+    stackUL.innerHTML = '';
     let currentOffset = (offset + LINES - 1) & 0xFFFF;
     text.split('\n').forEach(line => {
       const li = document.createElement('li');
@@ -413,7 +475,7 @@ function Stack(banks) {
       li.setAttribute('data-address', formatLongAddress(address));
       li.innerText = bytes[0] + ' ' + bytes[1] + bytes[0];
       if (sp === currentOffset) li.classList.add('sp');
-      stackWindow.appendChild(li);
+      stackUL.appendChild(li);
       currentOffset = (currentOffset - 1) & 0xFFFF;
     });
   }
@@ -437,7 +499,7 @@ function Backtrace(outline, disassembly) {
       a.href = '#' + addressText;
       a.title = addressText;
       a.innerText = label ? label.text : addressText;
-      a.addEventListener('click', () => disassembly.jumpTo(address));
+      onPress(a, () => disassembly.jumpTo(address));
       li.appendChild(a);
       backtraceWindow.appendChild(li);
     });
@@ -900,7 +962,7 @@ function Disassembly(banks, outline, memory) {
       a.href = '#' + encodeURIComponent(addressText);
       a.innerText = label.text;
       a.title = addressText;
-      a.addEventListener('click', () => {
+      onPress(a, () => {
         if (field.text === 'JP' || field.text === 'JR' || field.text === 'CALL') {
           jumpTo(address).then(() =>
             setSelection({ address: address, isLabel: false }))
@@ -1211,6 +1273,13 @@ function KeyMap() {
       (event.altKey ? 2 : 0) |
       (event.shiftKey ? 4 : 0);
   }
+}
+
+function onPress(button, action) {
+  button.addEventListener('click', action);
+  button.addEventListener('keydown', event => {
+    if (event.key === 'Enter') action();
+  });
 }
 
 async function fetchText(...args) {

@@ -3,6 +3,7 @@
 module Machine.GBC.CPU.Backtrace
   ( Backtrace
   , new
+  , reset
   , push
   , pop
   , toList
@@ -30,6 +31,11 @@ new size = do
   topRef    <- newUnboxedRef 0
   bottomRef <- newUnboxedRef 0
   pure Backtrace { .. }
+
+reset :: Backtrace -> IO ()
+reset Backtrace {..} = do
+  writeUnboxedRef topRef    0
+  writeUnboxedRef bottomRef 0
 
 {-# INLINE push #-}
 push :: Backtrace -> Word16 -> Word16 -> IO ()

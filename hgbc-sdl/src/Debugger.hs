@@ -192,6 +192,10 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       getSVG (LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"]))
     ["svg", "label"] ->
       getSVG (LB.fromStrict $(embedOneFileOf ["data/label.svg", "../data/label.svg"]))
+    ["svg", "download"] ->
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/download.svg", "../data/download.svg"]))
+    ["svg", "goto"] ->
+      getSVG (LB.fromStrict $(embedOneFileOf ["data/goto.svg", "../data/goto.svg"]))
 
     ["memory"] -> whenMethodGET $ case Wai.queryString req of
       [("address", Just addressText), ("lines", Just rawLines)] ->

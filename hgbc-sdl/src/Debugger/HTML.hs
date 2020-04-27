@@ -53,12 +53,13 @@ disassembly :: BB.Builder
 disassembly = divclass
   "'disassembly panel'"
   [ innerNav
-    [ input "text" "disassemblyAddress" 9 "0000:0000"
-    , button "runTo" "Run to current address" [img "svg/runto"]
+    [ input "text" "disassemblyAddress" 5 "0000:0000"
     , button "toPC"  "Go to current PC"       [img "svg/home"]
+    , button "runTo" "Run to current address" [img "svg/runto"]
     ]
-    [ button "breakpoint" "Toggle breakpoint" [img "svg/breakpoint"]
-    , button "label"      "Create label"      [img "svg/label"]
+    [ button "breakpoint"          "Toggle breakpoint"    [img "svg/breakpoint"]
+    , button "label"               "Create label"         [img "svg/label"]
+    , button "downloadDisassembly" "Download disassembly" [img "svg/download"]
     ]
   , focusDiv "window" [ulid "disassemblyList" []]
   ]
@@ -66,7 +67,14 @@ disassembly = divclass
 memory :: BB.Builder
 memory = divclass
   "'memory panel'"
-  [ nav [input "text" "address" 9 "0000"]
+  [ innerNav
+    [input "text" "address" 5 "0000"]
+    [ button "align"  "Align to nearest 8 byte boundary" ["Align"]
+    , button "gotoHL" "Scroll to (HL)"                   ["(HL)"]
+    , button "gotoBC" "Scroll to (BC)"                   ["(BC)"]
+    , button "gotoDE" "Scroll to (DE)"                   ["(DE)"]
+    , button "gotoC"  "Scroll to $FF00 + (C)"            ["(C)"]
+    ]
   , focusDiv
     "window"
     [ divclassid "addressLabels" ["addresses"] []
@@ -84,8 +92,16 @@ listViews = tabs
   ]
 
 stack :: BB.Builder
-stack = divclass "panel" [h 4 "Stack", focusDiv "window" [ulid "stack" []]]
+stack = divclassid
+  "stackPanel"
+  ["panel"]
+  [ button "gotoSP" "Go to current SP" [img "svg/home"]
+  , h 4 "Stack"
+  , focusDiv "window" [ulid "stack" []]
+  ]
 
 backtrace :: BB.Builder
-backtrace =
-  divclass "panel" [h 4 "Backtrace", divclass "'window backtraceWindow'" [ulid "backtrace" []]]
+backtrace = divclassid
+  "backtracePanel"
+  ["panel"]
+  [h 4 "Backtrace", divclass "'window backtraceWindow'" [ulid "backtrace" []]]

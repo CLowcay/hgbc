@@ -402,6 +402,8 @@ reset = do
     writeIORef cpuMode ModeNormal
     writeUnboxedRef cpuCycleClocks 4
     writeIORef haltBug False
+    writeUnboxedRef cpuCallDepth 0
+    Backtrace.reset cpuBacktrace
 
   writeByte P1     0xFF
   writeByte TIMA   0
