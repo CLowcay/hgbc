@@ -1,4 +1,4 @@
-name:                hgbc
+name:                hgbc-core
 version:             0.1.0.0
 github:              "CLowcay/hgbc"
 license:             BSD3
@@ -46,7 +46,7 @@ library:
     - -fcross-module-specialise
 
 tests:
-  hgbc-test:
+  hgbc-core-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -54,5 +54,5 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - hgbc
+    - hgbc-core
     - hspec

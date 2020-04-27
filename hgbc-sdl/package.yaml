@@ -31,7 +31,7 @@ dependencies:
 - filepath
 - hashable
 - hashtables
-- hgbc
+- hgbc-core
 - htoml
 - http-types
 - megaparsec
