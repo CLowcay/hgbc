@@ -58,13 +58,14 @@ keyFlag KeyStart  = 0x08
 {-# INLINE refreshKeypad #-}
 refreshKeypad :: Word8 -> Port Word8 -> Word8 -> Word8 -> IO Word8
 refreshKeypad keypad portIF _ p1 = do
-  let p1' = case (p1 `testBit` 4, p1 `testBit` 5) of
-        (True , False) -> complement keypad .&. 0x0F
-        (False, True ) -> complement (keypad .>>. 4)
+  let keypad' = complement keypad
+      p1'     = case (p1 `testBit` 4, p1 `testBit` 5) of
+        (True , False) -> keypad' .&. 0x0F
+        (False, True ) -> keypad' .>>. 4
         (True , True ) -> 0xFF
-        (False, False) -> 0
-  when (0 /= 0x0F .&. p1 .&. complement p1') (raiseInterrupt portIF InterruptP1Low)
-  pure p1'
+        (False, False) -> (keypad' .&. 0x0F) .|. (keypad' .>>. 4)
+  when (0x0F .&. p1 .&. complement p1' /= 0) (raiseInterrupt portIF InterruptP1Low)
+  pure (0xC0 .|. p1')
 
 keypadPress :: KeypadState -> Key -> IO ()
 keypadPress state@KeypadState {..} key = do
