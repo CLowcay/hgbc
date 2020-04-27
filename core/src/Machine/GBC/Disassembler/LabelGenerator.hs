@@ -1,6 +1,6 @@
 {-# LANGUAGE  OverloadedStrings #-}
 
-module Debugger.LabelGenerator
+module Machine.GBC.Disassembler.LabelGenerator
   ( nextGlobalLabel
   , nextLocalLabel
   )

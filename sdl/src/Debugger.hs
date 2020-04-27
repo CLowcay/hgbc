@@ -24,7 +24,9 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reader
 import           Data.Aeson
-import           Data.Aeson.Encoding            ( list )
+import           Data.Aeson.Encoding            ( list
+                                                , pair
+                                                )
 import           Data.Bifunctor
 import           Data.Char
 import           Data.Either
@@ -41,7 +43,7 @@ import           Data.Traversable
 import           Data.Word
 import           Debugger.HTML
 import           Debugger.Status
-import           Disassembler
+import           Machine.GBC.Disassembler
 import           Machine.GBC                    ( EmulatorState
                                                 , memory
                                                 , getCPUBacktrace
@@ -59,6 +61,7 @@ import           Text.Read
 import qualified Config
 import qualified Control.Concurrent.Async      as Async
 import qualified Data.ByteString               as B
+import qualified Data.ByteString.Short         as SB
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as CB
 import qualified Data.ByteString.Lazy          as LB
@@ -212,7 +215,12 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         (Wai.responseLBS
           HTTP.status200
           [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
-          (encode (uncurry LongAddress <$> backtrace))
+          (   BB.toLazyByteString
+          .   fromEncoding
+          .   list addressToJSON
+          $   uncurry LongAddress
+          <$> backtrace
+          )
         )
 
     ["stack"] -> whenMethodGET $ case Wai.queryString req of
@@ -246,7 +254,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             , (HTTP.hCacheControl   , "no-cache")
             ]
             (";; " <> fromString romFileName <> "\n\n" <> LT.encodeUtf8
-              (generateOutput disassembly labels)
+              (generateOutput disassembly ((fst <$>) . (`HM.lookup` labels)))
             )
           )
 
@@ -264,7 +272,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
                 (Wai.responseLBS
                   HTTP.status200
                   [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
-                  (encode fields)
+                  (BB.toLazyByteString . fromEncoding $ list fieldToJSON fields)
                 )
       _ -> invalidQuery
 
@@ -276,7 +284,9 @@ debugger channel romFileName emulator emulatorState debugState req respond =
             HTTP.status200
             [(HTTP.hContentType, "application/json"), (HTTP.hCacheControl, "no-cache")]
             (BB.toLazyByteString . fromEncoding $ list
-              (\(address, isEnabled) -> pairs ("address" .= address <> "isEnabled" .= isEnabled))
+              (\(address, isEnabled) ->
+                pairs (pair "address" (addressToJSON address) <> "isEnabled" .= isEnabled)
+              )
               bps
             )
           )
@@ -440,13 +450,40 @@ events (DebuggerChannel writeChannel) emulatorState = Wai.responseStream
           <> "}\n\n"
           )
         >> flush
-    pushAddress address = write (BB.lazyByteString (encode address) <> "\n\n") >> flush
+    pushAddress address = write (fromEncoding (addressToJSON address) <> "\n\n") >> flush
+
+addressToJSON :: LongAddress -> Encoding
+addressToJSON (LongAddress bank offset) = pairs ("bank" .= bank <> "offset" .= offset)
 
 labelsToJSON :: [(LongAddress, (T.Text, Editable))] -> Encoding
 labelsToJSON = list
   (\(address, (text, isEditable)) ->
-    pairs ("address" .= address <> "text" .= text <> "isEditable" .= isEditable)
+    pairs (pair "address" (addressToJSON address) <> "text" .= text <> "isEditable" .= isEditable)
   )
+
+parameterToJSON :: Parameter -> Encoding
+parameterToJSON (Constant text) = pairs ("text" .= text)
+parameterToJSON (Address address@(LongAddress _ offset)) =
+  pairs ("text" .= ('$' : formatHex offset) <> pair "address" (addressToJSON address))
+parameterToJSON (AtAddress address@(LongAddress _ offset)) = pairs
+  (  ("text" .= ("($" ++ formatHex offset ++ ")"))
+  <> pair "address" (addressToJSON address)
+  <> ("indirect" .= True)
+  )
+
+fieldToJSON :: Field -> Encoding
+fieldToJSON (Field address bytes overlap fdata) = pairs
+  (  pair "address" (addressToJSON address)
+  <> ("bytes" .= unwords (formatHex <$> SB.unpack bytes))
+  <> ("overlap" .= overlap)
+  <> fdataencoding
+  )
+ where
+  fdataencoding = case fdata of
+    Data                    -> "text" .= ("db" :: T.Text)
+    Instruction0 text       -> "text" .= text <> pair "p" (list id [] :: Encoding)
+    Instruction1 text p1    -> "text" .= text <> pair "p" (list parameterToJSON [p1])
+    Instruction2 text p1 p2 -> "text" .= text <> pair "p" (list parameterToJSON [p1, p2])
 
 debugCSS :: Wai.Response
 debugCSS = Wai.responseLBS

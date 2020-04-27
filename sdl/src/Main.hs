@@ -17,7 +17,7 @@ import           Data.FileEmbed
 import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
-import           Disassembler
+import           Machine.GBC.Disassembler
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Memory             ( getBank )

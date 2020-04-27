@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 351da03f591f68cc0451535ba70475b1478ce2f9f6762dc2f0a0599dbb0600a3
+-- hash: 738c78248cdb7c42fcca22a390b81bd952e62a76399948e0c61db7e24ab0c54a
 
 name:           hgbc-core
 version:        0.1.0.0
@@ -39,6 +39,8 @@ library
       Machine.GBC.CPU.Decode
       Machine.GBC.CPU.Interrupts
       Machine.GBC.CPU.ISA
+      Machine.GBC.Disassembler
+      Machine.GBC.Disassembler.LabelGenerator
       Machine.GBC.DMA
       Machine.GBC.Emulator
       Machine.GBC.Errors
@@ -68,12 +70,15 @@ library
       base >=4.7 && <5
     , binary
     , bytestring
+    , containers
     , directory
     , filepath
+    , hashable
     , mmap
     , mtl
     , primitive
     , resourcet
+    , text
     , time
     , vector
   default-language: Haskell2010
@@ -93,14 +98,17 @@ test-suite hgbc-core-test
       base >=4.7 && <5
     , binary
     , bytestring
+    , containers
     , directory
     , filepath
+    , hashable
     , hgbc-core
     , hspec
     , mmap
     , mtl
     , primitive
     , resourcet
+    , text
     , time
     , vector
   default-language: Haskell2010

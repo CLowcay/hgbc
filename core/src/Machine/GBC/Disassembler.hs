@@ -7,8 +7,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Disassembler
+module Machine.GBC.Disassembler
   ( LongAddress(..)
+  , Parameter(..)
+  , Instruction(..)
   , Field(..)
   , Editable
   , Labels
@@ -30,9 +32,9 @@ where
 import           Control.Category        hiding ( (.) )
 import           Control.Monad.Reader
 import           Control.Monad.State.Strict
-import           Data.Aeson
 import           Data.Bifunctor
 import           Data.Bits
+import           Data.Char
 import           Data.Foldable
 import           Data.Function
 import           Data.Functor
@@ -42,21 +44,19 @@ import           Data.List                      ( intersperse )
 import           Data.Maybe
 import           Data.String
 import           Data.Word
-import           Debugger.LabelGenerator
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
+import           Machine.GBC.Disassembler.LabelGenerator
 import           Machine.GBC.Memory
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( lookup )
 import qualified Data.ByteString.Short         as SB
-import qualified Data.HashMap.Strict           as HM
 import qualified Data.IntMap.Lazy              as IM
 import qualified Data.Text                     as T
 import qualified Data.Text.Lazy                as LT
 import qualified Data.Text.Lazy.Builder        as TB
 import qualified Data.Vector.Storable          as VS
-import           Data.Char
 
 data LongAddress
   = LongAddress !Word16 !Word16
@@ -65,9 +65,6 @@ data LongAddress
 instance Hashable LongAddress where
   hashWithSalt salt (LongAddress bank offset) =
     hashWithSalt salt ((fromIntegral bank .<<. 16) .|. fromIntegral offset :: Int)
-
-instance ToJSON LongAddress where
-  toJSON (LongAddress bank address) = object ["offset" .= address, "bank" .= bank]
 
 addOffset :: Integral a => LongAddress -> a -> LongAddress
 addOffset (LongAddress bank offset0) offset = LongAddress bank (offset0 + fromIntegral offset)
@@ -83,30 +80,12 @@ data Instruction
   | Instruction1 T.Text Parameter
   | Instruction2 T.Text Parameter Parameter
   deriving (Eq, Ord, Show)
+
 data Parameter
   = Constant T.Text
   | Address LongAddress
   | AtAddress LongAddress
   deriving (Eq, Ord, Show)
-
-instance ToJSON Parameter where
-  toJSON (Constant text) = object ["text" .= text]
-  toJSON (Address address@(LongAddress _ offset)) =
-    object ["text" .= ('$' : formatHex offset), "address" .= address]
-  toJSON (AtAddress address@(LongAddress _ offset)) =
-    object ["text" .= ("($" ++ formatHex offset ++ ")"), "address" .= address, "indirect" .= True]
-
-instance ToJSON Field where
-  toJSON (Field address bytes overlap fdata) =
-    object
-      $ ("address" .= address)
-      : ("bytes" .= unwords (formatHex <$> SB.unpack bytes))
-      : ("overlap" .= overlap)
-      : case fdata of
-          Data                    -> ["text" .= ("db" :: T.Text)]
-          Instruction0 text       -> ["text" .= text, "p" .= ([] :: [String])]
-          Instruction1 text p1    -> ["text" .= text, "p" .= [p1]]
-          Instruction2 text p1 p2 -> ["text" .= text, "p" .= [p1, p2]]
 
 fieldAddress :: Field -> LongAddress
 fieldAddress (Field address _ _ _) = address
@@ -232,8 +211,8 @@ lookupN (Disassembly m) n startAddress
   rightList  = snd <$> IM.toAscList r
 
 -- | Generate disassembly.
-generateOutput :: Disassembly -> HM.HashMap LongAddress (T.Text, Bool) -> LT.Text
-generateOutput (Disassembly disassembly) labels =
+generateOutput :: Disassembly -> (LongAddress -> Maybe T.Text) -> LT.Text
+generateOutput (Disassembly disassembly) lookupLabel =
   TB.toLazyText
     . mconcat
     $ map ((<> "\n") . generateLine)
@@ -255,10 +234,10 @@ generateOutput (Disassembly disassembly) labels =
     Address   address -> generateAddressParameter address
     AtAddress address -> "(" <> generateAddressParameter address <> ")"
   generateAddressParameter address@(LongAddress _ offset) =
-    maybe (TB.fromString ('$' : formatHex offset)) (TB.fromText . fst) (HM.lookup address labels)
-  generateLabel address = case HM.lookup address labels of
-    Nothing         -> ""
-    Just (label, _) -> case T.uncons label of
+    maybe (TB.fromString ('$' : formatHex offset)) TB.fromText (lookupLabel address)
+  generateLabel address = case lookupLabel address of
+    Nothing    -> ""
+    Just label -> case T.uncons label of
       Nothing -> ""
       Just (c1, _) ->
         (if isAlphaNum c1 || c1 == '_' then "\n" else "") <> TB.fromText label <> ":\n"

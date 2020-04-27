@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 4c255fe3eb51da262e060760e6f7103778b746d023796e09eb19371be8a61af3
+-- hash: 12380d61acb4a1acfdb187ac7430a8eb3529f849ea6b722154200848f2f7827f
 
 name:           hgbc-sdl
 version:        0.1.0.0
@@ -36,10 +36,8 @@ executable hgbc-sdl
       Debugger.HTML.LCDRegisters
       Debugger.HTML.SoundRegisters
       Debugger.HTML.SystemRegisters
-      Debugger.LabelGenerator
       Debugger.Parser
       Debugger.Status
-      Disassembler
       Emulator
       GLUtils
       Keymap
