@@ -172,10 +172,10 @@ position :: Attribute
 position = Attribute "position" 2 Ints PerVertex KeepInteger
 
 scaleVert :: B.ByteString
-scaleVert = $(embedOneFileOf ["hgbc-sdl/shaders/scale.vert", "shaders/scale.vert"])
+scaleVert = $(embedOneFileOf ["sdl/shaders/scale.vert", "shaders/scale.vert"])
 
 scaleFrag :: B.ByteString
-scaleFrag = $(embedOneFileOf ["hgbc-sdl/shaders/scale.frag", "shaders/scale.frag"])
+scaleFrag = $(embedOneFileOf ["sdl/shaders/scale.frag", "shaders/scale.frag"])
 
 -- | Configure OpenGL.
 setUpOpenGL :: IO GLState
