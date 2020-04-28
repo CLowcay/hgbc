@@ -63,7 +63,7 @@ getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
     in  fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> Config.Config Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start :: FilePath -> Config.Config k Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
 start romFileName Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow

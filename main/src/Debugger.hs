@@ -116,7 +116,7 @@ logError req message = do
 
 start
   :: FilePath
-  -> Config.Config Identity
+  -> Config.Config k Identity
   -> Emulator.Emulator
   -> EmulatorState
   -> DebugState

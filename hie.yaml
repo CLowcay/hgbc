@@ -4,5 +4,7 @@ cradle:
       component: "hgbc-core:test:hgbc-core-test"
     - path: "./core/src"
       component: "hgbc-core:lib"
+    - path: "./main/src"
+      component: "hgbc-main:lib"
     - path: "./sdl/src"
       component: "hgbc-sdl:exe:hgbc-sdl"

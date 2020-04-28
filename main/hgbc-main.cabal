@@ -4,9 +4,9 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a4fa3827ee5e22c8f3b4d535ba9f4b5f4110c148f44ca3b27149dae1a9a1cc49
+-- hash: 9ab9b1e4cfa7a5b5815e0b3cc4a648ecb5262d45ae7e38fedd224c70ccd1154f
 
-name:           hgbc-sdl
+name:           hgbc-main
 version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 homepage:       https://github.com/CLowcay/hgbc#readme
@@ -23,23 +23,26 @@ source-repository head
   type: git
   location: https://github.com/CLowcay/hgbc
 
-executable hgbc-sdl
-  main-is: Main.hs
+library
+  exposed-modules:
+      Config
+      Debugger
+      Debugger.HTML
+      Debugger.HTML.CPURegisters
+      Debugger.HTML.Elements
+      Debugger.HTML.LCDRegisters
+      Debugger.HTML.SoundRegisters
+      Debugger.HTML.SystemRegisters
+      Debugger.Status
+      Emulator
+      Keymap
   other-modules:
-      Audio
-      GLUtils
-      SDL.Extras
-      Thread.EventLoop
-      Thread.LCD
-      Window
-      Paths_hgbc_sdl
+      Paths_hgbc_main
   hs-source-dirs:
       src
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields -Wall-missed-specialisations
   build-depends:
-      OpenGLRaw
-    , StateVar
-    , aeson
+      aeson
     , async
     , base >=4.7 && <5
     , bytestring
@@ -50,15 +53,11 @@ executable hgbc-sdl
     , hashable
     , hashtables
     , hgbc-core
-    , hgbc-main
     , htoml
     , http-types
-    , megaparsec
     , mtl
     , optparse-applicative
-    , parser-combinators
     , resourcet
-    , sdl2
     , stm
     , text
     , time

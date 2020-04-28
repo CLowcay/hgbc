@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -53,7 +54,7 @@ data Options = Options
   , optionFilename        :: FilePath
   }
 
-optionsToConfig :: Options -> Config.Config Maybe
+optionsToConfig :: Ord k => Options -> Config.Config k Maybe
 optionsToConfig Options {..} = mempty { Config.scale           = optionScale
                                       , Config.speed           = optionSpeed
                                       , Config.noVsync         = Just optionNoVsync
@@ -109,7 +110,7 @@ type family HKD f a where
 
 type Palette = (Word32, Word32, Word32, Word32)
 
-data Config f = Config
+data Config k f = Config
   { speed :: HKD f Double
   , scale :: HKD f Int
   , noVsync :: HKD f Bool
@@ -117,20 +118,20 @@ data Config f = Config
   , bootROM :: HKD f (Maybe FilePath)
   , mode :: HKD f (Maybe EmulatorMode)
   , colorCorrection :: HKD f ColorCorrection
-  , keypad :: HKD f Keymap
+  , keypad :: HKD f (Keymap k)
   , backgroundPalette :: HKD f Palette
   , sprite1Palette :: HKD f Palette
   , sprite2Palette :: HKD f Palette
   }
 
-deriving instance Eq (Config Identity)
-deriving instance Ord (Config Identity)
-deriving instance Show (Config Identity)
-deriving instance Eq (Config Maybe)
-deriving instance Ord (Config Maybe)
-deriving instance Show (Config Maybe)
+deriving instance Eq k => Eq (Config k Identity)
+deriving instance Ord k => Ord (Config k Identity)
+deriving instance Show k => Show (Config k Identity)
+deriving instance Eq k => Eq (Config k Maybe)
+deriving instance Ord k => Ord (Config k Maybe)
+deriving instance Show k => Show (Config k Maybe)
 
-instance Semigroup (Config Maybe) where
+instance Ord k => Semigroup (Config k Maybe) where
   left <> right = Config { speed             = lastOf speed
                          , scale             = lastOf scale
                          , noVsync           = lastOf noVsync
@@ -144,40 +145,41 @@ instance Semigroup (Config Maybe) where
                          , sprite2Palette    = lastOf sprite2Palette
                          }
    where
-    lastOf :: (Config Maybe -> Maybe a) -> Maybe a
+    lastOf :: (Config k Maybe -> Maybe a) -> Maybe a
     lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
 
-instance Monoid (Config Maybe) where
+instance Ord k => Monoid (Config k Maybe) where
   mempty =
     Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
-finalize :: Config Maybe -> Config Identity
-finalize Config {..} = Config { speed             = fromMaybe 1 speed
-                              , scale             = fromMaybe 2 scale
-                              , noVsync           = fromMaybe False noVsync
-                              , debugPort         = fromMaybe 8080 debugPort
-                              , bootROM           = bootROM
-                              , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
-                              , mode              = mode
-                              , keypad            = fromMaybe defaultKeymap keypad
-                              , backgroundPalette = fromMaybe defaultPalette backgroundPalette
-                              , sprite1Palette    = fromMaybe defaultPalette sprite1Palette
-                              , sprite2Palette    = fromMaybe defaultPalette sprite2Palette
-                              }
+finalize :: Keymap k -> Config k Maybe -> Config k Identity
+finalize defaultKeymap Config {..} = Config
+  { speed             = fromMaybe 1 speed
+  , scale             = fromMaybe 2 scale
+  , noVsync           = fromMaybe False noVsync
+  , debugPort         = fromMaybe 8080 debugPort
+  , bootROM           = bootROM
+  , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
+  , mode              = mode
+  , keypad            = fromMaybe defaultKeymap keypad
+  , backgroundPalette = fromMaybe defaultPalette backgroundPalette
+  , sprite1Palette    = fromMaybe defaultPalette sprite1Palette
+  , sprite2Palette    = fromMaybe defaultPalette sprite2Palette
+  }
   where defaultPalette = (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
 
-parseConfigFile :: FilePath -> IO (Either [String] (Config Maybe))
-parseConfigFile filename = do
+parseConfigFile :: Ord k => ScancodeDecoder k -> FilePath -> IO (Either [String] (Config k Maybe))
+parseConfigFile decodeScancode filename = do
   rawContents <- B.readFile filename
-  pure (parseConfig filename (T.decodeUtf8With T.lenientDecode rawContents))
+  pure (parseConfig decodeScancode filename (T.decodeUtf8With T.lenientDecode rawContents))
 
-parseConfig :: FilePath -> T.Text -> Either [String] (Config Maybe)
-parseConfig filename contents = case Toml.parseTomlDoc filename contents of
+parseConfig :: Ord k => ScancodeDecoder k -> FilePath -> T.Text -> Either [String] (Config k Maybe)
+parseConfig decodeScancode filename contents = case Toml.parseTomlDoc filename contents of
   Left  parseError -> Left [show parseError]
-  Right table      -> decodeConfig table
+  Right table      -> decodeConfig decodeScancode table
 
-decodeConfig :: Toml.Table -> Either [String] (Config Maybe)
-decodeConfig = decodeTable rootTable
+decodeConfig :: Ord k => ScancodeDecoder k -> Toml.Table -> Either [String] (Config k Maybe)
+decodeConfig decodeScancode = decodeTable rootTable
  where
   rootTable ("speed"     , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
   rootTable ("speed"     , Toml.VFloat f  ) = Right (mempty { speed = Just f })
@@ -193,9 +195,12 @@ decodeConfig = decodeTable rootTable
     v <- first pure (decodeColorCorrection t)
     pure (mempty { colorCorrection = Just v })
   rootTable ("keypad", Toml.VTable keypadTable) =
-    bimap keypadError (\k -> mempty { keypad = Just k }) (decodeKeymap keypadTable)
+    bimap keypadError (setKeymap mempty) (decodeKeymap decodeScancode keypadTable)
   rootTable ("colors", Toml.VTable table) = decodeTable colorTable table
   rootTable (key     , v                ) = Left ["Invalid row " <> show key <> " = " <> show v]
+
+  setKeymap :: Config k Maybe -> Keymap k -> Config k Maybe
+  setKeymap config keymap = config { keypad = Just keymap }
 
   colorTable ("background", Toml.VArray v) = do
     p <- paletteNode =<< decodeArray colorNode v
