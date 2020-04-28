@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML.LCDRegisters
+module HGBC.Debugger.HTML.LCDRegisters
   ( lcdRegisters
   )
 where
 
-import           Debugger.HTML.Elements
+import           HGBC.Debugger.HTML.Elements
 import qualified Data.ByteString.Builder       as BB
 
 lcdRegisters :: BB.Builder

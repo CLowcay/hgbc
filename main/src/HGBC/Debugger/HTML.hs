@@ -1,16 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML
+module HGBC.Debugger.HTML
   ( debugHTML
   )
 where
 
 import           Data.String
-import           Debugger.HTML.CPURegisters
-import           Debugger.HTML.Elements
-import           Debugger.HTML.LCDRegisters
-import           Debugger.HTML.SoundRegisters
-import           Debugger.HTML.SystemRegisters
+import           HGBC.Debugger.HTML.CPURegisters
+import           HGBC.Debugger.HTML.Elements
+import           HGBC.Debugger.HTML.LCDRegisters
+import           HGBC.Debugger.HTML.SoundRegisters
+import           HGBC.Debugger.HTML.SystemRegisters
 import           Prelude                 hiding ( head
                                                 , div
                                                 )

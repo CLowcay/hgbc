@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML.Elements
+module HGBC.Debugger.HTML.Elements
   ( html
   , head
   , title

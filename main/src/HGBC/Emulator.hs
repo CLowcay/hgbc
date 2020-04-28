@@ -1,4 +1,4 @@
-module Emulator
+module HGBC.Emulator
   ( Notification(..)
   , Emulator
   , new

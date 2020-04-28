@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.Status
+module HGBC.Debugger.Status
   ( getStatus
   )
 where

@@ -6,7 +6,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Config
+module HGBC.Config
   ( Config(..)
   , Options(..)
   , optionsToConfig
@@ -24,7 +24,7 @@ import           Data.Either
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Word
-import           Keymap
+import           HGBC.Keymap
 import           Machine.GBC                    ( ColorCorrection(..)
                                                 , EmulatorMode(..)
                                                 )
@@ -54,14 +54,14 @@ data Options = Options
   , optionFilename        :: FilePath
   }
 
-optionsToConfig :: Ord k => Options -> Config.Config k Maybe
-optionsToConfig Options {..} = mempty { Config.scale           = optionScale
-                                      , Config.speed           = optionSpeed
-                                      , Config.noVsync         = Just optionNoVsync
-                                      , Config.debugPort       = optionDebugPort
-                                      , Config.bootROM         = optionBootROM
-                                      , Config.colorCorrection = optionColorCorrection
-                                      , Config.mode            = optionMode
+optionsToConfig :: Ord k => Options -> HGBC.Config.Config k Maybe
+optionsToConfig Options {..} = mempty { HGBC.Config.scale           = optionScale
+                                      , HGBC.Config.speed           = optionSpeed
+                                      , HGBC.Config.noVsync         = Just optionNoVsync
+                                      , HGBC.Config.debugPort       = optionDebugPort
+                                      , HGBC.Config.bootROM         = optionBootROM
+                                      , HGBC.Config.colorCorrection = optionColorCorrection
+                                      , HGBC.Config.mode            = optionMode
                                       }
 
 optionsP :: Parser Options
@@ -138,7 +138,7 @@ instance Ord k => Semigroup (Config k Maybe) where
                          , debugPort         = lastOf debugPort
                          , bootROM           = lastOf bootROM
                          , colorCorrection   = lastOf colorCorrection
-                         , mode              = lastOf Config.mode
+                         , mode              = lastOf HGBC.Config.mode
                          , keypad            = keypad left <> keypad right
                          , backgroundPalette = lastOf backgroundPalette
                          , sprite1Palette    = lastOf sprite1Palette
@@ -190,7 +190,7 @@ decodeConfig decodeScancode = decodeTable rootTable
     Right (mempty { bootROM = Just (T.unpack filename) })
   rootTable ("mode", Toml.VString t) = do
     v <- first pure (decodeMode t)
-    pure (mempty { Config.mode = v })
+    pure (mempty { HGBC.Config.mode = v })
   rootTable ("color-correction", Toml.VString t) = do
     v <- first pure (decodeColorCorrection t)
     pure (mempty { colorCorrection = Just v })

@@ -30,16 +30,16 @@ import           Options.Applicative            ( (<**>) )
 import           System.Directory
 import           System.FilePath
 import qualified Audio
-import qualified Config
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Char8         as BC
 import qualified Data.HashMap.Lazy             as HM
 import qualified Data.HashTable.IO             as H
 import qualified Data.Map.Strict               as M
 import qualified Data.Text                     as T
-import qualified Debugger
-import qualified Emulator
-import qualified Keymap
+import qualified HGBC.Config as Config
+import qualified HGBC.Debugger as Debugger
+import qualified HGBC.Emulator as Emulator
+import qualified HGBC.Keymap as Keymap
 import qualified Machine.GBC.Keypad            as GBC
 import qualified Options.Applicative           as Opt
 import qualified SDL

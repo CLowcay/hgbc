@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML.SoundRegisters
+module HGBC.Debugger.HTML.SoundRegisters
   ( soundRegisters
   )
 where
 
-import           Debugger.HTML.Elements
+import           HGBC.Debugger.HTML.Elements
 import qualified Data.ByteString.Builder       as BB
 
 soundRegisters :: BB.Builder

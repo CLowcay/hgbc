@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML.CPURegisters
+module HGBC.Debugger.HTML.CPURegisters
   ( cpuRegisters
   )
 where
 
-import           Debugger.HTML.Elements
+import           HGBC.Debugger.HTML.Elements
 import qualified Data.ByteString.Builder       as BB
 
 cpuRegisters :: BB.Builder

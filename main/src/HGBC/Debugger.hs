@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Debugger
+module HGBC.Debugger
   ( start
   , sendNotification
   , addNewLabels
@@ -41,8 +41,8 @@ import           Data.Time.Format
 import           Data.Time.LocalTime
 import           Data.Traversable
 import           Data.Word
-import           Debugger.HTML
-import           Debugger.Status
+import           HGBC.Debugger.HTML
+import           HGBC.Debugger.Status
 import           Machine.GBC.Disassembler
 import           Machine.GBC                    ( EmulatorState
                                                 , memory
@@ -58,7 +58,7 @@ import           System.Directory
 import           System.FilePath
 import           System.IO
 import           Text.Read
-import qualified Config
+import qualified HGBC.Config
 import qualified Control.Concurrent.Async      as Async
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Short         as SB
@@ -73,7 +73,7 @@ import qualified Data.Text.Encoding            as T
 import qualified Data.Text.Encoding.Error      as T
 import qualified Data.Text.IO                  as T
 import qualified Data.Text.Lazy.Encoding       as LT
-import qualified Emulator
+import qualified HGBC.Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
 import qualified Network.Wai.Handler.Warp      as Warp
@@ -116,12 +116,12 @@ logError req message = do
 
 start
   :: FilePath
-  -> Config.Config k Identity
-  -> Emulator.Emulator
+  -> HGBC.Config.Config k Identity
+  -> HGBC.Emulator.Emulator
   -> EmulatorState
   -> DebugState
   -> IO DebuggerChannel
-start romFileName Config.Config {..} emulator emulatorState debugState = do
+start romFileName HGBC.Config.Config {..} emulator emulatorState debugState = do
   channel <- DebuggerChannel <$> newBroadcastTChanIO
   void $ forkIO $ Warp.run debugPort
                            (debugger channel romFileName emulator emulatorState debugState)
@@ -130,7 +130,7 @@ start romFileName Config.Config {..} emulator emulatorState debugState = do
 debugger
   :: DebuggerChannel
   -> FilePath
-  -> Emulator.Emulator
+  -> HGBC.Emulator.Emulator
   -> EmulatorState
   -> DebugState
   -> Wai.Application
@@ -147,25 +147,25 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         body <- Wai.lazyRequestBody req
         case HTTP.parseQuery (LB.toStrict body) of
           [("run", _)] -> do
-            Emulator.sendNotification emulator Emulator.PauseNotification
+            HGBC.Emulator.sendNotification emulator HGBC.Emulator.PauseNotification
             pure emptyResponse
           [("step", _)] -> do
-            Emulator.sendNotification emulator Emulator.StepNotification
+            HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepNotification
             pure emptyResponse
           [("stepOver", _)] -> do
-            Emulator.sendNotification emulator Emulator.StepOverNotification
+            HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepOverNotification
             pure emptyResponse
           [("stepOut", _)] -> do
-            Emulator.sendNotification emulator Emulator.StepOutNotification
+            HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepOutNotification
             pure emptyResponse
           [("restart", _)] -> do
-            Emulator.sendNotification emulator Emulator.RestartNotification
+            HGBC.Emulator.sendNotification emulator HGBC.Emulator.RestartNotification
             pure emptyResponse
           [("runTo", _), ("bank", Just bank), ("offset", Just offset)] ->
             case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
               Nothing      -> invalidCommandParamters "runTo"
               Just address -> do
-                Emulator.sendNotification emulator (Emulator.RunToNotification address)
+                HGBC.Emulator.sendNotification emulator (HGBC.Emulator.RunToNotification address)
                 pure emptyResponse
           _ -> invalidCommand ""
       _ -> badMethod

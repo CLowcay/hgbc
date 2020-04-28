@@ -22,7 +22,7 @@ import           GLUtils
 import           Graphics.GL.Core44
 import           Machine.GBC                    ( GraphicsSync(..) )
 import           SDL.Extras
-import qualified Config
+import qualified HGBC.Config
 import qualified Data.ByteString               as B
 import qualified Data.Text                     as T
 import qualified SDL
@@ -63,8 +63,8 @@ getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
     in  fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> Config.Config k Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
-start romFileName Config.Config {..} sync = do
+start :: FilePath -> HGBC.Config.Config k Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start romFileName HGBC.Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
     (windowTitle romFileName False)

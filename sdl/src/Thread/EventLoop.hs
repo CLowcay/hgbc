@@ -9,14 +9,14 @@ import           Machine.GBC                    ( EmulatorState
                                                 , keyUp
                                                 , keyDown
                                                 )
-import           Keymap
-import qualified Emulator
+import           HGBC.Keymap
+import qualified HGBC.Emulator
 import qualified SDL
 import qualified Window
 import           Data.Maybe
 
 -- | Start the event loop.
-start :: Window.Window -> Keymap SDL.Scancode -> Emulator.Emulator -> EmulatorState -> IO ()
+start :: Window.Window -> Keymap SDL.Scancode -> HGBC.Emulator.Emulator -> EmulatorState -> IO ()
 start window keymap emulator emulatorState = void $ forkOS go
  where
   isMainWindow w = if Window.sdlWindow window == w then Just window else Nothing
@@ -31,13 +31,13 @@ start window keymap emulator emulatorState = void $ forkOS go
                 case lookupKey keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
                   Nothing           -> pure ()
                   Just (GBCKey key) -> runReaderT (keyDown key) emulatorState
-                  Just Pause        -> Emulator.sendNotification emulator Emulator.PauseNotification
-                  Just Quit         -> Emulator.sendNotification emulator Emulator.QuitNotification
+                  Just Pause        -> HGBC.Emulator.sendNotification emulator HGBC.Emulator.PauseNotification
+                  Just Quit         -> HGBC.Emulator.sendNotification emulator HGBC.Emulator.QuitNotification
               SDL.Released ->
                 case lookupKey keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
                   Just (GBCKey key) -> runReaderT (keyUp key) emulatorState
                   _                 -> pure ()
-      SDL.QuitEvent -> Emulator.sendNotification emulator Emulator.QuitNotification
+      SDL.QuitEvent -> HGBC.Emulator.sendNotification emulator HGBC.Emulator.QuitNotification
       payload       -> Window.dispatchNotification isMainWindow payload
 
     go

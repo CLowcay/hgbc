@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Debugger.HTML.SystemRegisters
+module HGBC.Debugger.HTML.SystemRegisters
   ( systemRegisters
   )
 where
 
 import           Data.Functor
-import           Debugger.HTML.Elements
+import           HGBC.Debugger.HTML.Elements
 import qualified Data.ByteString.Builder       as BB
 
 systemRegisters :: BB.Builder

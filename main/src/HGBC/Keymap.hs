@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
-module Keymap
+module HGBC.Keymap
   ( Key(..)
   , Modifier(..)
   , Keymap(..)
