@@ -15,9 +15,10 @@ import           Prelude                 hiding ( head
                                                 , div
                                                 )
 import qualified Data.ByteString.Builder       as BB
+import qualified Data.ByteString.Lazy          as LB
 
-debugHTML :: FilePath -> Int -> BB.Builder
-debugHTML romFileName bootROMLimit = html [header, main]
+debugHTML :: FilePath -> Int -> LB.ByteString
+debugHTML romFileName bootROMLimit = BB.toLazyByteString (html [header, main])
  where
   header = head
     [ title (fromString romFileName <> " - hgbc debugger")

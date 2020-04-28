@@ -1,7 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
 module Main
@@ -16,9 +15,7 @@ import           Control.Monad.Identity
 import           Control.Monad.Reader
 import           Control.Monad.Writer.Lazy
 import           Data.Bits
-import           Data.FileEmbed
 import           Data.Foldable
-import           Data.Functor
 import           Data.IORef
 import           Machine.GBC
 import           Machine.GBC.CPU                ( readPC )
@@ -26,7 +23,6 @@ import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
 import           Machine.GBC.ROM
 import           Machine.GBC.Util
-import           Options.Applicative            ( (<**>) )
 import           System.Directory
 import           System.FilePath
 import qualified Audio
@@ -36,69 +32,19 @@ import qualified Data.HashMap.Lazy             as HM
 import qualified Data.HashTable.IO             as H
 import qualified Data.Map.Strict               as M
 import qualified Data.Text                     as T
-import qualified HGBC.Config as Config
-import qualified HGBC.Debugger as Debugger
-import qualified HGBC.Emulator as Emulator
-import qualified HGBC.Keymap as Keymap
+import qualified HGBC.Debugger.Labels          as Labels
+import qualified HGBC.Debugger.Events          as Event
+import qualified HGBC.Config.Paths             as Path
+import qualified HGBC.Config                   as Config
+import qualified HGBC.Config.CommandLine       as CommandLine
+import qualified HGBC.Debugger                 as Debugger
+import qualified HGBC.Emulator                 as Emulator
+import qualified HGBC.Keymap                   as Keymap
 import qualified Machine.GBC.Keypad            as GBC
-import qualified Options.Applicative           as Opt
 import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
 import qualified Window
-
-description :: Opt.ParserInfo Config.Options
-description = Opt.info (Config.optionsP <**> Opt.helper)
-                       (Opt.fullDesc <> Opt.header "hgbc-sdl - a Gameboy Color emulator")
-
-hgbcBaseDir :: IO FilePath
-hgbcBaseDir = getAppUserDataDirectory "hgbc"
-
-getEffectiveConfig :: ROM -> Config.Options -> IO (Config.Config SDL.Scancode Identity)
-getEffectiveConfig rom options = do
-  mainConfig <- getMainConfig
-  romConfig  <- getROMConfig (romPaths rom)
-  pure (Config.finalize defaultKeymap (mainConfig <> romConfig <> Config.optionsToConfig options))
-
-getMainConfig :: IO (Config.Config SDL.Scancode Maybe)
-getMainConfig = do
-  baseDir <- hgbcBaseDir
-  let configFile = baseDir </> "config.toml"
-  exists <- doesFileExist configFile
-  unless exists $ do
-    createDirectoryIfMissing True baseDir
-    B.writeFile configFile $(embedOneFileOf ["data/default.toml", "../data/default.toml"])
-
-  handleConfigErrors configFile =<< Config.parseConfigFile decodeScancode configFile
-
-getROMConfig :: ROMPaths -> IO (Config.Config SDL.Scancode Maybe)
-getROMConfig ROMPaths {..} = do
-  let configFile = takeDirectory romSaveFile </> "config.toml"
-  exists <- doesFileExist configFile
-  if exists
-    then handleConfigErrors configFile =<< Config.parseConfigFile decodeScancode configFile
-    else pure mempty
-
-handleConfigErrors
-  :: FilePath
-  -> Either [String] (Config.Config SDL.Scancode Maybe)
-  -> IO (Config.Config SDL.Scancode Maybe)
-handleConfigErrors _          (Right config) = pure config
-handleConfigErrors configFile (Left  errors) = do
-  putStrLn ("Cannot parse " <> configFile <> ":")
-  for_ errors putStrLn
-  pure mempty
-
-getROMPaths :: FilePath -> IO ROMPaths
-getROMPaths romFile = do
-  baseDir <- hgbcBaseDir <&> (</> "rom")
-  let romDir      = baseDir </> takeBaseName romFile
-  let romSaveFile = romDir </> "battery"
-  let romRTCFile  = romDir </> "rtc"
-  pure ROMPaths { .. }
-
-getLabelsPath :: FilePath -> IO FilePath
-getLabelsPath romFile = hgbcBaseDir <&> (</> "rom" </> takeBaseName romFile)
 
 readBootROMFile :: Maybe FilePath -> IO (Maybe B.ByteString)
 readBootROMFile Nothing            = pure Nothing
@@ -116,56 +62,60 @@ readBootROMFile (Just bootROMFile) = do
 main :: IO ()
 main = do
   SDL.initializeAll
-  allOptions@Config.Options {..} <- Opt.execParser description
-  fileContent                    <- B.readFile optionFilename
-  romPaths                       <- getROMPaths optionFilename
+  (errors, options, romPaths, config) <- Config.configure decodeScancode defaultKeymap
+  fileContent                         <- B.readFile (CommandLine.filename options)
   let (eROM, warnings) = runWriter (runExceptT (parseROM romPaths fileContent))
 
+  unless (null errors) $ for_ errors $ \(fileName, fileErrors) -> do
+    putStrLn ("Errors in " <> fileName)
+    for_ fileErrors $ \err -> putStrLn ("  " <> err)
+
   unless (null warnings) $ do
-    putStrLn ("Some problems were detected in ROM file " <> optionFilename <> ":")
+    putStrLn ("Some problems were detected in ROM file " <> CommandLine.filename options <> ":")
     for_ warnings $ \message -> putStrLn (" - " <> message)
 
   case eROM of
     Left err -> do
-      putStrLn ("Cannot read ROM file " <> optionFilename <> " because:")
+      putStrLn ("Cannot read ROM file " <> CommandLine.filename options <> " because:")
       putStrLn (" - " <> err)
     Right rom -> do
       when (requiresSaveFiles rom)
         $ createDirectoryIfMissing True (takeDirectory (romSaveFile romPaths))
-      emulator rom allOptions
+      emulator rom options config
 
-emulator :: ROM -> Config.Options -> IO ()
-emulator rom allOptions@Config.Options {..} = do
+emulator :: ROM -> CommandLine.Options -> Config.Config SDL.Scancode Identity -> IO ()
+emulator rom options config = do
   dumpROMHeader (romHeader rom)
-  config                <- getEffectiveConfig rom allOptions
   graphicsSync          <- newGraphicsSync
   emulatorChannel       <- Emulator.new
-  (window, frameBuffer) <- LCD.start (takeBaseName optionFilename) config graphicsSync
-  bootROM               <- readBootROMFile (Config.bootROM config)
-  emulatorState         <- initEmulatorState bootROM
-                                             rom
-                                             (Config.mode config)
-                                             (Config.colorCorrection config)
-                                             graphicsSync
-                                             frameBuffer
+  (window, frameBuffer) <- LCD.start (takeBaseName (CommandLine.filename options))
+                                     config
+                                     graphicsSync
+  bootROM       <- readBootROMFile (Config.bootROM config)
+  emulatorState <- initEmulatorState bootROM
+                                     rom
+                                     (Config.mode config)
+                                     (Config.colorCorrection config)
+                                     graphicsSync
+                                     frameBuffer
 
   when (mode emulatorState == DMG) $ do
     writeBgRGBPalette emulatorState 0 (Config.backgroundPalette config)
     writeFgRGBPalette emulatorState 0 (Config.sprite1Palette config)
     writeFgRGBPalette emulatorState 1 (Config.sprite2Palette config)
 
-  audio <- if optionNoSound then pure Nothing else Just <$> Audio.start emulatorState
+  audio <- if CommandLine.noSound options then pure Nothing else Just <$> Audio.start emulatorState
   EventLoop.start window (Config.keypad config) emulatorChannel emulatorState
 
-  let romFileName = takeBaseName optionFilename
+  let romFileName = takeBaseName (CommandLine.filename options)
   disassemblyRef   <- newIORef mempty
   breakpoints      <- H.new
   labelsRef        <- newIORef (HM.fromList initialLabels)
-  bootDebuggerPath <- traverse getLabelsPath (Config.bootROM config)
-  romDebuggerPath  <- getLabelsPath romFileName
+  bootDebuggerPath <- traverse Path.debugState (Config.bootROM config)
+  romDebuggerPath  <- Path.debugState romFileName
   let debugState = Debugger.DebugState { .. }
 
-  debuggerChannel <- if optionDebugMode
+  debuggerChannel <- if CommandLine.debugMode options
     then Just <$> Debugger.start romFileName config emulatorChannel emulatorState debugState
     else pure Nothing
 
@@ -177,18 +127,18 @@ emulator rom allOptions@Config.Options {..} = do
       restoredLabels        <- readIORef labelsRef
       (disassembly, labels) <- disassembleROM (memory emulatorState) (HM.keys restoredLabels)
       writeIORef disassemblyRef disassembly
-      Debugger.addNewLabels debugState channel labels
+      Labels.addFromList debugState channel labels
 
   let pauseAudio  = maybe (pure ()) Audio.pause audio
   let resumeAudio = maybe (pure ()) Audio.resume audio
 
   let notifyPaused = do
         Window.sendNotification window Window.PausedNotification
-        maybe (pure ()) (`Debugger.sendNotification` Debugger.EmulatorPaused) debuggerChannel
+        maybe (pure ()) (`Event.send` Event.EmulatorPaused) debuggerChannel
 
   let notifyResumed = do
         Window.sendNotification window Window.ResumedNotification
-        maybe (pure ()) (`Debugger.sendNotification` Debugger.EmulatorStarted) debuggerChannel
+        maybe (pure ()) (`Event.send` Event.EmulatorStarted) debuggerChannel
 
   let onQuit =
         -- Switch off audio so that the audio callback is not invoked
@@ -202,7 +152,7 @@ emulator rom allOptions@Config.Options {..} = do
       let
         innerEmulatorLoop !steps = do
           step
-          breakRequired <- if optionDebugMode
+          breakRequired <- if CommandLine.debugMode options
             then do
               address <- getCurrentAddress
               updateDisassembly address
@@ -216,7 +166,7 @@ emulator rom allOptions@Config.Options {..} = do
             then pauseAudio >> pauseLoop
             else if steps .&. 0x1FFFFF == 0
               then do
-                when optionStats $ printPerformanceStats emulatorClock now
+                when (CommandLine.stats options) $ printPerformanceStats emulatorClock now
                 emulatorLoop runToAddress level
               else if steps .&. 0xFFFF == 0
                 then do
@@ -261,10 +211,13 @@ emulator rom allOptions@Config.Options {..} = do
           Nothing      -> pure ()
           Just channel -> liftIO $ do
             writeIORef disassemblyRef disassembly'
-            Debugger.addNewLabels debugState channel newLabels
+            Labels.addFromList debugState channel newLabels
 
   runReaderT
-    (reset >> if optionDebugMode then pauseLoop else resumeAudio >> emulatorLoop Nothing Nothing)
+    (reset >> if CommandLine.debugMode options
+      then pauseLoop
+      else resumeAudio >> emulatorLoop Nothing Nothing
+    )
     emulatorState
 
  where

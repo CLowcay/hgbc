@@ -12,10 +12,9 @@ import           Data.Aeson
 import           Data.Bits
 import           Data.Functor
 import           Data.List
-import           Machine.GBC                    ( EmulatorState(..) )
-import           Machine.GBC.Audio
+import           Machine.GBC.Audio              ( AudioState(..) )
 import           Machine.GBC.Audio.Common       ( directReadPorts )
-import           Machine.GBC.Audio.WaveChannel
+import           Machine.GBC.Audio.WaveChannel  ( WaveChannel(..) )
 import           Machine.GBC.CPU
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Graphics           ( GraphicsState(..) )
@@ -27,14 +26,15 @@ import           Prelude                 hiding ( div )
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Lazy          as LBS
 import qualified Data.Vector                   as V
+import qualified Machine.GBC                   as GBC
 
-getStatus :: EmulatorState -> IO LBS.ByteString
+getStatus :: GBC.EmulatorState -> IO LBS.ByteString
 getStatus emulatorState =
   BB.toLazyByteString . fromEncoding . pairs <$> runReaderT go emulatorState
  where
   highlow x = let s = formatHex x in splitAt 2 s
   getBit n x = if x `testBit` n then '1' else '0'
-  go :: ReaderT EmulatorState IO Series
+  go :: ReaderT GBC.EmulatorState IO Series
   go =
     fmap (foldl' (<>) mempty)
       . foldl' (liftA2 (++)) (pure [])
@@ -82,10 +82,10 @@ getStatus emulatorState =
         , field "lyc" formatHex <$> readByte LYC
         , cgbPalette "bcps" <$> readByte BCPS
         , field "bcpd" formatHex
-          <$> liftIO (directReadPort (portBCPD (graphicsState emulatorState)))
+          <$> liftIO (directReadPort (portBCPD (GBC.graphicsState emulatorState)))
         , cgbPalette "ocps" <$> readByte OCPS
         , field "ocpd" formatHex
-          <$> liftIO (directReadPort (portBCPD (graphicsState emulatorState)))
+          <$> liftIO (directReadPort (portBCPD (GBC.graphicsState emulatorState)))
         , audio1
         , audio2
         , audio3
@@ -117,13 +117,13 @@ getStatus emulatorState =
     (rA, rF) <- highlow <$> readR16pp PushPopAF
     pure ["rA" .= rA, "rF" .= rF]
   rPC = do
-    pc <- readPC
+    pc   <- readPC
     bank <- getBank pc
     let (rPCH, rPCL) = highlow pc
     pure ["rPCH" .= rPCH, "rPCL" .= rPCL, "pcBank" .= formatHex bank]
   rSP = do
     sp <- readR16 RegSP
-    let (rSPH, rSPL) = highlow sp 
+    let (rSPH, rSPL) = highlow sp
     pure ["rSPH" .= rSPH, "rSPL" .= rSPL, "sp" .= sp]
   flags = do
     i           <- testIME <&> \ime -> if ime then 'I' else 'i'
@@ -224,10 +224,10 @@ getStatus emulatorState =
     , (name <> "2_1") .= formatHex ((r .>>. 1) .&. 3) !! 1
     , (name <> "0") .= getBit 0 r
     ]
-  waveTable = portWaveTable . channel3 . audioState $ emulatorState
+  waveTable = portWaveTable . channel3 . GBC.audioState $ emulatorState
   audio1    = do
     (nr10, nr11, nr12, nr13raw, nr14) <- liftIO
-      (directReadPorts (channel1 . audioState $ emulatorState))
+      (directReadPorts (channel1 . GBC.audioState $ emulatorState))
     pure
       [ "nr13" .= formatHex nr13raw
       , "nr106_4" .= formatHex ((nr10 .>>. 4) .&. 7) !! 1
@@ -244,7 +244,7 @@ getStatus emulatorState =
       ]
   audio2 = do
     (_, nr21, nr22, nr23raw, nr24) <- liftIO
-      (directReadPorts (channel2 . audioState $ emulatorState))
+      (directReadPorts (channel2 . GBC.audioState $ emulatorState))
     pure
       [ "nr23" .= formatHex nr23raw
       , "nr217_6" .= formatHex (nr21 .>>. 6) !! 1
@@ -258,7 +258,7 @@ getStatus emulatorState =
       ]
   audio3 = do
     (nr30, nr31raw, nr32, nr33raw, nr34) <- liftIO
-      (directReadPorts (channel3 . audioState $ emulatorState))
+      (directReadPorts (channel3 . GBC.audioState $ emulatorState))
     pure
       [ "nr31" .= formatHex nr31raw
       , "nr33" .= formatHex nr33raw
@@ -269,7 +269,8 @@ getStatus emulatorState =
       , "nr342_0" .= formatHex (nr34 .&. 7) !! 1
       ]
   audio4 = do
-    (_, nr41, nr42, nr43, nr44) <- liftIO (directReadPorts (channel4 . audioState $ emulatorState))
+    (_, nr41, nr42, nr43, nr44) <- liftIO
+      (directReadPorts (channel4 . GBC.audioState $ emulatorState))
     pure
       [ "nr415_0" .= formatHex (nr41 .&. 0x3F)
       , "nr427_4" .= head (formatHex nr42)

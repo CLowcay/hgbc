@@ -1,156 +1,95 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module HGBC.Config
   ( Config(..)
-  , Options(..)
-  , optionsToConfig
-  , optionsP
-  , parseConfig
-  , parseConfigFile
-  , finalize
+  , configure
   )
 where
 
-import           Control.Monad.Identity
-import           Data.Bifunctor
-import           Data.Bits
-import           Data.Either
+import           Control.Monad
+import           Data.FileEmbed
+import           Data.Functor.Identity
 import           Data.Maybe
-import           Data.Monoid
-import           Data.Word
-import           HGBC.Keymap
-import           Machine.GBC                    ( ColorCorrection(..)
-                                                , EmulatorMode(..)
+import           HGBC.Config.File
+import           HGBC.Errors
+import           HGBC.Keymap                    ( Keymap
+                                                , ScancodeDecoder
                                                 )
-import           Machine.GBC.Util
-import           Options.Applicative
+import           System.Directory
+import           System.FilePath
 import qualified Data.ByteString               as B
-import qualified Data.HashMap.Strict           as HM
-import qualified Data.Text                     as T
-import qualified Data.Text.Encoding            as T
-import qualified Data.Text.Encoding.Error      as T
-import qualified Data.Text.Read                as T
-import qualified Data.Vector                   as V
-import qualified Text.Toml                     as Toml
-import qualified Text.Toml.Types               as Toml
+import qualified HGBC.Config.CommandLine       as CommandLine
+import qualified HGBC.Config.Paths             as Paths
+import qualified Machine.GBC                   as GBC
 
-data Options = Options
-  { optionDebugMode       :: Bool
-  , optionDebugPort       :: Maybe Int
-  , optionNoSound         :: Bool
-  , optionNoVsync         :: Bool
-  , optionStats           :: Bool
-  , optionScale           :: Maybe Int
-  , optionSpeed           :: Maybe Double
-  , optionColorCorrection :: Maybe ColorCorrection
-  , optionBootROM         :: Maybe FilePath
-  , optionMode            :: Maybe EmulatorMode
-  , optionFilename        :: FilePath
-  }
+-- | Configure HGBC.
+configure
+  :: Ord k
+  => ScancodeDecoder k   -- ^ Platform specific keycode decoder.
+  -> Keymap k            -- ^ Default keymap (platform specific).
+  -> IO (FileParseErrors, CommandLine.Options, GBC.ROMPaths, Config k Identity)
+configure decodeScancode defaultKeymap = do
+  options               <- CommandLine.parse
+  romPaths              <- Paths.romPaths (CommandLine.filename options)
+  (errors0, mainConfig) <- loadMainConfig decodeScancode
+  (errors1, romConfig ) <- loadROMConfig decodeScancode romPaths
+  pure
+    ( errors0 <> errors1
+    , options
+    , romPaths
+    , finalize defaultKeymap (mainConfig <> romConfig <> optionsToConfig options)
+    )
 
-optionsToConfig :: Ord k => Options -> HGBC.Config.Config k Maybe
-optionsToConfig Options {..} = mempty { HGBC.Config.scale           = optionScale
-                                      , HGBC.Config.speed           = optionSpeed
-                                      , HGBC.Config.noVsync         = Just optionNoVsync
-                                      , HGBC.Config.debugPort       = optionDebugPort
-                                      , HGBC.Config.bootROM         = optionBootROM
-                                      , HGBC.Config.colorCorrection = optionColorCorrection
-                                      , HGBC.Config.mode            = optionMode
-                                      }
+-- Load the main configuration file (or create it if it doesn't exist).
+loadMainConfig :: Ord k => ScancodeDecoder k -> IO (FileParseErrors, Config k Maybe)
+loadMainConfig decodeScancode = do
+  baseDir <- Paths.base
+  let configFile = baseDir </> "config.toml"
+  exists <- doesFileExist configFile
+  unless exists $ do
+    createDirectoryIfMissing True baseDir
+    B.writeFile configFile $(embedOneFileOf ["data/default.toml", "../data/default.toml"])
 
-optionsP :: Parser Options
-optionsP =
-  Options
-    <$> switch (long "debug" <> help "Enable the debugger")
-    <*> option
-          (Just <$> auto)
-          (long "debug-port" <> value Nothing <> metavar "DEBUG_PORT" <> help
-            "Port to run the debug server on"
-          )
-    <*> switch (long "no-sound" <> help "Disable audio output")
-    <*> switch (long "no-vsync" <> help "Disable vertical retrace syncrhonization")
-    <*> switch (long "stats" <> help "Show performance information on stdout")
-    <*> option
-          (Just <$> auto)
-          (long "scale" <> value Nothing <> metavar "SCALE" <> help
-            "Default scale factor for video output"
-          )
-    <*> option
-          (Just <$> auto)
-          (long "speed" <> value Nothing <> metavar "SPEED" <> help
-            "Speed as a fraction of normal speed"
-          )
-    <*> option
-          (Just <$> eitherReader (decodeColorCorrection . T.pack))
-          (long "color-correction" <> value Nothing <> metavar "CORRECTION_MODE" <> help
-            "Color correction mode. Recognized values are 'none' and 'default'"
-          )
-    <*> option
-          (Just <$> str)
-          (long "boot-rom" <> value Nothing <> metavar "BOOT_FILE" <> help
-            "Use an optional boot ROM"
-          )
-    <*> option
-          (eitherReader (decodeMode . T.pack))
-          (long "mode" <> value Nothing <> metavar "MODE" <> help
-            "Graphics mode at startup. Can be 'dmg', 'cgb', or 'auto' (default)."
-          )
-    <*> strArgument (metavar "ROM_FILE" <> help "The ROM file to run")
+  handleConfigErrors configFile <$> parseFile decodeScancode configFile
 
-type family HKD f a where
-  HKD Identity a      = a
-  HKD Maybe (Maybe a) = Maybe a
-  HKD f a             = f a
+-- | Load configuration files specific to a particular ROM.
+loadROMConfig :: Ord k => ScancodeDecoder k -> GBC.ROMPaths -> IO (FileParseErrors, Config k Maybe)
+loadROMConfig decodeScancode GBC.ROMPaths {..} = do
+  let configFile = takeDirectory romSaveFile </> "config.toml"
+  exists <- doesFileExist configFile
+  if exists
+    then handleConfigErrors configFile <$> parseFile decodeScancode configFile
+    else pure mempty
 
-type Palette = (Word32, Word32, Word32, Word32)
+handleConfigErrors
+  :: Ord k => FilePath -> Either [String] (Config k Maybe) -> (FileParseErrors, Config k Maybe)
+handleConfigErrors _          (Right config) = ([], config)
+handleConfigErrors configFile (Left  errors) = ([(configFile, errors)], mempty)
 
-data Config k f = Config
-  { speed :: HKD f Double
-  , scale :: HKD f Int
-  , noVsync :: HKD f Bool
-  , debugPort :: HKD f Int
-  , bootROM :: HKD f (Maybe FilePath)
-  , mode :: HKD f (Maybe EmulatorMode)
-  , colorCorrection :: HKD f ColorCorrection
-  , keypad :: HKD f (Keymap k)
-  , backgroundPalette :: HKD f Palette
-  , sprite1Palette :: HKD f Palette
-  , sprite2Palette :: HKD f Palette
-  }
+-- readBootROMFile :: Maybe FilePath -> IO (Maybe B.ByteString)
+-- readBootROMFile Nothing            = pure Nothing
+-- readBootROMFile (Just bootROMFile) = do
+--   mContent <- try (B.readFile bootROMFile)
+--   case mContent of
+--     Left err -> do
+--       putStrLn
+--         ("Cannot load boot ROM file " <> bootROMFile <> ":\n" <> displayException
+--           (err :: IOException)
+--         )
+--       pure Nothing
+--     Right content -> pure (Just content)
 
-deriving instance Eq k => Eq (Config k Identity)
-deriving instance Ord k => Ord (Config k Identity)
-deriving instance Show k => Show (Config k Identity)
-deriving instance Eq k => Eq (Config k Maybe)
-deriving instance Ord k => Ord (Config k Maybe)
-deriving instance Show k => Show (Config k Maybe)
-
-instance Ord k => Semigroup (Config k Maybe) where
-  left <> right = Config { speed             = lastOf speed
-                         , scale             = lastOf scale
-                         , noVsync           = lastOf noVsync
-                         , debugPort         = lastOf debugPort
-                         , bootROM           = lastOf bootROM
-                         , colorCorrection   = lastOf colorCorrection
-                         , mode              = lastOf HGBC.Config.mode
-                         , keypad            = keypad left <> keypad right
-                         , backgroundPalette = lastOf backgroundPalette
-                         , sprite1Palette    = lastOf sprite1Palette
-                         , sprite2Palette    = lastOf sprite2Palette
-                         }
-   where
-    lastOf :: (Config k Maybe -> Maybe a) -> Maybe a
-    lastOf f = getLast . mconcat . fmap Last $ [f left, f right]
-
-instance Ord k => Monoid (Config k Maybe) where
-  mempty =
-    Config Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+optionsToConfig :: Ord k => CommandLine.Options -> Config k Maybe
+optionsToConfig CommandLine.Options {..} = mempty { scale           = scale
+                                                  , speed           = speed
+                                                  , noVsync         = Just noVsync
+                                                  , debugPort       = debugPort
+                                                  , bootROM         = bootROM
+                                                  , colorCorrection = colorCorrection
+                                                  , mode            = mode
+                                                  }
 
 finalize :: Keymap k -> Config k Maybe -> Config k Identity
 finalize defaultKeymap Config {..} = Config
@@ -159,7 +98,7 @@ finalize defaultKeymap Config {..} = Config
   , noVsync           = fromMaybe False noVsync
   , debugPort         = fromMaybe 8080 debugPort
   , bootROM           = bootROM
-  , colorCorrection   = fromMaybe DefaultColorCorrection colorCorrection
+  , colorCorrection   = fromMaybe GBC.DefaultColorCorrection colorCorrection
   , mode              = mode
   , keypad            = fromMaybe defaultKeymap keypad
   , backgroundPalette = fromMaybe defaultPalette backgroundPalette
@@ -167,107 +106,3 @@ finalize defaultKeymap Config {..} = Config
   , sprite2Palette    = fromMaybe defaultPalette sprite2Palette
   }
   where defaultPalette = (0x0f380fff, 0x306230ff, 0x8bac0fff, 0x9bbc0fff)
-
-parseConfigFile :: Ord k => ScancodeDecoder k -> FilePath -> IO (Either [String] (Config k Maybe))
-parseConfigFile decodeScancode filename = do
-  rawContents <- B.readFile filename
-  pure (parseConfig decodeScancode filename (T.decodeUtf8With T.lenientDecode rawContents))
-
-parseConfig :: Ord k => ScancodeDecoder k -> FilePath -> T.Text -> Either [String] (Config k Maybe)
-parseConfig decodeScancode filename contents = case Toml.parseTomlDoc filename contents of
-  Left  parseError -> Left [show parseError]
-  Right table      -> decodeConfig decodeScancode table
-
-decodeConfig :: Ord k => ScancodeDecoder k -> Toml.Table -> Either [String] (Config k Maybe)
-decodeConfig decodeScancode = decodeTable rootTable
- where
-  rootTable ("speed"     , Toml.VInteger i) = Right (mempty { speed = Just (fromIntegral i) })
-  rootTable ("speed"     , Toml.VFloat f  ) = Right (mempty { speed = Just f })
-  rootTable ("scale"     , Toml.VInteger i) = Right (mempty { scale = Just (fromIntegral i) })
-  rootTable ("no-vsync"  , Toml.VBoolean v) = Right (mempty { noVsync = Just v })
-  rootTable ("debug-port", Toml.VInteger i) = Right (mempty { debugPort = Just (fromIntegral i) })
-  rootTable ("boot-rom", Toml.VString filename) =
-    Right (mempty { bootROM = Just (T.unpack filename) })
-  rootTable ("mode", Toml.VString t) = do
-    v <- first pure (decodeMode t)
-    pure (mempty { HGBC.Config.mode = v })
-  rootTable ("color-correction", Toml.VString t) = do
-    v <- first pure (decodeColorCorrection t)
-    pure (mempty { colorCorrection = Just v })
-  rootTable ("keypad", Toml.VTable keypadTable) =
-    bimap keypadError (setKeymap mempty) (decodeKeymap decodeScancode keypadTable)
-  rootTable ("colors", Toml.VTable table) = decodeTable colorTable table
-  rootTable (key     , v                ) = Left ["Invalid row " <> show key <> " = " <> show v]
-
-  setKeymap :: Config k Maybe -> Keymap k -> Config k Maybe
-  setKeymap config keymap = config { keypad = Just keymap }
-
-  colorTable ("background", Toml.VArray v) = do
-    p <- paletteNode =<< decodeArray colorNode v
-    pure (mempty { backgroundPalette = Just p })
-  colorTable ("sprite1", Toml.VArray v) = do
-    p <- paletteNode =<< decodeArray colorNode v
-    pure (mempty { sprite1Palette = Just p })
-  colorTable ("sprite2", Toml.VArray v) = do
-    p <- paletteNode =<< decodeArray colorNode v
-    pure (mempty { sprite2Palette = Just p })
-  colorTable (key, v) = Left ["Invalid row in colors section " <> show key <> " = " <> show v]
-
-  colorNode (Toml.VString t) = decodeColor t
-  colorNode x                = Left ("Expected a color, got " <> show x)
-  paletteNode [c0, c1, c2, c3] = Right (c0, c1, c2, c3)
-  paletteNode x = Left ["A palette must have four colors, not " <> show (length x) <> " colors"]
-
-  keypadError = fmap (\(key, v) -> "Invalid row in keypad section: " <> show key <> " = " <> v)
-
-decodeArray :: (Toml.Node -> Either String a) -> V.Vector Toml.Node -> Either [String] [a]
-decodeArray decode array = case partitionEithers (decode <$> V.toList array) of
-  ([]    , rows) -> Right rows
-  (errors, _   ) -> Left errors
-
-decodeTable
-  :: Monoid a => ((T.Text, Toml.Node) -> Either [String] a) -> Toml.Table -> Either [String] a
-decodeTable decode table = case partitionEithers (decode <$> HM.toList table) of
-  ([]    , rows) -> Right (mconcat rows)
-  (errors, _   ) -> Left (mconcat errors)
-
-decodeMode :: T.Text -> Either String (Maybe EmulatorMode)
-decodeMode "auto" = Right Nothing
-decodeMode "dmg"  = Right (Just DMG)
-decodeMode "cgb"  = Right (Just CGB)
-decodeMode x      = Left ("Unknown graphics mode " <> show x)
-
-decodeColorCorrection :: T.Text -> Either String ColorCorrection
-decodeColorCorrection "none"    = Right NoColorCorrection
-decodeColorCorrection "default" = Right DefaultColorCorrection
-decodeColorCorrection x         = Left ("Unknown color correction mode " <> show x)
-
-decodeColor :: T.Text -> Either String Word32
-decodeColor t = case T.stripPrefix "#" t of
-  Nothing   -> Left "Colors must start with #"
-  Just code -> case T.hexadecimal code of
-    Left  err    -> Left err
-    Right (n, r) -> do
-      when (r /= "") $ Left "Colors must start with # and contain only valid hexadecimal digits."
-      case T.length code of
-        3 -> Right (expand3 n)
-        6 -> Right (expand6 n)
-        8 -> Right n
-        x -> Left ("Colors must have 3, 6, or 8 hexadecimal digits, not " <> show x <> " digits.")
- where
-  expand3 x =
-    let r = x .>>. 8
-        g = (x .>>. 4) .&. 0xF
-        b = x .&. 0xF
-    in  (r .<<. 28)
-          .|. (r .<<. 24)
-          .|. (g .<<. 20)
-          .|. (g .<<. 16)
-          .|. (b .<<. 12)
-          .|. (b .<<. 8)
-          .|. 0xFF
-  expand6 x =
-    let r = x .>>. 16
-        g = (x .>>. 8) .&. 0xFF
-        b = x .&. 0xFF
-    in  (r .<<. 24) .|. (g .<<. 16) .|. (b .<<. 8) .|. 0xFF

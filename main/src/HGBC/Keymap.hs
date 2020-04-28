@@ -6,14 +6,16 @@ module HGBC.Keymap
   , Modifier(..)
   , Keymap(..)
   , ScancodeDecoder
-  , decodeKeymap
-  , lookupKey
+  , lookup
+  , fromList
+  , decode
   )
 where
 
 import           Data.Either
 import           Data.Foldable
 import           Data.Functor
+import           Prelude                 hiding ( lookup )
 import qualified Data.HashMap.Strict           as HM
 import qualified Data.Map.Strict               as M
 import qualified Data.Text                     as T
@@ -42,11 +44,18 @@ instance Ord k => Semigroup (Keymap k) where
 instance Ord k => Monoid (Keymap k) where
   mempty = Keymap mempty
 
+-- | Decode an SDL key symbol into a 'Key'.
+lookup :: Ord k => Keymap k -> (k, [Modifier]) -> Maybe Key
+lookup (Keymap keys) key = M.lookup key keys
+
+-- | Create a keymap from a list
+fromList :: Ord k => [((k, [Modifier]), Key)] -> Keymap k
+fromList = Keymap . M.fromList
 
 -- | Decode a keymap from TOML, returning the keymap or a list of errors. Each
 -- error is a pair of the key that was incorrect and the incorrect value.
-decodeKeymap :: Ord k => ScancodeDecoder k -> Toml.Table -> Either [(String, String)] (Keymap k)
-decodeKeymap decodeScancode table = case partitionEithers (decodeRow <$> HM.toList table) of
+decode :: Ord k => ScancodeDecoder k -> Toml.Table -> Either [(String, String)] (Keymap k)
+decode decodeScancode table = case partitionEithers (decodeRow <$> HM.toList table) of
   ([]    , rows) -> Right (Keymap (M.fromList (concat rows)))
   (errors, _   ) -> Left errors
  where
@@ -74,7 +83,3 @@ decodeKey text = case text of
   "pause"  -> Just Pause
   "quit"   -> Just Quit
   _        -> Nothing
-
--- | Decode an SDL key symbol into a 'Key'.
-lookupKey :: Ord k => Keymap k -> (k, [Modifier]) -> Maybe Key
-lookupKey (Keymap keys) key = M.lookup key keys
