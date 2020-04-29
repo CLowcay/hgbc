@@ -102,24 +102,24 @@ eventLoop :: Double -> WindowContext -> IO ()
 eventLoop extraFrames context@WindowContext {..} = do
   signal <- try (takeMVar (signalWindow sync))
   case signal of
-    Left Window.CloseNotification ->
+    Left Window.Close ->
       -- Drain the signal MVar to prevent the emulator thread from blocking.
       void $ tryTakeMVar (signalWindow sync)
 
-    Left (Window.SizeChangedNotification (SDL.V2 w h)) -> do
+    Left (Window.SizeChanged (SDL.V2 w h)) -> do
       glViewport 0 0 w h
       matrix <- aspectCorrectionMatrix w h
       aspectCorrection glState $= matrix
       glClear GL_COLOR_BUFFER_BIT
       eventLoop extraFrames context
 
-    Left (Window.MovedNotification _) -> eventLoop extraFrames =<< updateFramesPerSync context
+    Left (Window.Moved _) -> eventLoop extraFrames =<< updateFramesPerSync context
 
-    Left Window.PausedNotification    -> do
+    Left Window.Paused    -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName True
       eventLoop extraFrames context
 
-    Left Window.ResumedNotification -> do
+    Left Window.Resumed -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName False
       eventLoop extraFrames context
 

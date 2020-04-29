@@ -1,6 +1,8 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 module HGBC.Debugger.State
   ( DebugState(..)
+  , init
   , saveLabels
   , restoreLabels
   , saveBreakpoints
@@ -8,7 +10,7 @@ module HGBC.Debugger.State
   )
 where
 
-import           Control.Exception              ( bracket )
+import           Control.Exception       hiding ( handle )
 import           Control.Monad
 import           Data.Bifunctor
 import           Data.Either
@@ -17,6 +19,7 @@ import           Data.Functor
 import           Data.IORef
 import           HGBC.Errors
 import           Machine.GBC.Disassembler
+import           Prelude                 hiding ( init )
 import           System.Directory
 import           System.FilePath
 import           System.IO
@@ -25,6 +28,7 @@ import qualified Data.HashMap.Strict           as HM
 import qualified Data.HashTable.IO             as H
 import qualified Data.Text                     as T
 import qualified Data.Text.IO                  as T
+import qualified HGBC.Config.Paths             as Path
 
 data DebugState = DebugState {
     disassemblyRef   :: IORef Disassembly
@@ -35,12 +39,24 @@ data DebugState = DebugState {
   , romDebuggerPath  :: FilePath
 }
 
+-- | Initialize the debugger state.
+init :: FilePath -> Maybe FilePath -> IO DebugState
+init rom bootROM = do
+  let romFileName = takeBaseName rom
+  disassemblyRef   <- newIORef mempty
+  breakpoints      <- H.new
+  labelsRef        <- newIORef (HM.fromList initialLabels)
+  bootDebuggerPath <- traverse Path.debugState bootROM
+  romDebuggerPath  <- Path.debugState romFileName
+  pure DebugState { .. }
+
 labelsFileName :: FilePath
 labelsFileName = "labels"
 
 breakpointsFileName :: FilePath
 breakpointsFileName = "breakpoints"
 
+-- | Persist the state of the debugger labels.
 saveLabels :: DebugState -> IO ()
 saveLabels debugState = do
   labels <- readIORef (labelsRef debugState)
@@ -59,6 +75,7 @@ saveLabels debugState = do
       hClose handle
       renamePath file (labelsPath </> labelsFileName)
 
+-- | Restore the persisted debugger labels.
 restoreLabels :: DebugState -> IO FileParseErrors
 restoreLabels debugState = do
   errors0 <- readLabelsFile (romDebuggerPath debugState </> "labels")
@@ -70,11 +87,16 @@ restoreLabels debugState = do
     exists <- doesFileExist path
     if not exists
       then pure []
-      else withFile path ReadMode $ \handle -> do
-        contents <- hGetContents handle
-        case parseLines contents of
-          Left  errors -> pure [(path, errors)]
-          Right labels -> [] <$ modifyIORef' (labelsRef debugState) (HM.fromList labels `HM.union`)
+      else
+        fmap (either (\e -> [(path, [displayIOException e])]) id)
+        . try
+        $ withFile path ReadMode
+        $ \handle -> do
+            contents <- hGetContents handle
+            case parseLines contents of
+              Left errors -> pure [(path, errors)]
+              Right labels ->
+                [] <$ modifyIORef' (labelsRef debugState) (HM.fromList labels `HM.union`)
   parseLines contents =
     case partitionEithers $ writeError . second parseLine <$> [1 ..] `zip` lines contents of
       ([]    , labels) -> Right labels
@@ -86,6 +108,10 @@ restoreLabels debugState = do
   writeError (i, Nothing) = Left ("error on line " <> show (i :: Int))
   writeError (_, Just a ) = Right a
 
+displayIOException :: IOException -> String
+displayIOException = displayException
+
+-- | Persist the breakpoints state.
 saveBreakpoints :: DebugState -> IO ()
 saveBreakpoints debugState = do
   bps <- H.toList (breakpoints debugState)
@@ -97,17 +123,22 @@ saveBreakpoints debugState = do
     hClose handle
     renamePath file (path </> breakpointsFileName)
 
+-- | Restore the persisted breakpoints.
 restoreBreakpoints :: DebugState -> IO FileParseErrors
 restoreBreakpoints debugState = do
   let path = romDebuggerPath debugState </> breakpointsFileName
   exists <- doesFileExist path
   if not exists
     then pure []
-    else withFile path ReadMode $ \handle -> do
-      contents <- hGetContents handle
-      case parseLines contents of
-        Left  errors -> pure [(path, errors)]
-        Right bps    -> [] <$ for_ bps (uncurry (H.insert (breakpoints debugState)))
+    else
+      fmap (either (\e -> [(path, [displayIOException e])]) id)
+      . try
+      $ withFile path ReadMode
+      $ \handle -> do
+          contents <- hGetContents handle
+          case parseLines contents of
+            Left  errors -> pure [(path, errors)]
+            Right bps    -> [] <$ for_ bps (uncurry (H.insert (breakpoints debugState)))
 
  where
   parseLines contents =

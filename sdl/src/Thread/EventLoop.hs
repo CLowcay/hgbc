@@ -6,7 +6,7 @@ where
 import           Control.Concurrent
 import           Control.Monad.Reader
 import           Data.Maybe
-import qualified HGBC.Emulator
+import qualified HGBC.Emulator                 as Emulator
 import qualified HGBC.Keymap                   as Keymap
 import qualified Machine.GBC                   as GBC
 import qualified SDL
@@ -14,12 +14,8 @@ import qualified Window
 
 -- | Start the event loop.
 start
-  :: Window.Window
-  -> Keymap.Keymap SDL.Scancode
-  -> HGBC.Emulator.Emulator
-  -> GBC.EmulatorState
-  -> IO ()
-start window keymap emulator emulatorState = void $ forkOS go
+  :: Window.Window -> Keymap.Keymap SDL.Scancode -> Emulator.Channel -> GBC.EmulatorState -> IO ()
+start window keymap commandChannel emulatorState = void $ forkOS go
  where
   isMainWindow w = if Window.sdlWindow window == w then Just window else Nothing
   go = do
@@ -33,16 +29,14 @@ start window keymap emulator emulatorState = void $ forkOS go
                 case Keymap.lookup keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
                   Nothing                  -> pure ()
                   Just (Keymap.GBCKey key) -> runReaderT (GBC.keyDown key) emulatorState
-                  Just Keymap.Pause ->
-                    HGBC.Emulator.sendNotification emulator HGBC.Emulator.PauseNotification
-                  Just Keymap.Quit ->
-                    HGBC.Emulator.sendNotification emulator HGBC.Emulator.QuitNotification
+                  Just Keymap.Pause        -> Emulator.send commandChannel Emulator.Pause
+                  Just Keymap.Quit         -> Emulator.send commandChannel Emulator.Quit
               SDL.Released ->
                 case Keymap.lookup keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
                   Just (Keymap.GBCKey key) -> runReaderT (GBC.keyUp key) emulatorState
                   _                        -> pure ()
-      SDL.QuitEvent -> HGBC.Emulator.sendNotification emulator HGBC.Emulator.QuitNotification
-      payload       -> Window.dispatchNotification isMainWindow payload
+      SDL.QuitEvent -> Emulator.send commandChannel Emulator.Quit
+      payload       -> Window.dispatchEvent isMainWindow payload
 
     go
 

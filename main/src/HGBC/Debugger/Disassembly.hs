@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module HGBC.Debugger.Disassembly
-  ( getAll
+  ( get
+  , set
+  , getAll
   , getN
   )
 where
@@ -10,12 +12,18 @@ import           Data.IORef
 import           Data.String
 import           HGBC.Debugger.State
 import           Machine.GBC.Disassembler
-import qualified HGBC.Debugger.JSON as JSON
+import qualified HGBC.Debugger.JSON            as JSON
 import qualified Data.Aeson.Encoding           as JSON
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Lazy.Char8    as LBC
 import qualified Data.HashMap.Strict           as HM
 import qualified Data.Text.Lazy                as LT
+
+get :: DebugState -> IO Disassembly
+get debugState = readIORef (disassemblyRef debugState)
+
+set :: DebugState -> Disassembly -> IO ()
+set debugState disassembly = writeIORef (disassemblyRef debugState) $! disassembly
 
 getAll :: DebugState -> IO LT.Text
 getAll debugState = do

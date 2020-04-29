@@ -4,7 +4,7 @@
 
 module HGBC.Config
   ( Config(..)
-  , configure
+  , load
   )
 where
 
@@ -25,12 +25,12 @@ import qualified HGBC.Config.Paths             as Paths
 import qualified Machine.GBC                   as GBC
 
 -- | Configure HGBC.
-configure
+load
   :: Ord k
   => ScancodeDecoder k   -- ^ Platform specific keycode decoder.
   -> Keymap k            -- ^ Default keymap (platform specific).
-  -> IO (FileParseErrors, CommandLine.Options, GBC.ROMPaths, Config k Identity)
-configure decodeScancode defaultKeymap = do
+  -> IO (FileParseErrors, CommandLine.Options, Config k Identity)
+load decodeScancode defaultKeymap = do
   options               <- CommandLine.parse
   romPaths              <- Paths.romPaths (CommandLine.filename options)
   (errors0, mainConfig) <- loadMainConfig decodeScancode
@@ -38,7 +38,6 @@ configure decodeScancode defaultKeymap = do
   pure
     ( errors0 <> errors1
     , options
-    , romPaths
     , finalize defaultKeymap (mainConfig <> romConfig <> optionsToConfig options)
     )
 

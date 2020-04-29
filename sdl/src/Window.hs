@@ -4,8 +4,8 @@ module Window
   , Notification(..)
   , sdlWindow
   , new
-  , sendNotification
-  , dispatchNotification
+  , send
+  , dispatchEvent
   )
 where
 
@@ -18,11 +18,11 @@ import qualified SDL
 
 -- | Notification of a window event.
 data Notification
-  = CloseNotification                      -- ^ The window was closed.
-  | PausedNotification                     -- ^ The emulator has been paused.
-  | ResumedNotification                    -- ^ The emulator has been resumed.
-  | SizeChangedNotification (SDL.V2 Int32) -- ^ The window size was changed.
-  | MovedNotification (SDL.Point SDL.V2 Int32) -- ^ The window was moved.
+  = Close                      -- ^ The window was closed.
+  | Paused                     -- ^ The emulator has been paused.
+  | Resumed                    -- ^ The emulator has been resumed.
+  | SizeChanged (SDL.V2 Int32) -- ^ The window size was changed.
+  | Moved (SDL.Point SDL.V2 Int32) -- ^ The window was moved.
   deriving (Eq, Ord, Show)
 
 instance Exception Notification
@@ -38,20 +38,19 @@ new :: SDL.Window -> ThreadId -> Window
 new sdlWindow threadId = Window { .. }
 
 -- | Send a 'Notification' to a window.
-sendNotification :: MonadIO m => Window -> Notification -> m ()
-sendNotification window = liftIO . throwTo (threadId window)
+send :: MonadIO m => Window -> Notification -> m ()
+send window = liftIO . throwTo (threadId window)
 
 -- | Convert an SDL 'SDL.Event. into a 'Notification' and dispatch it to the
 -- appropriate 'Window' given a function to lookup the window.
-dispatchNotification :: MonadIO m => (SDL.Window -> Maybe Window) -> SDL.EventPayload -> m ()
-dispatchNotification lookup event = case event of
-  (SDL.WindowClosedEvent (SDL.WindowClosedEventData window)) ->
-    maybeSendNotification (lookup window) CloseNotification
+dispatchEvent :: MonadIO m => (SDL.Window -> Maybe Window) -> SDL.EventPayload -> m ()
+dispatchEvent lookup event = case event of
+  (SDL.WindowClosedEvent (SDL.WindowClosedEventData window)) -> maybeSend (lookup window) Close
   (SDL.WindowSizeChangedEvent (SDL.WindowSizeChangedEventData window size)) ->
-    maybeSendNotification (lookup window) (SizeChangedNotification size)
+    maybeSend (lookup window) (SizeChanged size)
   (SDL.WindowMovedEvent (SDL.WindowMovedEventData window position)) ->
-    maybeSendNotification (lookup window) (MovedNotification position)
+    maybeSend (lookup window) (Moved position)
   _ -> pure ()
  where
-  maybeSendNotification Nothing       _            = pure ()
-  maybeSendNotification (Just window) notification = sendNotification window notification
+  maybeSend Nothing       _            = pure ()
+  maybeSend (Just window) notification = send window notification

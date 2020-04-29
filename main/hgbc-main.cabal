@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cfe54fe5fb7d9f92626a2392fc1c864bd7d66f5332b23b54e330bc315a9c7187
+-- hash: 0ce756ff86e8d0fd33a80afafc2597a6040d4e05b57b8ece5548f1546dddb059
 
 name:           hgbc-main
 version:        0.1.0.0
@@ -33,7 +33,6 @@ library
       HGBC.Debugger
       HGBC.Debugger.Breakpoints
       HGBC.Debugger.Disassembly
-      HGBC.Debugger.Events
       HGBC.Debugger.HTML
       HGBC.Debugger.HTML.CPURegisters
       HGBC.Debugger.HTML.Elements
@@ -45,10 +44,12 @@ library
       HGBC.Debugger.Logging
       HGBC.Debugger.Memory
       HGBC.Debugger.Resources
+      HGBC.Debugger.ROM
       HGBC.Debugger.State
       HGBC.Debugger.Status
       HGBC.Emulator
       HGBC.Errors
+      HGBC.Events
       HGBC.Keymap
   other-modules:
       Paths_hgbc_main

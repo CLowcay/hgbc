@@ -11,53 +11,59 @@ where
 
 import           Control.Concurrent
 import           Control.Monad
-import           Data.Functor.Identity
+import           Control.Monad.Reader
+import           Data.String
 import           HGBC.Debugger.HTML
 import           HGBC.Debugger.Logging
 import           HGBC.Debugger.State
+import           HGBC.Debugger.Status
+import           HGBC.Errors
 import           Machine.GBC                    ( EmulatorState(..) )
+import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
-import           Machine.GBC.Memory             ( bootROMLength )
+import           Machine.GBC.Memory             ( bootROMLength
+                                                , getBank
+                                                )
 import           Text.Read
+import qualified Control.Concurrent.Async      as Async
+import qualified Data.Aeson.Encoding           as JSON
+import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as BC
 import qualified Data.ByteString.Lazy.Char8    as LBC
 import qualified Data.Text.Encoding            as T
 import qualified Data.Text.Encoding.Error      as T
 import qualified Data.Text.Lazy.Encoding       as LT
-import qualified HGBC.Config
 import qualified HGBC.Debugger.Breakpoints     as Breakpoints
 import qualified HGBC.Debugger.Disassembly     as Disassembly
-import qualified HGBC.Debugger.Events          as Event
 import qualified HGBC.Debugger.JSON            as JSON
 import qualified HGBC.Debugger.Labels          as Labels
 import qualified HGBC.Debugger.Memory          as Memory
 import qualified HGBC.Debugger.Resources       as Resource
-import qualified HGBC.Emulator
+import qualified HGBC.Emulator                 as Emulator
+import qualified HGBC.Events                   as Event
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
 import qualified Network.Wai.Handler.Warp      as Warp
 
-start
-  :: FilePath
-  -> HGBC.Config.Config k Identity
-  -> HGBC.Emulator.Emulator
-  -> EmulatorState
-  -> DebugState
-  -> IO Event.Channel
-start romFileName HGBC.Config.Config {..} emulator emulatorState debugState = do
-  channel <- Event.newChannel
-  void $ forkIO $ Warp.run debugPort
-                           (debugger channel romFileName emulator emulatorState debugState)
-  pure channel
+-- | Start the debugger
+start :: Int -> Emulator.RuntimeConfig -> EmulatorState -> IO FileParseErrors
+start debugPort runtimeState@Emulator.RuntimeConfig {..} emulatorState = do
+  r <- restoreState
+  void $ forkIO $ Warp.run debugPort (debugger runtimeState emulatorState)
+  pure r
 
-debugger
-  :: Event.Channel
-  -> FilePath
-  -> HGBC.Emulator.Emulator
-  -> EmulatorState
-  -> DebugState
-  -> Wai.Application
-debugger channel romFileName emulator emulatorState debugState req respond =
+ where
+  restoreState = do
+    w0                    <- restoreBreakpoints debugState
+    w1                    <- restoreLabels debugState
+    restoredLabels        <- map fst <$> Labels.getAsList debugState
+    (disassembly, labels) <- disassembleROM (memory emulatorState) restoredLabels
+    Disassembly.set debugState disassembly
+    Labels.addFromList debugState eventChannel labels
+    pure (w0 ++ w1)
+
+debugger :: Emulator.RuntimeConfig -> EmulatorState -> Wai.Application
+debugger Emulator.RuntimeConfig {..} emulatorState req respond =
   respond =<< case Wai.pathInfo req of
     [] -> case Wai.requestMethod req of
       "GET" -> pure
@@ -68,25 +74,16 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       "POST" -> do
         body <- Wai.lazyRequestBody req
         case HTTP.parseQuery (LBC.toStrict body) of
-          [("run", _)] ->
-            emptyResponse <$ HGBC.Emulator.sendNotification emulator HGBC.Emulator.PauseNotification
-          [("step", _)] ->
-            emptyResponse <$ HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepNotification
-          [("stepOver", _)] ->
-            emptyResponse
-              <$ HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepOverNotification
-          [("stepOut", _)] ->
-            emptyResponse
-              <$ HGBC.Emulator.sendNotification emulator HGBC.Emulator.StepOutNotification
-          [("restart", _)] ->
-            emptyResponse
-              <$ HGBC.Emulator.sendNotification emulator HGBC.Emulator.RestartNotification
+          [("run"     , _)] -> emptyResponse <$ Emulator.send commandChannel Emulator.Pause
+          [("step"    , _)] -> emptyResponse <$ Emulator.send commandChannel Emulator.Step
+          [("stepOver", _)] -> emptyResponse <$ Emulator.send commandChannel Emulator.StepOver
+          [("stepOut" , _)] -> emptyResponse <$ Emulator.send commandChannel Emulator.StepOut
+          [("restart" , _)] -> emptyResponse <$ Emulator.send commandChannel Emulator.Restart
           [("runTo", _), ("bank", Just bank), ("offset", Just offset)] ->
             case LongAddress <$> readMaybeHexText bank <*> readMaybeHexText offset of
-              Nothing      -> invalidCommandParamters "runTo"
-              Just address -> emptyResponse <$ HGBC.Emulator.sendNotification
-                emulator
-                (HGBC.Emulator.RunToNotification address)
+              Nothing -> invalidCommandParamters "runTo"
+              Just address ->
+                emptyResponse <$ Emulator.send commandChannel (Emulator.RunTo address)
           _ -> invalidCommand ""
       _ -> badMethod
 
@@ -153,9 +150,9 @@ debugger channel romFileName emulator emulatorState debugState req respond =
       "POST" -> withAddress $ \address -> do
         body <- Wai.lazyRequestBody req
         case HTTP.parseQuery (LBC.toStrict body) of
-          [("set"    , _)] -> emptyResponse <$ Breakpoints.set debugState channel address
-          [("disable", _)] -> emptyResponse <$ Breakpoints.disable debugState channel address
-          [("unset"  , _)] -> emptyResponse <$ Breakpoints.unset debugState channel address
+          [("set"    , _)] -> emptyResponse <$ Breakpoints.set debugState eventChannel address
+          [("disable", _)] -> emptyResponse <$ Breakpoints.disable debugState eventChannel address
+          [("unset"  , _)] -> emptyResponse <$ Breakpoints.unset debugState eventChannel address
           _                -> invalidCommand "breakpoints"
       _ -> badMethod
 
@@ -165,9 +162,12 @@ debugger channel romFileName emulator emulatorState debugState req respond =
     ["label"] -> withAddress $ \address -> whenMethodPOST $ do
       body <- Wai.lazyRequestBody req
       case HTTP.parseQuery (LBC.toStrict body) of
-        [("update", Just rawText)] -> emptyResponse
-          <$ Labels.update debugState channel address (T.decodeUtf8With T.lenientDecode rawText)
-        [("delete", _)] -> emptyResponse <$ Labels.delete debugState channel address
+        [("update", Just rawText)] -> emptyResponse <$ Labels.update
+          debugState
+          eventChannel
+          address
+          (T.decodeUtf8With T.lenientDecode rawText)
+        [("delete", _)] -> emptyResponse <$ Labels.delete debugState eventChannel address
         _               -> invalidCommand "label"
 
     ["events"] -> whenMethodGET
@@ -175,7 +175,7 @@ debugger channel romFileName emulator emulatorState debugState req respond =
         (Wai.responseStream
           HTTP.status200
           [(HTTP.hContentType, "text/event-stream"), (HTTP.hCacheControl, "no-cache")]
-          (Event.stream channel emulatorState)
+          (eventStream eventChannel emulatorState)
         )
       )
     _ -> resourceNotFound
@@ -218,3 +218,74 @@ debugger channel romFileName emulator emulatorState debugState req respond =
     whenMethodGET (pure (Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "text/css")] content))
   jsResponse content = whenMethodGET
     (pure (Wai.responseLBS HTTP.status200 [(HTTP.hContentType, "application/javascript")] content))
+
+-- | Minimum frequency to send a keep-alive event.
+keepAliveTime :: Int
+keepAliveTime = 60 * 1000000
+
+-- | Delay between updates.
+updateDelay :: Int
+updateDelay = 250000
+
+eventStream :: Event.Channel -> EmulatorState -> (BB.Builder -> IO ()) -> IO () -> IO ()
+eventStream channel emulatorState write flush = do
+  waitEvent <- Event.waitAction channel
+  let
+    continue isPaused = do
+      event <- Async.race (threadDelay (if isPaused then keepAliveTime else updateDelay)) waitEvent
+      case event of
+        Left () -> do
+          if isPaused then write ": keep-alive\n\n" >> flush else pushStatus
+          continue isPaused
+        Right Event.Resumed -> do
+          write "event: started\ndata:\n\n" >> flush
+          continue False
+        Right Event.Paused -> do
+          pushPaused
+          continue True
+        Right (Event.BreakPointSet address) -> do
+          write "event: breakpoint-added\ndata:"
+          pushAddress address
+          continue isPaused
+        Right (Event.BreakPointDisabled address) -> do
+          write "event: breakpoint-disabled\ndata:"
+          pushAddress address
+          continue isPaused
+        Right (Event.BreakPointRemoved address) -> do
+          write "event: breakpoint-removed\ndata:"
+          pushAddress address
+          continue isPaused
+        Right (Event.LabelUpdated labels) -> do
+          write ("event: label-added\ndata:" <> JSON.fromEncoding (JSON.labels labels) <> "\n\n")
+          flush
+          continue isPaused
+        Right (Event.LabelRemoved address) -> do
+          write "event: label-removed\ndata:"
+          pushAddress address
+          continue isPaused
+        _ -> continue isPaused
+
+  pushPaused >> continue True
+
+ where
+  pushStatus = do
+    status <- getStatus emulatorState
+    write ("event: status\ndata:" <> BB.lazyByteString status <> "\n\n") >> flush
+  pushPaused = do
+    pushStatus
+    (bank, pc) <- runReaderT
+      (do
+        pc'   <- readPC
+        bank' <- getBank pc'
+        pure (bank', pc')
+      )
+      emulatorState
+    write
+        (  "event: paused\ndata:{\"bank\":"
+        <> fromString (show bank)
+        <> ",\"offset\":"
+        <> fromString (show pc)
+        <> "}\n\n"
+        )
+      >> flush
+  pushAddress address = write (JSON.fromEncoding (JSON.longAddress address) <> "\n\n") >> flush
