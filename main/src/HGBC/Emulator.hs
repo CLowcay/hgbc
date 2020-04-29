@@ -20,7 +20,6 @@ import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
 import           Data.Bits
-import           Data.ByteString               as B
 import           Data.Functor.Identity
 import           Data.Time.Clock.System
 import           Data.Word
@@ -31,6 +30,7 @@ import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
 import           System.Directory
 import           System.FilePath
+import qualified Data.ByteString               as B
 import qualified HGBC.Config.CommandLine       as CommandLine
 import qualified HGBC.Config.Paths             as Path
 import qualified HGBC.Debugger.Breakpoints     as Breakpoints
@@ -156,21 +156,20 @@ run RuntimeConfig {..} = do
               breakpoint <- liftIO $ Breakpoints.check debugState address
               callDepth  <- GBC.getCPUCallDepth
               pure (Just address == runToAddress || breakpoint || Just callDepth == level)
-            else pure True
+            else pure False
 
           if
             | breakRequired -> pauseLoop
             | steps .&. 0x1FFFFF == 0 -> do
               when showStats $ statisticsUpdate emulatorClock now
               emulatorLoop runToAddress level
-            | steps .&. 0xFFFF == 0 -> do
+            | otherwise -> do
               command <- getCommand commandChannel
               case command of
                 Just Pause   -> pauseLoop
                 Just Quit    -> pure ()
                 Just Restart -> GBC.reset >> innerEmulatorLoop (steps + 1)
                 _            -> innerEmulatorLoop (steps + 1)
-            | otherwise -> innerEmulatorLoop (steps + 1)
     innerEmulatorLoop (1 :: Int)
 
   pauseLoop = do
