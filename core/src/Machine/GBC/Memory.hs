@@ -82,6 +82,7 @@ portOffset = subtract 0xFF00 . fromIntegral
 
 -- | Reset the memory system. If there is no boot ROM, then also run the
 -- supplied boot code.
+{-# INLINABLE resetAndBoot #-}
 resetAndBoot :: HasMemory env => ReaderT env IO () -> ReaderT env IO ()
 resetAndBoot pseudoBootROM = do
   Memory {..} <- asks forMemory
@@ -212,6 +213,7 @@ hasBootROM :: Memory -> Bool
 hasBootROM Memory {..} = isJust bootROM
 
 -- | Get the current bank loaded at the specified address
+{-# INLINABLE getBank #-}
 getBank :: HasMemory env => Word16 -> ReaderT env IO Word16
 getBank address = do
   Memory {..} <- asks forMemory
@@ -301,6 +303,7 @@ dmaToOAM source = do
   where offset base = fromIntegral source - base
 
 -- | Read a byte from memory.
+{-# INLINABLE readByte #-}
 readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
 readByte addr = do
   Memory {..} <- asks forMemory

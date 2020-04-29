@@ -72,13 +72,16 @@ data ROMPaths = ROMPaths
 
 requiresSaveFiles :: ROM -> Bool
 requiresSaveFiles rom =
-  let CartridgeType {..} = cartridgeType (romHeader rom) in hasBackupBattery || mbcType == Just MBC3RTC
+  let CartridgeType {..} = cartridgeType (romHeader rom)
+  in  hasBackupBattery || mbcType == Just MBC3RTC
 
 -- | Parse a ROM file.
+{-# INLINABLE parseROM #-}
 parseROM
-  :: ROMPaths            -- ^ Paths to the ROM files.
+  :: Monad m
+  => ROMPaths            -- ^ Paths to the ROM files.
   -> B.ByteString        -- ^ The ROM file content.
-  -> ExceptT String (Writer [String]) ROM
+  -> ExceptT String (WriterT [String] m) ROM
 parseROM romPaths romContent = do
   when (romContent `B.index` 0x100 /= 0x00) $ tell ["Header check 0x100 failed"]
   when (romContent `B.index` 0x101 /= 0xC3) $ tell ["Header check 0x101 failed"]

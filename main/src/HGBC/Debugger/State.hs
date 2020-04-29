@@ -76,7 +76,7 @@ saveLabels debugState = do
       renamePath file (labelsPath </> labelsFileName)
 
 -- | Restore the persisted debugger labels.
-restoreLabels :: DebugState -> IO FileParseErrors
+restoreLabels :: DebugState -> IO [FileParseErrors]
 restoreLabels debugState = do
   errors0 <- readLabelsFile (romDebuggerPath debugState </> "labels")
   (errors0 <>) <$> case bootDebuggerPath debugState of
@@ -124,7 +124,7 @@ saveBreakpoints debugState = do
     renamePath file (path </> breakpointsFileName)
 
 -- | Restore the persisted breakpoints.
-restoreBreakpoints :: DebugState -> IO FileParseErrors
+restoreBreakpoints :: DebugState -> IO [FileParseErrors]
 restoreBreakpoints debugState = do
   let path = romDebuggerPath debugState </> breakpointsFileName
   exists <- doesFileExist path

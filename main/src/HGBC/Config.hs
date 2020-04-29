@@ -29,7 +29,7 @@ load
   :: Ord k
   => ScancodeDecoder k   -- ^ Platform specific keycode decoder.
   -> Keymap k            -- ^ Default keymap (platform specific).
-  -> IO (FileParseErrors, CommandLine.Options, Config k Identity)
+  -> IO ([FileParseErrors], CommandLine.Options, Config k Identity)
 load decodeScancode defaultKeymap = do
   options               <- CommandLine.parse
   romPaths              <- Paths.romPaths (CommandLine.filename options)
@@ -42,7 +42,7 @@ load decodeScancode defaultKeymap = do
     )
 
 -- Load the main configuration file (or create it if it doesn't exist).
-loadMainConfig :: Ord k => ScancodeDecoder k -> IO (FileParseErrors, Config k Maybe)
+loadMainConfig :: Ord k => ScancodeDecoder k -> IO ([FileParseErrors], Config k Maybe)
 loadMainConfig decodeScancode = do
   baseDir <- Paths.base
   let configFile = baseDir </> "config.toml"
@@ -54,7 +54,8 @@ loadMainConfig decodeScancode = do
   handleConfigErrors configFile <$> parseFile decodeScancode configFile
 
 -- | Load configuration files specific to a particular ROM.
-loadROMConfig :: Ord k => ScancodeDecoder k -> GBC.ROMPaths -> IO (FileParseErrors, Config k Maybe)
+loadROMConfig
+  :: Ord k => ScancodeDecoder k -> GBC.ROMPaths -> IO ([FileParseErrors], Config k Maybe)
 loadROMConfig decodeScancode GBC.ROMPaths {..} = do
   let configFile = takeDirectory romSaveFile </> "config.toml"
   exists <- doesFileExist configFile
@@ -63,22 +64,9 @@ loadROMConfig decodeScancode GBC.ROMPaths {..} = do
     else pure mempty
 
 handleConfigErrors
-  :: Ord k => FilePath -> Either [String] (Config k Maybe) -> (FileParseErrors, Config k Maybe)
+  :: Ord k => FilePath -> Either [String] (Config k Maybe) -> ([FileParseErrors], Config k Maybe)
 handleConfigErrors _          (Right config) = ([], config)
 handleConfigErrors configFile (Left  errors) = ([(configFile, errors)], mempty)
-
--- readBootROMFile :: Maybe FilePath -> IO (Maybe B.ByteString)
--- readBootROMFile Nothing            = pure Nothing
--- readBootROMFile (Just bootROMFile) = do
---   mContent <- try (B.readFile bootROMFile)
---   case mContent of
---     Left err -> do
---       putStrLn
---         ("Cannot load boot ROM file " <> bootROMFile <> ":\n" <> displayException
---           (err :: IOException)
---         )
---       pure Nothing
---     Right content -> pure (Just content)
 
 optionsToConfig :: Ord k => CommandLine.Options -> Config k Maybe
 optionsToConfig CommandLine.Options {..} = mempty { scale           = scale

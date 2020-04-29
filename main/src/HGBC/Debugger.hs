@@ -46,7 +46,7 @@ import qualified Network.Wai                   as Wai
 import qualified Network.Wai.Handler.Warp      as Warp
 
 -- | Start the debugger
-start :: Int -> Emulator.RuntimeConfig -> EmulatorState -> IO FileParseErrors
+start :: Int -> Emulator.RuntimeConfig -> EmulatorState -> IO [FileParseErrors]
 start debugPort runtimeState@Emulator.RuntimeConfig {..} emulatorState = do
   r <- restoreState
   void $ forkIO $ Warp.run debugPort (debugger runtimeState emulatorState)

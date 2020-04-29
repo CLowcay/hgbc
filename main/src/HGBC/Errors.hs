@@ -3,4 +3,4 @@ module HGBC.Errors
   )
 where
 
-type FileParseErrors = [(FilePath, [String])]
+type FileParseErrors = (FilePath, [String])

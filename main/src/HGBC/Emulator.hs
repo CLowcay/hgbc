@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -19,12 +18,14 @@ import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
+import           Data.Bifunctor
 import           Data.Bits
 import           Data.Functor.Identity
 import           Data.Time.Clock.System
 import           Data.Word
 import           Foreign.Ptr
 import           HGBC.Config                    ( Config(..) )
+import           HGBC.Errors
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
@@ -88,31 +89,19 @@ configure options config = do
   debugState     <- DebugState.init (CommandLine.filename options) (bootROM config)
   pure RuntimeConfig { .. }
 
-type Warnings = [String]
-
 -- | Create a 'GBC.EmulatorState'.
 makeEmulatorState
   :: FilePath
   -> Config k Identity
   -> GBC.GraphicsSync
   -> Ptr Word8
-  -> IO (Warnings, Either String GBC.EmulatorState)
+  -> ExceptT FileParseErrors (WriterT [FileParseErrors] IO) GBC.EmulatorState
 makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
-  romPaths                       <- Path.romPaths filename
-  (bootROMWarnings, bootROMData) <- readBootROMFile bootROM
-  eFileContent                   <- try (B.readFile filename)
-  case eFileContent of
-    Left  err         -> pure (bootROMWarnings, Left (convertIOException "Cannot read ROM: " err))
-    Right fileContent -> do
-      let (eROM, romWarnings) = runWriter (runExceptT (GBC.parseROM romPaths fileContent))
-      let allWarnings = bootROMWarnings ++ ((("In " <> filename <> ": ") <>) <$> romWarnings)
-
-      case eROM of
-        Left  err -> pure (allWarnings, Left ("Cannot parse ROM: " <> err))
-        Right rom -> (allWarnings, ) . Right <$> initEmulatorState bootROMData rom
-
- where
-  initEmulatorState bootROMData rom = do
+  romPaths    <- liftIO (Path.romPaths filename)
+  bootROMData <- traverse tryReadFile bootROM
+  fileContent <- tryReadFile filename
+  rom         <- attachFilename filename (GBC.parseROM romPaths fileContent)
+  liftIO $ do
     when (GBC.requiresSaveFiles rom)
       $ createDirectoryIfMissing True (takeDirectory (GBC.romSaveFile (GBC.romPaths rom)))
 
@@ -125,13 +114,13 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
 
     pure s
 
-  readBootROMFile bootROMFile = do
-    eBootData <- try (traverse B.readFile bootROMFile)
-    pure $ case eBootData of
-      Right bootData -> ([], bootData)
-      Left  err      -> ([convertIOException "Cannot read boot ROM file: " err], Nothing)
-
-  convertIOException prefix err = prefix <> displayException (err :: IOException)
+ where
+  attachFilename path = mapExceptT
+    (mapWriterT
+      (fmap (bimap (first (\err -> (path, [err]))) (\errs -> [ (path, errs) | not (null errs) ])))
+    )
+  tryReadFile path = ExceptT (first (convertIOException path) <$> liftIO (try (B.readFile path)))
+  convertIOException path err = (path, [displayException (err :: IOException)])
 
 -- | Run the emulator.  Does not return until the Quit command is sent.
 run :: RuntimeConfig -> ReaderT GBC.EmulatorState IO ()

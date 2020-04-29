@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0ce756ff86e8d0fd33a80afafc2597a6040d4e05b57b8ece5548f1546dddb059
+-- hash: 4975a93e61c380d0ffedb06d34a8c9031c103bc8c25f05cb6afea507fc72837d
 
 name:           hgbc-main
 version:        0.1.0.0
@@ -55,7 +55,7 @@ library
       Paths_hgbc_main
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields -Wall-missed-specialisations
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
   build-depends:
       aeson
     , async

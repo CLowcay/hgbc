@@ -7,6 +7,7 @@ import           Control.Concurrent
 import           Control.Exception              ( displayException )
 import           Control.Monad.Except
 import           Control.Monad.Reader
+import           Control.Monad.Writer
 import           Data.Foldable
 import           Keymap
 import           Machine.GBC.Memory             ( getROMHeader )
@@ -30,32 +31,25 @@ main = do
   (configErrors, options, config) <- Config.load decodeScancode defaultKeymap
   runtimeConfig                   <- Emulator.configure options config
   let romFileName = Emulator.romFileName runtimeConfig
-  graphicsSync               <- GBC.newGraphicsSync
-  (window  , frameBuffer   ) <- LCD.start romFileName config graphicsSync
-  (warnings, eEmulatorState) <- Emulator.makeEmulatorState romFileName
-                                                           config
-                                                           graphicsSync
-                                                           frameBuffer
+  graphicsSync                  <- GBC.newGraphicsSync
+  (window        , frameBuffer) <- LCD.start romFileName config graphicsSync
+  (eEmulatorState, warnings   ) <- runWriterT
+    (runExceptT (Emulator.makeEmulatorState romFileName config graphicsSync frameBuffer))
 
   -- Report errors and warnings.
-  case eEmulatorState of
-    Right _       -> pure ()
-    Left  failure -> putStrLn failure
-
-  for_ warnings     putStrLn
+  either printErrors (const (pure ())) eEmulatorState
+  for_ warnings     printErrors
   for_ configErrors printErrors
 
   -- Run the emulator.
   case eEmulatorState of
     Left  _             -> pure ()
     Right emulatorState -> do
+      when (CommandLine.debugMode options) $ do
+        errors <- Debugger.start (Config.debugPort config) runtimeConfig emulatorState
+        for_ errors printErrors
+
       ROM.dumpHeader (getROMHeader (GBC.memory emulatorState))
-
-      debuggerErrors <- if CommandLine.debugMode options
-        then Debugger.start (Config.debugPort config) runtimeConfig emulatorState
-        else pure []
-
-      for_ debuggerErrors printErrors
 
       EventLoop.start window
                       (Config.keypad config)
@@ -72,7 +66,7 @@ main = do
 
  where
   printErrors (path, errors) = do
-    putStrLn ("Errors in " <> path)
+    putStrLn (show (length errors) ++ " errors in " <> path)
     for_ errors (putStrLn . ("  " <>))
 
   forwardEvents window audio eventChannel = do
