@@ -1,0 +1,70 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 8104a9323a202ebe733ea35dd39df868354f04862b4b81e8686cbe1b8eff206a
+
+name:           hgbc-sdl
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
+homepage:       https://github.com/CLowcay/hgbc#readme
+bug-reports:    https://github.com/CLowcay/hgbc/issues
+author:         Callum Lowcay
+maintainer:     cwslowcay@gmail.com
+copyright:      2019-2020 Callum Lowcay
+license:        BSD3
+build-type:     Simple
+extra-source-files:
+    ../README.md
+
+source-repository head
+  type: git
+  location: https://github.com/CLowcay/hgbc
+
+executable hgbc-sdl
+  main-is: Main.hs
+  other-modules:
+      Audio
+      GLUtils
+      Keymap
+      SDL.Extras
+      Thread.EventLoop
+      Thread.LCD
+      Window
+      Paths_hgbc_sdl
+  hs-source-dirs:
+      src
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
+  build-depends:
+      OpenGLRaw
+    , StateVar
+    , aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , directory
+    , file-embed
+    , filepath
+    , hashable
+    , hashtables
+    , hgbc-core
+    , hgbc-main
+    , htoml
+    , http-types
+    , megaparsec
+    , mtl
+    , optparse-applicative
+    , parser-combinators
+    , resourcet
+    , sdl2
+    , stm
+    , text
+    , time
+    , unordered-containers
+    , vector
+    , wai
+    , warp
+  default-language: Haskell2010

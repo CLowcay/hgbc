@@ -1,0 +1,83 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 4975a93e61c380d0ffedb06d34a8c9031c103bc8c25f05cb6afea507fc72837d
+
+name:           hgbc-main
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
+homepage:       https://github.com/CLowcay/hgbc#readme
+bug-reports:    https://github.com/CLowcay/hgbc/issues
+author:         Callum Lowcay
+maintainer:     cwslowcay@gmail.com
+copyright:      2019-2020 Callum Lowcay
+license:        BSD3
+build-type:     Simple
+extra-source-files:
+    ../README.md
+
+source-repository head
+  type: git
+  location: https://github.com/CLowcay/hgbc
+
+library
+  exposed-modules:
+      HGBC.Config
+      HGBC.Config.CommandLine
+      HGBC.Config.Decode
+      HGBC.Config.File
+      HGBC.Config.Paths
+      HGBC.Debugger
+      HGBC.Debugger.Breakpoints
+      HGBC.Debugger.Disassembly
+      HGBC.Debugger.HTML
+      HGBC.Debugger.HTML.CPURegisters
+      HGBC.Debugger.HTML.Elements
+      HGBC.Debugger.HTML.LCDRegisters
+      HGBC.Debugger.HTML.SoundRegisters
+      HGBC.Debugger.HTML.SystemRegisters
+      HGBC.Debugger.JSON
+      HGBC.Debugger.Labels
+      HGBC.Debugger.Logging
+      HGBC.Debugger.Memory
+      HGBC.Debugger.Resources
+      HGBC.Debugger.ROM
+      HGBC.Debugger.State
+      HGBC.Debugger.Status
+      HGBC.Emulator
+      HGBC.Errors
+      HGBC.Events
+      HGBC.Keymap
+  other-modules:
+      Paths_hgbc_main
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , directory
+    , file-embed
+    , filepath
+    , hashable
+    , hashtables
+    , hgbc-core
+    , htoml
+    , http-types
+    , mtl
+    , optparse-applicative
+    , resourcet
+    , stm
+    , text
+    , time
+    , unordered-containers
+    , vector
+    , wai
+    , warp
+  default-language: Haskell2010

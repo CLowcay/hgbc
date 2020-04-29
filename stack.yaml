@@ -29,8 +29,9 @@ resolver: lts-14.27
 #   - auto-update
 #   - wai
 packages:
-- hgbc
-- hgbc-sdl
+- core
+- main
+- sdl
 # Dependency packages to be pulled from upstream that are not in the resolver.
 # These entries can reference officially published versions as well as
 # forks / in-progress versions pinned to a git hash. For example:
