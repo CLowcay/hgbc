@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.31.2.
+-- This file has been generated from package.yaml by hpack version 0.33.0.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 738c78248cdb7c42fcca22a390b81bd952e62a76399948e0c61db7e24ab0c54a
+-- hash: eaeb62ec49dab7d471e1a3c2ec1e49062a8ce39abdacce53ac7c598605237bdc
 
 name:           hgbc-core
 version:        0.1.0.0
@@ -59,6 +59,7 @@ library
       Machine.GBC.Primitive.UnboxedRef
       Machine.GBC.Registers
       Machine.GBC.ROM
+      Machine.GBC.Serial
       Machine.GBC.Timer
       Machine.GBC.Util
   other-modules:

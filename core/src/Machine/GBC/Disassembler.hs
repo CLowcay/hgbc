@@ -47,7 +47,6 @@ import           Data.Word
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Disassembler.LabelGenerator
-import           Machine.GBC.Memory
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( lookup )
@@ -57,6 +56,7 @@ import qualified Data.Text                     as T
 import qualified Data.Text.Lazy                as LT
 import qualified Data.Text.Lazy.Builder        as TB
 import qualified Data.Vector.Storable          as VS
+import qualified Machine.GBC.Memory            as Memory
 
 data LongAddress
   = LongAddress !Word16 !Word16
@@ -261,23 +261,23 @@ data DisassemblyState = DisassemblyState {
     disassemblyPC          :: !Word16
   , disassemblyBanks       :: !Banks
   , disassemblyBytes       :: ![Word8]
-  , disassemblyMemory      :: !Memory
+  , disassemblyMemory      :: !Memory.State
 }
 
 -- | Get the current memory bank numbers.
-getBanks :: HasMemory env => ReaderT env IO Banks
+getBanks :: Memory.Has env => ReaderT env IO Banks
 getBanks = do
   bankBootLimit <- bootLimit
-  bankROM       <- getBank 0x4000
-  bankRAM       <- getBank 0xA000
-  bankWRAM      <- getBank 0xD000
-  bankVRAM      <- getBank 0x8000
+  bankROM       <- Memory.getBank 0x4000
+  bankRAM       <- Memory.getBank 0xA000
+  bankWRAM      <- Memory.getBank 0xD000
+  bankVRAM      <- Memory.getBank 0x8000
   pure Banks { .. }
  where
   bootLimit = do
-    memory0       <- asks forMemory
-    isBootEnabled <- getBank 0x0000 <&> (== 0xFFFF)
-    pure (if isBootEnabled then fromIntegral (bootROMLength memory0) else 0)
+    memory0       <- asks Memory.forState
+    isBootEnabled <- Memory.getBank 0x0000 <&> (== 0xFFFF)
+    pure (if isBootEnabled then fromIntegral (Memory.bootROMLength memory0) else 0)
 
 -- | Get the current bank associated with an address.
 lookupBank :: Word16 -> Banks -> Word16
@@ -294,21 +294,21 @@ lookupBank offset Banks {..}
   | otherwise       = 0
 
 -- | Check if more disassembly is required at the given address.
-disassemblyRequired :: HasMemory env => LongAddress -> Disassembly -> ReaderT env IO Bool
+disassemblyRequired :: Memory.Has env => LongAddress -> Disassembly -> ReaderT env IO Bool
 disassemblyRequired address@(LongAddress _ pc) disassembly = case lookup disassembly address of
   Nothing                          -> pure True
   Just (Field _ bytes _ fieldData) -> case fieldData of
     Data -> pure True
     _    -> do
-      actualBytes <- traverse readByte (take (SB.length bytes) [pc ..])
+      actualBytes <- traverse Memory.readByte (take (SB.length bytes) [pc ..])
       pure (or (zipWith (/=) actualBytes (SB.unpack bytes)))
 
 -- | Disassemble the ROM currently loaded in memory.
-disassembleROM :: Memory -> [LongAddress] -> IO (Disassembly, Labels)
+disassembleROM :: Memory.State -> [LongAddress] -> IO (Disassembly, Labels)
 disassembleROM memory0 extraRoots = runReaderT
   (disassembleFromRoots
     (bootSubstrate <> substrate)
-    (  (if hasBootROM memory0 then LongAddress 0xFFFF 0 else LongAddress 0 0x100)
+    (  (if Memory.hasBootROM memory0 then LongAddress 0xFFFF 0 else LongAddress 0 0x100)
     :  (   LongAddress 0
        <$> [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60]
        )
@@ -318,13 +318,13 @@ disassembleROM memory0 extraRoots = runReaderT
   memory0
 
  where
-  bootSubstrate = case getBootROMData memory0 of
+  bootSubstrate = case Memory.getBootROMData memory0 of
     Nothing      -> mempty
     Just bootROM -> Disassembly
       (IM.fromList (filter (isAtBootROMAddress . snd) (toData bootROMAddressing bootROM)))
   isAtBootROMAddress (Field (LongAddress bank offset) _ _ _) =
     bank == 0xFFFF && (offset < 0x100 || offset >= 0x200)
-  substrate = Disassembly (IM.fromList (toData romAddressing (getROMData memory0)))
+  substrate = Disassembly (IM.fromList (toData romAddressing (Memory.getROMData memory0)))
   toData addressing rawData =
     zipWith (\address bytes -> (encodeAddress address, Field address (SB.pack bytes) False Data))
             addressing
@@ -425,20 +425,20 @@ initialLabels =
     <> [ (LongAddress 0 (0xFE00 + i * 4), ("OBJ" <> T.pack (show i), False)) | i <- [0 .. 39] ]
 
 -- | Generate disassembly starting at a particular PC.
-disassembleFrom :: HasMemory env => Word16 -> Disassembly -> ReaderT env IO (Disassembly, Labels)
+disassembleFrom :: Memory.Has env => Word16 -> Disassembly -> ReaderT env IO (Disassembly, Labels)
 disassembleFrom pc disassembly = do
-  memory <- asks forMemory
+  memory <- asks Memory.forState
   banks  <- getBanks
   liftIO (disassemble (DisassemblyState pc banks [] memory) disassembly)
 
 -- | Disassemble starting from a list of root addresses.
 disassembleFromRoots
-  :: HasMemory env => Disassembly -> [LongAddress] -> ReaderT env IO (Disassembly, Labels)
+  :: Memory.Has env => Disassembly -> [LongAddress] -> ReaderT env IO (Disassembly, Labels)
 disassembleFromRoots disassembly0 roots = do
-  memory <- asks forMemory
+  memory <- asks Memory.forState
   liftIO (runStateT (foldM (disassembleS memory) disassembly0 roots) [])
  where
-  disassembleS :: Memory -> Disassembly -> LongAddress -> StateT Labels IO Disassembly
+  disassembleS :: Memory.State -> Disassembly -> LongAddress -> StateT Labels IO Disassembly
   disassembleS memory d0 (LongAddress bank pc) = do
     labels       <- get
     (r, labels') <- liftIO (disassemble state0 d0)
@@ -447,12 +447,13 @@ disassembleFromRoots disassembly0 roots = do
    where
     state0 = DisassemblyState
       pc
-      Banks { bankBootLimit = if bank == 0xFFFF then fromIntegral (bootROMLength memory) else 0
-            , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 0
-            , bankRAM       = 0
-            , bankWRAM      = 0
-            , bankVRAM      = 0
-            }
+      Banks
+        { bankBootLimit = if bank == 0xFFFF then fromIntegral (Memory.bootROMLength memory) else 0
+        , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 0
+        , bankRAM       = 0
+        , bankWRAM      = 0
+        , bankVRAM      = 0
+        }
       []
       memory
 
@@ -578,7 +579,7 @@ instance MonadFetch (StateT DisassemblyState IO) where
     let banks' = if pc' == 0x100 && bankBootLimit disassemblyBanks /= 0
           then disassemblyBanks { bankBootLimit = 0 }
           else disassemblyBanks
-    byte <- liftIO (runReaderT (readByteLong bank pc) disassemblyMemory)
+    byte <- liftIO (runReaderT (Memory.readByteLong bank pc) disassemblyMemory)
     put
       (s { disassemblyPC    = pc'
          , disassemblyBanks = banks'

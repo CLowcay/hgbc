@@ -28,7 +28,7 @@ backtrace emulatorState =
   BB.toLazyByteString
     .   JSON.fromEncoding
     .   JSON.list (JSON.longAddress . uncurry LongAddress)
-    <$> runReaderT GBC.getCPUBacktrace emulatorState
+    <$> runReaderT GBC.getBacktrace emulatorState
 
 stackAt :: GBC.EmulatorState -> Word16 -> Int -> IO LBC.ByteString
 stackAt emulatorState offset n = do

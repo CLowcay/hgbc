@@ -1,10 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
 module Machine.GBC.Timer
-  ( TimerState
-  , initTimerState
-  , timerPorts
-  , updateTimer
+  ( State
+  , init
+  , ports
+  , update
   )
 where
 
@@ -17,6 +17,7 @@ import           Machine.GBC.Primitive
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import           Prelude                 hiding ( init )
 
 -- | The TIMA register behaves differently for 2 cycles after it overflows, so
 -- we need to keep track of these states.
@@ -27,7 +28,7 @@ data TIMAState
   deriving (Eq, Ord, Show)
 
 -- | The current state of the timer hardware.
-data TimerState = TimerState {
+data State = State {
     systemDIV    :: !(UnboxedRef Word16)
   , resetDIVRef  :: !(IORef Bool)
   , extraClockRef:: !(IORef Bool)
@@ -43,8 +44,8 @@ data TimerState = TimerState {
 }
 
 -- | Create the initial timer state.
-initTimerState :: IO () -> Port Word8 -> Port Word8 -> IO TimerState
-initTimerState clockAudio portKEY1 portIF = do
+init :: IO () -> Port Word8 -> Port Word8 -> IO State
+init clockAudio portKEY1 portIF = do
   systemDIV     <- newUnboxedRef 0
   resetDIVRef   <- newIORef False
   extraClockRef <- newIORef False
@@ -72,10 +73,10 @@ initTimerState clockAudio portKEY1 portIF = do
     let timerSwitch1 = systemDIV0 .&. timaMask' /= 0 && timerStarted v'
     when (timerSwitch0 && not timerSwitch1) $ writeIORef extraClockRef True
     writeUnboxedRef timaMaskRef timaMask'
-  pure TimerState { .. }
+  pure State { .. }
 
-timerPorts :: TimerState -> [(Word16, Port Word8)]
-timerPorts TimerState {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
+ports :: State -> [(Word16, Port Word8)]
+ports State {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
 
 decodeTimaMask :: Word8 -> Word16
 decodeTimaMask tac = case tac .&. 3 of
@@ -128,8 +129,8 @@ updateClocks timaMask tma timaEnabled = outerLoop
               outerLoop (rif .|. timerInterrupt) tma TIMAReload False False systemClock' cycles'
             TIMAReload -> outerLoop rif tma TIMANormal False False systemClock' cycles'
 
-updateTimer :: TimerState -> Int -> IO ()
-updateTimer TimerState {..} advance = do
+update :: State -> Int -> IO ()
+update State {..} advance = do
   key1 <- directReadPort portKEY1
   let doubleSpeed    = fromIntegral (key1 .>>. 7)
   let audioFrameMask = 0x1000 .<<. doubleSpeed

@@ -15,12 +15,10 @@ import           Data.Int
 import           Data.Maybe
 import           Data.Traversable
 import           Data.Word
-import           Machine.GBC.CPU
 import           Machine.GBC.CPU.Decode
 import           Machine.GBC.CPU.ISA
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.MBC
-import           Machine.GBC.Memory
 import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.ROM
@@ -29,6 +27,8 @@ import           Machine.GBC.Util
 import           Test.Hspec
 import qualified Data.ByteString               as B
 import qualified Data.Vector.Storable          as VS
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Memory            as Memory
 
 spec :: Spec
 spec = do
@@ -64,54 +64,54 @@ blankHeader = Header { startAddress          = 0
                      }
 
 data CPUTestState = CPUTestState {
-    testCPU :: !CPUState
-  , testMemory :: !Memory
+    testCPU :: !CPU.State
+  , testMemory :: !Memory.State
   , extraCycles :: !(IORef Int)
 }
 
-instance HasCPU CPUTestState where
-  forCPUState = testCPU
+instance CPU.Has CPUTestState where
+  forState = testCPU
 
-instance HasMemory CPUTestState where
-  forMemory = testMemory
+instance Memory.Has CPUTestState where
+  forState = testMemory
 
-withNewCPU :: CPUM CPUTestState () -> IO ()
+withNewCPU :: CPU.M CPUTestState () -> IO ()
 withNewCPU computation = mdo
   vram    <- initVRAM NoColorCorrection
   portIF  <- newPort 0x00 0x1F alwaysUpdate
   portIE  <- newPort 0x00 0xFF alwaysUpdate
   mbc     <- nullMBC
   modeRef <- newIORef DMG
-  mem     <- initMemory Nothing
-                        blankROM
-                        blankHeader
-                        mbc
-                        vram
-                        ((IF, portIF) : cpuPorts cpu)
-                        portIE
-                        modeRef
+  mem     <- Memory.init Nothing
+                         blankROM
+                         blankHeader
+                         mbc
+                         vram
+                         ((IF, portIF) : CPU.ports cpu)
+                         portIE
+                         modeRef
   extraCycles <- newIORef 0
-  cpu <- initCPU portIF portIE DMG (\cycles clocksPerCycle -> modifyIORef' extraCycles (+ cycles))
+  cpu <- CPU.init portIF portIE DMG (\cycles clocksPerCycle -> modifyIORef' extraCycles (+ cycles))
   void $ runReaderT checkingFlags $ CPUTestState cpu mem extraCycles
  where
   checkingFlags = for_ [0 .. 15] $ \flags -> do
-    reset
+    CPU.reset
     let flags0 = flags .<<. 4
-    writeF flags0
+    CPU.writeF flags0
     computationWithVerification
-    flags1 <- readF
+    flags1 <- CPU.readF
     liftIO $ flags1 `shouldBe` flags0
 
   computationWithVerification = do
-    registers0 <- getRegisterFile
-    mode0      <- getMode
-    clocks0    <- getCPUCycleClocks
+    registers0 <- CPU.getRegisterFile
+    mode0      <- CPU.getMode
+    clocks0    <- CPU.getCycleClocks
 
-    runCPUM computation
+    CPU.run computation
 
-    registers1 <- getRegisterFile
-    mode1      <- getMode
-    clocks1    <- getCPUCycleClocks
+    registers1 <- CPU.getRegisterFile
+    mode1      <- CPU.getMode
+    clocks1    <- CPU.getCycleClocks
 
     registersConsistent
     liftIO $ do
@@ -120,16 +120,16 @@ withNewCPU computation = mdo
       clocks0 `shouldBe` clocks1
 
   registersConsistent = do
-    bc <- readR16 RegBC
-    de <- readR16 RegDE
-    hl <- readR16 RegHL
-    b  <- readR8 RegB
-    c  <- readR8 RegC
-    d  <- readR8 RegD
-    e  <- readR8 RegE
-    h  <- readR8 RegH
-    l  <- readR8 RegL
-    f  <- readF
+    bc <- CPU.readR16 RegBC
+    de <- CPU.readR16 RegDE
+    hl <- CPU.readR16 RegHL
+    b  <- CPU.readR8 RegB
+    c  <- CPU.readR8 RegC
+    d  <- CPU.readR8 RegD
+    e  <- CPU.readR8 RegE
+    h  <- CPU.readR8 RegH
+    l  <- CPU.readR8 RegL
+    f  <- CPU.readF
     liftIO $ do
       f .&. 0x0F `shouldBe` 0
       fromIntegral (bc .>>. 8) `shouldBe` b
@@ -139,219 +139,219 @@ withNewCPU computation = mdo
       fromIntegral (de .&. 0x00FF) `shouldBe` e
       fromIntegral (hl .&. 0x00FF) `shouldBe` l
 
-alteringRegisters :: [Register8] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringRegisters :: [Register8] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringRegisters rs computation = do
-  registers <- CPUM getRegisterFile
+  registers <- CPU.M CPU.getRegisterFile
   computation
-  CPUM $ for_ rs $ \case
-    RegA -> writeR8 RegA (regA registers)
-    RegB -> writeR8 RegB (regB registers)
-    RegC -> writeR8 RegC (regC registers)
-    RegD -> writeR8 RegD (regD registers)
-    RegE -> writeR8 RegE (regE registers)
-    RegH -> writeR8 RegH (regH registers)
-    RegL -> writeR8 RegL (regL registers)
+  CPU.M $ for_ rs $ \case
+    RegA -> CPU.writeR8 RegA (CPU.regA registers)
+    RegB -> CPU.writeR8 RegB (CPU.regB registers)
+    RegC -> CPU.writeR8 RegC (CPU.regC registers)
+    RegD -> CPU.writeR8 RegD (CPU.regD registers)
+    RegE -> CPU.writeR8 RegE (CPU.regE registers)
+    RegH -> CPU.writeR8 RegH (CPU.regH registers)
+    RegL -> CPU.writeR8 RegL (CPU.regL registers)
 
-alteringSSRegisters :: [Register16] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringSSRegisters :: [Register16] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringSSRegisters rs computation = do
-  registers <- CPUM getRegisterFile
+  registers <- CPU.M CPU.getRegisterFile
   computation
-  CPUM $ for_ rs $ \case
+  CPU.M $ for_ rs $ \case
     RegBC -> do
-      writeR8 RegB (regB registers)
-      writeR8 RegC (regC registers)
+      CPU.writeR8 RegB (CPU.regB registers)
+      CPU.writeR8 RegC (CPU.regC registers)
     RegDE -> do
-      writeR8 RegD (regD registers)
-      writeR8 RegE (regE registers)
+      CPU.writeR8 RegD (CPU.regD registers)
+      CPU.writeR8 RegE (CPU.regE registers)
     RegHL -> do
-      writeR8 RegH (regH registers)
-      writeR8 RegL (regL registers)
-    RegSP -> writeR16 RegSP (regSP registers)
+      CPU.writeR8 RegH (CPU.regH registers)
+      CPU.writeR8 RegL (CPU.regL registers)
+    RegSP -> CPU.writeR16 RegSP (CPU.regSP registers)
 
-alteringQQRegisters :: [RegisterPushPop] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringQQRegisters :: [RegisterPushPop] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringQQRegisters rs computation = do
-  registers <- CPUM getRegisterFile
+  registers <- CPU.M CPU.getRegisterFile
   computation
-  CPUM $ for_ rs $ \case
+  CPU.M $ for_ rs $ \case
     PushPopBC -> do
-      writeR8 RegB (regB registers)
-      writeR8 RegC (regC registers)
+      CPU.writeR8 RegB (CPU.regB registers)
+      CPU.writeR8 RegC (CPU.regC registers)
     PushPopDE -> do
-      writeR8 RegD (regD registers)
-      writeR8 RegE (regE registers)
+      CPU.writeR8 RegD (CPU.regD registers)
+      CPU.writeR8 RegE (CPU.regE registers)
     PushPopHL -> do
-      writeR8 RegH (regH registers)
-      writeR8 RegL (regL registers)
+      CPU.writeR8 RegH (CPU.regH registers)
+      CPU.writeR8 RegL (CPU.regL registers)
     PushPopAF -> do
-      writeR8 RegA (regA registers)
-      writeF (regF registers)
+      CPU.writeR8 RegA (CPU.regA registers)
+      CPU.writeF (CPU.regF registers)
 
-alteringSP :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringSP :: CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringSP computation = do
-  sp <- CPUM $ readR16 RegSP
+  sp <- CPU.M $ CPU.readR16 RegSP
   computation
-  CPUM $ writeR16 RegSP sp
+  CPU.M $ CPU.writeR16 RegSP sp
 
-alteringPC :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringPC :: CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringPC computation = do
-  pc <- CPUM readPC
+  pc <- CPU.M CPU.readPC
   computation
-  CPUM $ writePC pc
+  CPU.M $ CPU.writePC pc
 
-alteringMode :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringMode :: CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringMode computation = do
-  mode0 <- CPUM getMode
+  mode0 <- CPU.M CPU.getMode
   computation
-  CPUM $ setMode mode0
+  CPU.M $ CPU.setMode mode0
 
-alteringCPUCycleClocks :: CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringCPUCycleClocks :: CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringCPUCycleClocks computation = do
-  clocks <- CPUM getCPUCycleClocks
+  clocks <- CPU.M CPU.getCycleClocks
   computation
-  CPUM $ setCPUCycleClocks clocks
+  CPU.M $ CPU.setCycleClocks clocks
 
-alteringFlags :: Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+alteringFlags :: Word8 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 alteringFlags mask computation = do
-  flags0 <- CPUM readF
+  flags0 <- CPU.M CPU.readF
   computation
-  flags1 <- CPUM readF
-  CPUM $ writeF ((flags0 .&. mask) .|. (flags1 .&. complement mask))
+  flags1 <- CPU.M CPU.readF
+  CPU.M $ CPU.writeF ((flags0 .&. mask) .|. (flags1 .&. complement mask))
 
-notAlteringFlags :: Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+notAlteringFlags :: Word8 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 notAlteringFlags mask computation = do
-  flags0 <- CPUM readF
+  flags0 <- CPU.M CPU.readF
   computation
-  flags1 <- CPUM readF
+  flags1 <- CPU.M CPU.readF
   liftIO ((flags1 .&. mask) `shouldBe` (flags0 .&. mask))
 
-withPC :: Word16 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withPC :: Word16 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withPC address computation = do
-  pc0 <- CPUM readPC
-  CPUM $ writePC address
+  pc0 <- CPU.M CPU.readPC
+  CPU.M $ CPU.writePC address
   computation
-  CPUM $ writePC pc0
+  CPU.M $ CPU.writePC pc0
 
-withIME :: Bool -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withIME :: Bool -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withIME ime computation = do
-  ime0 <- CPUM testIME
-  CPUM $ if ime then setIME else clearIME
+  ime0 <- CPU.M CPU.testIME
+  CPU.M $ if ime then CPU.setIME else CPU.clearIME
   computation
-  CPUM $ if ime0 then setIME else clearIME
+  CPU.M $ if ime0 then CPU.setIME else CPU.clearIME
 
-withMode :: CPUMode -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withMode :: CPU.Mode -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withMode mode computation = do
-  mode0 <- CPUM getMode
-  CPUM $ setMode mode
+  mode0 <- CPU.M CPU.getMode
+  CPU.M $ CPU.setMode mode
   computation
-  CPUM $ setMode mode0
+  CPU.M $ CPU.setMode mode0
 
-withExtraCycles :: CPUM CPUTestState () -> CPUM CPUTestState ()
+withExtraCycles :: CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withExtraCycles computation = do
-  CPUTestState _ _ cycles <- CPUM ask
+  CPUTestState _ _ cycles <- CPU.M ask
   liftIO $ writeIORef cycles 0
   computation
 
-withValueAt :: Register16 -> Word16 -> Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValueAt :: Register16 -> Word16 -> Word8 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValueAt ss address value computation = alteringSSRegisters [ss] $ do
-  CPUM $ do
-    writeR16 ss address
-    writeByte address value
+  CPU.M $ do
+    CPU.writeR16 ss address
+    Memory.writeByte address value
   computation
 
-withValue16At :: Register16 -> Word16 -> Word16 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValue16At :: Register16 -> Word16 -> Word16 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValue16At ss address value computation = alteringSSRegisters [ss] $ do
-  CPUM $ do
-    writeR16 ss address
-    writeWord address value
+  CPU.M $ do
+    CPU.writeR16 ss address
+    Memory.writeWord address value
   computation
 
-withValueAtC :: Word8 -> Word8 -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValueAtC :: Word8 -> Word8 -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValueAtC address value computation = alteringRegisters [RegC] $ do
-  CPUM $ do
-    writeR8 RegC address
-    writeByte (0xFF00 + fromIntegral address) value
+  CPU.M $ do
+    CPU.writeR8 RegC address
+    Memory.writeByte (0xFF00 + fromIntegral address) value
   computation
 
-withValuesInRegisters :: [(Register8, Word8)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInRegisters :: [(Register8, Word8)] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValuesInRegisters rvs computation = alteringRegisters (fst <$> rvs) $ do
-  for_ rvs $ \(r, v) -> CPUM $ writeR8 r v
+  for_ rvs $ \(r, v) -> CPU.M $ CPU.writeR8 r v
   computation
 
-withValuesInSSRegisters :: [(Register16, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+withValuesInSSRegisters :: [(Register16, Word16)] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValuesInSSRegisters rvs computation = alteringSSRegisters (fst <$> rvs) $ do
-  for_ rvs $ \(r, v) -> CPUM $ writeR16 r v
+  for_ rvs $ \(r, v) -> CPU.M $ CPU.writeR16 r v
   computation
 
 withValuesInQQRegisters
-  :: [(RegisterPushPop, Word16)] -> CPUM CPUTestState () -> CPUM CPUTestState ()
+  :: [(RegisterPushPop, Word16)] -> CPU.M CPUTestState () -> CPU.M CPUTestState ()
 withValuesInQQRegisters rvs computation = alteringQQRegisters (fst <$> rvs) $ do
-  for_ rvs $ \(r, v) -> CPUM $ writeR16pp r v
+  for_ rvs $ \(r, v) -> CPU.M $ CPU.writeR16pp r v
   computation
 
-setCondition :: ConditionCode -> CPUM CPUTestState ()
-setCondition CondC  = CPUM $ setFlagsMask flagCY flagCY
-setCondition CondNC = CPUM $ setFlagsMask flagCY 0
-setCondition CondZ  = CPUM $ setFlagsMask flagZ flagZ
-setCondition CondNZ = CPUM $ setFlagsMask flagZ 0
+setCondition :: ConditionCode -> CPU.M CPUTestState ()
+setCondition CondC  = CPU.M $ CPU.setFlagsMask CPU.flagCY CPU.flagCY
+setCondition CondNC = CPU.M $ CPU.setFlagsMask CPU.flagCY 0
+setCondition CondZ  = CPU.M $ CPU.setFlagsMask CPU.flagZ CPU.flagZ
+setCondition CondNZ = CPU.M $ CPU.setFlagsMask CPU.flagZ 0
 
-clearCondition :: ConditionCode -> CPUM CPUTestState ()
-clearCondition CondC  = CPUM $ setFlagsMask flagCY 0
-clearCondition CondNC = CPUM $ setFlagsMask flagCY flagCY
-clearCondition CondZ  = CPUM $ setFlagsMask flagZ 0
-clearCondition CondNZ = CPUM $ setFlagsMask flagZ flagZ
+clearCondition :: ConditionCode -> CPU.M CPUTestState ()
+clearCondition CondC  = CPU.M $ CPU.setFlagsMask CPU.flagCY 0
+clearCondition CondNC = CPU.M $ CPU.setFlagsMask CPU.flagCY CPU.flagCY
+clearCondition CondZ  = CPU.M $ CPU.setFlagsMask CPU.flagZ 0
+clearCondition CondNZ = CPU.M $ CPU.setFlagsMask CPU.flagZ CPU.flagZ
 
-registerShouldBe :: Register8 -> Word8 -> CPUM CPUTestState ()
+registerShouldBe :: Register8 -> Word8 -> CPU.M CPUTestState ()
 registerShouldBe r expected = do
-  v <- CPUM $ readR8 r
+  v <- CPU.M $ CPU.readR8 r
   liftIO (v `shouldBe` expected)
 
-register16ShouldBe :: Register16 -> Word16 -> CPUM CPUTestState ()
+register16ShouldBe :: Register16 -> Word16 -> CPU.M CPUTestState ()
 register16ShouldBe r expected = do
-  v <- CPUM $ readR16 r
+  v <- CPU.M $ CPU.readR16 r
   liftIO (v `shouldBe` expected)
 
-registerPPShouldBe :: RegisterPushPop -> Word16 -> CPUM CPUTestState ()
+registerPPShouldBe :: RegisterPushPop -> Word16 -> CPU.M CPUTestState ()
 registerPPShouldBe r expected = do
-  v <- CPUM $ readR16pp r
+  v <- CPU.M $ CPU.readR16pp r
   liftIO (v `shouldBe` expected)
 
-shouldHaveCycles :: CPUM CPUTestState Int -> Int -> CPUM CPUTestState ()
+shouldHaveCycles :: CPU.M CPUTestState Int -> Int -> CPU.M CPUTestState ()
 shouldHaveCycles instruction expectedCycles = do
   cycles <- instruction
   liftIO (cycles `shouldBe` expectedCycles)
 
-atAddressShouldBe :: Word16 -> Word8 -> CPUM CPUTestState ()
+atAddressShouldBe :: Word16 -> Word8 -> CPU.M CPUTestState ()
 atAddressShouldBe address value = do
-  v <- CPUM $ readByte address
+  v <- CPU.M $ Memory.readByte address
   liftIO (v `shouldBe` value)
 
-expectFlags :: Word8 -> Word8 -> CPUM CPUTestState ()
+expectFlags :: Word8 -> Word8 -> CPU.M CPUTestState ()
 expectFlags mask expected = do
-  flags <- CPUM readF
+  flags <- CPU.M CPU.readF
   liftIO ((flags .&. mask) `shouldBe` (expected .&. mask))
 
-expectPC :: Word16 -> CPUM CPUTestState ()
+expectPC :: Word16 -> CPU.M CPUTestState ()
 expectPC expected = do
-  pc <- CPUM readPC
+  pc <- CPU.M CPU.readPC
   liftIO (pc `shouldBe` expected)
 
-expectMode :: CPUMode -> CPUM CPUTestState ()
+expectMode :: CPU.Mode -> CPU.M CPUTestState ()
 expectMode expected = do
-  mode <- CPUM getMode
+  mode <- CPU.M CPU.getMode
   liftIO (mode `shouldBe` expected)
 
-expectCPUCycleClocks :: Int -> CPUM CPUTestState ()
+expectCPUCycleClocks :: Int -> CPU.M CPUTestState ()
 expectCPUCycleClocks expected = do
-  clocks <- CPUM getCPUCycleClocks
+  clocks <- CPU.M CPU.getCycleClocks
   liftIO (clocks `shouldBe` expected)
 
-expectIME :: Bool -> CPUM CPUTestState ()
+expectIME :: Bool -> CPU.M CPUTestState ()
 expectIME expected = do
-  ime <- CPUM testIME
+  ime <- CPU.M CPU.testIME
   liftIO (ime `shouldBe` expected)
 
-expectExtraCycles :: Int -> CPUM CPUTestState ()
-expectExtraCycles expected = CPUM $ do
+expectExtraCycles :: Int -> CPU.M CPUTestState ()
+expectExtraCycles expected = CPU.M $ do
   CPUTestState _ _ cyclesRef <- ask
   liftIO $ do
     cycles <- readIORef cyclesRef
@@ -359,10 +359,10 @@ expectExtraCycles expected = CPUM $ do
 
 buildFlags :: Bool -> Bool -> Bool -> Bool -> Word8
 buildFlags cy h n z =
-  (if cy then flagCY else 0)
-    .|. (if h then flagH else 0)
-    .|. (if n then flagN else 0)
-    .|. (if z then flagZ else 0)
+  (if cy then CPU.flagCY else 0)
+    .|. (if h then CPU.flagH else 0)
+    .|. (if n then CPU.flagN else 0)
+    .|. (if z then CPU.flagZ else 0)
 
 allFlags :: Word8
 allFlags = 0xF0
@@ -498,7 +498,7 @@ loads = do
     $ alteringRegisters [RegA]
     $ withExtraCycles
     $ do
-        CPUM $ writeByte 0xFF80 42
+        CPU.M $ Memory.writeByte 0xFF80 42
         ldan 0x80 `shouldHaveCycles` 2
         expectExtraCycles 1
         RegA `registerShouldBe` 42
@@ -510,7 +510,7 @@ loads = do
     $ withValuesInRegisters [(RegA, 42)]
     $ withExtraCycles
     $ do
-        CPUM $ writeByte 0xFF80 32
+        CPU.M $ Memory.writeByte 0xFF80 32
         ldna 0x80 `shouldHaveCycles` 2
         expectExtraCycles 1
         RegA `registerShouldBe` 42
@@ -522,7 +522,7 @@ loads = do
     $ alteringRegisters [RegA]
     $ withExtraCycles
     $ do
-        CPUM $ writeByte 0xC000 42
+        CPU.M $ Memory.writeByte 0xC000 42
         ldann 0xC000 `shouldHaveCycles` 2
         expectExtraCycles 2
         RegA `registerShouldBe` 42
@@ -534,7 +534,7 @@ loads = do
     $ withValuesInRegisters [(RegA, 42)]
     $ withExtraCycles
     $ do
-        CPUM $ writeByte 0xC000 32
+        CPU.M $ Memory.writeByte 0xC000 32
         ldnna 0xC000 `shouldHaveCycles` 2
         expectExtraCycles 2
         RegA `registerShouldBe` 42
@@ -659,14 +659,15 @@ loads = do
           RegHL `register16ShouldBe` (sp + fromIntegral e)
           let carry  = carryIntoBit 8 sp e (+)
           let carryH = carryIntoBit 4 sp e (+)
-          expectFlags allFlags ((if carry then flagCY else 0) .|. (if carryH then flagH else 0))
+          expectFlags allFlags
+                      ((if carry then CPU.flagCY else 0) .|. (if carryH then CPU.flagH else 0))
 
   describe "LD (nn), SP"
     $ it "Works for LD (C000), SP"
     $ withNewCPU
     $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
     $ do
-        CPUM $ writeWord 0xC000 0101
+        CPU.M $ Memory.writeWord 0xC000 0101
         ldnnSP 0xC000 `shouldHaveCycles` 5
         RegSP `register16ShouldBe` 0xFFF0
         0xC000 `atAddressShouldBe` 0xF0
@@ -715,7 +716,7 @@ arithmetic8 = do
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
           $ do
-              cy <- CPUM $ testFlag flagCY
+              cy <- CPU.M $ CPU.testFlag CPU.flagCY
               adcr r `shouldHaveCycles` 1
               let a = if r == RegA then v else 0x11
               verifyArithmetic8 a v (\x y -> x + y + (if cy then 1 else 0)) False
@@ -726,7 +727,7 @@ arithmetic8 = do
       $ withValuesInRegisters [(RegA, 0x11)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           adcn v `shouldHaveCycles` 2
           verifyArithmetic8 0x11 v (\x y -> x + y + (if cy then 1 else 0)) False
 
@@ -737,7 +738,7 @@ arithmetic8 = do
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           adchl `shouldHaveCycles` 2
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` v
@@ -784,7 +785,7 @@ arithmetic8 = do
           $ withValuesInRegisters [(RegA, 0x11), (r, v)]
           $ alteringFlags allFlags
           $ do
-              cy <- CPUM $ testFlag flagCY
+              cy <- CPU.M $ CPU.testFlag CPU.flagCY
               sbcr r `shouldHaveCycles` 1
               let a = if r == RegA then v else 0x11
               verifyArithmetic8 a v (\x y -> x - y - (if cy then 1 else 0)) True
@@ -795,7 +796,7 @@ arithmetic8 = do
       $ withValuesInRegisters [(RegA, 0x11)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           sbcn v `shouldHaveCycles` 2
           verifyArithmetic8 0x11 v (\x y -> x - y - (if cy then 1 else 0)) True
 
@@ -806,7 +807,7 @@ arithmetic8 = do
       $ withValueAt RegHL 0xC000 v
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           sbchl `shouldHaveCycles` 2
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` v
@@ -823,7 +824,7 @@ arithmetic8 = do
               andr r `shouldHaveCycles` 1
               let expected = v .&. if r == RegA then v else 0x11
               RegA `registerShouldBe` expected
-              expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+              expectFlags allFlags (CPU.flagH .|. (if expected == 0 then CPU.flagZ else 0))
 
   describe "AND A, n" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for AND A, " <> formatHex v)
@@ -834,7 +835,7 @@ arithmetic8 = do
           andn v `shouldHaveCycles` 2
           let expected = v .&. 0x11
           RegA `registerShouldBe` expected
-          expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+          expectFlags allFlags (CPU.flagH .|. (if expected == 0 then CPU.flagZ else 0))
 
   describe "AND A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for AND A, (HL) ; ((HL) = " <> formatHex v <> ")")
@@ -847,7 +848,7 @@ arithmetic8 = do
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` v
           let expected = v .&. 0x11
-          expectFlags allFlags (flagH .|. (if expected == 0 then flagZ else 0))
+          expectFlags allFlags (CPU.flagH .|. (if expected == 0 then CPU.flagZ else 0))
 
   describe "OR A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
@@ -860,7 +861,7 @@ arithmetic8 = do
               orr r `shouldHaveCycles` 1
               let expected = v .|. if r == RegA then v else 0x11
               RegA `registerShouldBe` expected
-              expectFlags allFlags (if expected == 0 then flagZ else 0)
+              expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "OR A, n" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for OR A, " <> formatHex v)
@@ -871,7 +872,7 @@ arithmetic8 = do
           orn v `shouldHaveCycles` 2
           let expected = v .|. 0x11
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if expected == 0 then flagZ else 0)
+          expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "OR A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for OR A, (HL) ; ((HL) = " <> formatHex v <> ")")
@@ -884,7 +885,7 @@ arithmetic8 = do
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` v
           let expected = v .|. 0x11
-          expectFlags allFlags (if expected == 0 then flagZ else 0)
+          expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "XOR A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
@@ -897,7 +898,7 @@ arithmetic8 = do
               xorr r `shouldHaveCycles` 1
               let expected = v `xor` if r == RegA then v else 0x11
               RegA `registerShouldBe` expected
-              expectFlags allFlags (if expected == 0 then flagZ else 0)
+              expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "XOR A, n" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for XOR A, " <> formatHex v)
@@ -908,7 +909,7 @@ arithmetic8 = do
           xorn v `shouldHaveCycles` 2
           let expected = v `xor` 0x11
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if expected == 0 then flagZ else 0)
+          expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "XOR A, (HL)" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for XOR A, (HL) ; ((HL) = " <> formatHex v <> ")")
@@ -921,7 +922,7 @@ arithmetic8 = do
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` v
           let expected = v `xor` 0x11
-          expectFlags allFlags (if expected == 0 then flagZ else 0)
+          expectFlags allFlags (if expected == 0 then CPU.flagZ else 0)
 
   describe "CP A, r"
     $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ]
@@ -960,19 +961,19 @@ arithmetic8 = do
     it ("Works for INC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
-      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
       $ do
           incr r `shouldHaveCycles` 1
           let expected = v + 1
           r `registerShouldBe` expected
-          expectFlags (flagH .|. flagN .|. flagZ)
+          expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                       (buildFlags False (carryIntoBit 4 v (1 :: Word8) (+)) False (expected == 0))
 
   describe "INC (HL)" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for INC (HL) ; ((HL) = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
-      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
       $ withExtraCycles
       $ do
           inchl `shouldHaveCycles` 2
@@ -980,26 +981,26 @@ arithmetic8 = do
           let expected = v + 1
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` expected
-          expectFlags (flagH .|. flagN .|. flagZ)
+          expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                       (buildFlags False (carryIntoBit 4 v (1 :: Word8) (+)) False (expected == 0))
 
   describe "DEC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
     it ("Works for DEC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValuesInRegisters [(r, v)]
-      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
       $ do
           decr r `shouldHaveCycles` 1
           let expected = v - 1
           r `registerShouldBe` expected
-          expectFlags (flagH .|. flagN .|. flagZ)
+          expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                       (buildFlags False (carryIntoBit 4 v (1 :: Word8) (-)) True (expected == 0))
 
   describe "DEC (HL)" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for DEC (HL) ; ((HL) = " <> formatHex v <> ")")
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
-      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
       $ withExtraCycles
       $ do
           dechl `shouldHaveCycles` 2
@@ -1007,17 +1008,17 @@ arithmetic8 = do
           let expected = v - 1
           RegHL `register16ShouldBe` 0xC000
           0xC000 `atAddressShouldBe` expected
-          expectFlags (flagH .|. flagN .|. flagZ)
+          expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                       (buildFlags False (carryIntoBit 4 v (1 :: Word8) (-)) True (expected == 0))
 
-verifyArithmetic8 :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPUM CPUTestState ()
+verifyArithmetic8 :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPU.M CPUTestState ()
 verifyArithmetic8 a v op n = do
   let expected = fromIntegral (fromIntegral a `op` fromIntegral v)
   RegA `registerShouldBe` expected
   verifyArithmetic8Flags a v op n
 
 verifyArithmetic8Flags
-  :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPUM CPUTestState ()
+  :: Word8 -> Word8 -> (Word32 -> Word32 -> Word32) -> Bool -> CPU.M CPUTestState ()
 verifyArithmetic8Flags a v op n = do
   let expected = fromIntegral (fromIntegral a `op` fromIntegral v) :: Word8
   expectFlags allFlags
@@ -1031,14 +1032,14 @@ arithmetic16 = do
         it ("Works for ADD HL, " <> show ss <> " ; (" <> show ss <> " = " <> formatHex v <> ")")
           $ withNewCPU
           $ withValuesInSSRegisters [(RegHL, 0x11FF), (ss, v)]
-          $ alteringFlags (flagCY .|. flagH .|. flagN)
+          $ alteringFlags (CPU.flagCY .|. CPU.flagH .|. CPU.flagN)
           $ do
               addhlss ss `shouldHaveCycles` 2
               let a        = if ss == RegHL then v else 0x11FF
               let expected = v + a
               RegHL `register16ShouldBe` expected
               expectFlags
-                (flagCY .|. flagH .|. flagN)
+                (CPU.flagCY .|. CPU.flagH .|. CPU.flagN)
                 (buildFlags (carryIntoBit 16 a v (+)) (carryIntoBit 12 a v (+)) False False)
 
   describe "ADD SP, e" $ for_ [minBound .. maxBound] $ \v ->
@@ -1085,7 +1086,7 @@ rotateAndShift = do
           rlca `shouldHaveCycles` 1
           let expected = (v .<<. 1) .|. (v .>>. 7)
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if v `testBit` 7 then flagCY else 0)
+          expectFlags allFlags (if v `testBit` 7 then CPU.flagCY else 0)
 
   describe "RLA" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for RLA ; (A = " <> formatHex v <> ")")
@@ -1093,11 +1094,11 @@ rotateAndShift = do
       $ withValuesInRegisters [(RegA, v)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rla `shouldHaveCycles` 1
           let expected = (v .<<. 1) .|. (if cy then 1 else 0)
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if v `testBit` 7 then flagCY else 0)
+          expectFlags allFlags (if v `testBit` 7 then CPU.flagCY else 0)
 
   describe "RRCA" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for RRCA ; (A = " <> formatHex v <> ")")
@@ -1108,7 +1109,7 @@ rotateAndShift = do
           rrca `shouldHaveCycles` 1
           let expected = (v .>>. 1) .|. (v .<<. 7)
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if v `testBit` 0 then flagCY else 0)
+          expectFlags allFlags (if v `testBit` 0 then CPU.flagCY else 0)
 
   describe "RRA" $ for_ [minBound .. maxBound] $ \v ->
     it ("Works for RRA ; (A = " <> formatHex v <> ")")
@@ -1116,11 +1117,11 @@ rotateAndShift = do
       $ withValuesInRegisters [(RegA, v)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rra `shouldHaveCycles` 1
           let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
           RegA `registerShouldBe` expected
-          expectFlags allFlags (if v `testBit` 0 then flagCY else 0)
+          expectFlags allFlags (if v `testBit` 0 then CPU.flagCY else 0)
 
   describe "RLC r" $ for_ [ (r, v) | r <- allRegisters, v <- [minBound .. maxBound] ] $ \(r, v) ->
     it ("Works for RLC " <> show r <> " ; (" <> show r <> " = " <> formatHex v <> ")")
@@ -1139,7 +1140,7 @@ rotateAndShift = do
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rlr r `shouldHaveCycles` 2
           let expected = (v .<<. 1) .|. (if cy then 1 else 0)
           r `registerShouldBe` expected
@@ -1162,7 +1163,7 @@ rotateAndShift = do
       $ withValuesInRegisters [(r, v)]
       $ alteringFlags allFlags
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rrr r `shouldHaveCycles` 2
           let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
           r `registerShouldBe` expected
@@ -1189,7 +1190,7 @@ rotateAndShift = do
       $ alteringFlags allFlags
       $ withExtraCycles
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rlhl `shouldHaveCycles` 2
           expectExtraCycles 2
           let expected = (v .<<. 1) .|. (if cy then 1 else 0)
@@ -1218,7 +1219,7 @@ rotateAndShift = do
       $ alteringFlags allFlags
       $ withExtraCycles
       $ do
-          cy <- CPUM $ testFlag flagCY
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
           rrhl `shouldHaveCycles` 2
           expectExtraCycles 2
           let expected = (v .>>. 1) .|. (if cy then 0x80 else 0)
@@ -1334,25 +1335,25 @@ bitOperations = do
         it ("Works for " <> formatBitR r b v)
           $ withNewCPU
           $ withValuesInRegisters [(r, v)]
-          $ alteringFlags (flagH .|. flagN .|. flagZ)
+          $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
           $ do
               bitr r (fromIntegral b) `shouldHaveCycles` 2
               r `registerShouldBe` v
-              expectFlags (flagH .|. flagN .|. flagZ)
+              expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                           (buildFlags False True False (not (v `testBit` b)))
 
   describe "BIT b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
     it ("Works for " <> formatBitHL b v)
       $ withNewCPU
       $ withValueAt RegHL 0xC000 v
-      $ alteringFlags (flagH .|. flagN .|. flagZ)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
       $ withExtraCycles
       $ do
           bithl (fromIntegral b) `shouldHaveCycles` 2
           expectExtraCycles 1
           0xC000 `atAddressShouldBe` v
           RegHL `register16ShouldBe` 0xC000
-          expectFlags (flagH .|. flagN .|. flagZ)
+          expectFlags (CPU.flagH .|. CPU.flagN .|. CPU.flagZ)
                       (buildFlags False True False (not (v `testBit` b)))
 
   describe "SET b, r"
@@ -1555,26 +1556,31 @@ miscellaneous = do
     it ("Works for CPL ; A = " <> formatHex v)
       $ withNewCPU
       $ withValuesInRegisters [(RegA, v)]
-      $ alteringFlags (flagH .|. flagN)
+      $ alteringFlags (CPU.flagH .|. CPU.flagN)
       $ do
           cpl `shouldHaveCycles` 1
           RegA `registerShouldBe` complement v
-          expectFlags (flagH .|. flagN) (flagH .|. flagN)
+          expectFlags (CPU.flagH .|. CPU.flagN) (CPU.flagH .|. CPU.flagN)
 
   describe "NOP" $ it "Does nothing" $ withNewCPU $ nop `shouldHaveCycles` 1
 
   describe "CCF" $ for_ [True, False] $ \cf0 ->
     it ("Works for CCF ; CY = " <> show cf0)
       $ withNewCPU
-      $ alteringFlags (flagCY .|. flagH .|. flagN)
+      $ alteringFlags (CPU.flagCY .|. CPU.flagH .|. CPU.flagN)
       $ do
-          CPUM $ setFlagsMask flagCY (if cf0 then flagCY else 0)
+          CPU.M $ CPU.setFlagsMask CPU.flagCY (if cf0 then CPU.flagCY else 0)
           ccf `shouldHaveCycles` 1
-          expectFlags (flagCY .|. flagH .|. flagN) (buildFlags (not cf0) False False False)
+          expectFlags (CPU.flagCY .|. CPU.flagH .|. CPU.flagN)
+                      (buildFlags (not cf0) False False False)
 
-  describe "SCF" $ it "Works for SCF" $ withNewCPU $ alteringFlags (flagCY .|. flagH .|. flagN) $ do
-    scf `shouldHaveCycles` 1
-    expectFlags (flagCY .|. flagH .|. flagN) (buildFlags True False False False)
+  describe "SCF"
+    $ it "Works for SCF"
+    $ withNewCPU
+    $ alteringFlags (CPU.flagCY .|. CPU.flagH .|. CPU.flagN)
+    $ do
+        scf `shouldHaveCycles` 1
+        expectFlags (CPU.flagCY .|. CPU.flagH .|. CPU.flagN) (buildFlags True False False False)
 
   describe "DI" $ for_ [True, False] $ \ime0 ->
     it ("Works for DI ; IME = " <> show ime0) $ withNewCPU $ withIME ime0 $ do
@@ -1585,7 +1591,7 @@ miscellaneous = do
     it ("Works for EI ; IME = " <> show ime0) $ withNewCPU $ withPC 0x4001 $ withIME ime0 $ do
       ei `shouldHaveCycles` 1
       expectIME ime0
-      CPUM cpuStep `shouldHaveCycles` 1
+      CPU.M CPU.step `shouldHaveCycles` 1
       expectIME True
 
   describe "HALT" $ do
@@ -1596,47 +1602,47 @@ miscellaneous = do
         $ withIME ime0
         $ do
             halt `shouldHaveCycles` 1
-            expectMode ModeHalt
+            expectMode CPU.ModeHalt
     it "Enters halt mode when IF & IE /= 0 and IME = True"
       $ withNewCPU
       $ alteringMode
       $ withIME True
       $ do
-          CPUM $ do
-            writeByte IE 1
-            writeByte IF 1
+          CPU.M $ do
+            Memory.writeByte IE 1
+            Memory.writeByte IF 1
           halt `shouldHaveCycles` 1
-          expectMode ModeHalt
+          expectMode CPU.ModeHalt
     it "Bugs out when IF & IE /= 0 and IME = False"
       $ withNewCPU
       $ withValuesInRegisters [(RegA, 0)]
       $ withPC 0xC000
       $ withIME False
-      $ alteringFlags (flagZ .|. flagN .|. flagH)
+      $ alteringFlags (CPU.flagZ .|. CPU.flagN .|. CPU.flagH)
       $ do
-          CPUM $ do
-            writeByte IE     1
-            writeByte IF     1
-            writeByte 0xC000 0x3C -- INC A
+          CPU.M $ do
+            Memory.writeByte IE 1
+            Memory.writeByte IF 1
+            Memory.writeByte 0xC000 0x3C -- INC A
           halt `shouldHaveCycles` 1
-          CPUM cpuStep `shouldHaveCycles` 1
-          CPUM cpuStep `shouldHaveCycles` 1
-          CPUM cpuStep `shouldHaveCycles` 1
+          CPU.M CPU.step `shouldHaveCycles` 1
+          CPU.M CPU.step `shouldHaveCycles` 1
+          CPU.M CPU.step `shouldHaveCycles` 1
           RegA `registerShouldBe` 2
-          expectFlags (flagZ .|. flagN .|. flagH) 0
+          expectFlags (CPU.flagZ .|. CPU.flagN .|. CPU.flagH) 0
 
   describe "STOP" $ do
     it "Enters stop mode" $ withNewCPU $ alteringMode $ do
       stop `shouldHaveCycles` 1
-      expectMode ModeStop
+      expectMode CPU.ModeStop
     it "Switches speed mode" $ withNewCPU $ alteringCPUCycleClocks $ do
       KEY1 `atAddressShouldBe` 0
-      CPUM $ writeByte KEY1 1
+      CPU.M $ Memory.writeByte KEY1 1
       KEY1 `atAddressShouldBe` 1
       stop `shouldHaveCycles` 1
       KEY1 `atAddressShouldBe` 0x80
       expectCPUCycleClocks 2
-      CPUM $ writeByte KEY1 1
+      CPU.M $ Memory.writeByte KEY1 1
       KEY1 `atAddressShouldBe` 0x81
       stop `shouldHaveCycles` 1
       KEY1 `atAddressShouldBe` 0x00
@@ -1666,12 +1672,12 @@ bcd = do
           daa `shouldHaveCycles` 1
           expectFlags
             allFlags
-            (   flagN
-            .|. (if (a - b + 100) `mod` 100 == 0 then flagZ else 0)
-            .|. (if a < b then flagCY else 0)
+            (   CPU.flagN
+            .|. (if (a - b + 100) `mod` 100 == 0 then CPU.flagZ else 0)
+            .|. (if a < b then CPU.flagCY else 0)
             )
-          cy <- CPUM $ testFlag flagCY
-          a' <- CPUM $ readR8 RegA
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
+          a' <- CPU.M $ CPU.readR8 RegA
           let result   = fromIntegral a' + if cy then 0x0100 else 0
           let expected = if a < b then toBCD (a - b + 100) + 0x0100 else toBCD (a - b)
           liftIO (result `shouldBe` expected)
@@ -1686,9 +1692,11 @@ bcd = do
           daa `shouldHaveCycles` 1
           expectFlags
             allFlags
-            ((if (a + b) `mod` 100 == 0 then flagZ else 0) .|. (if a + b >= 100 then flagCY else 0))
-          cy <- CPUM $ testFlag flagCY
-          a' <- CPUM $ readR8 RegA
+            (   (if (a + b) `mod` 100 == 0 then CPU.flagZ else 0)
+            .|. (if a + b >= 100 then CPU.flagCY else 0)
+            )
+          cy <- CPU.M $ CPU.testFlag CPU.flagCY
+          a' <- CPU.M $ CPU.readR8 RegA
           let result = fromIntegral a' + if cy then 0x0100 else 0
           liftIO (result `shouldBe` toBCD (a + b))
 
@@ -1716,16 +1724,16 @@ interrupts = do
           $ withPC 0x4001
           $ do
               let behavior | pending && enabled && ime = Trigger
-                           | mode /= ModeNormal && pending && enabled = Wakeup
+                           | mode /= CPU.ModeNormal && pending && enabled = Wakeup
                            | otherwise                 = Ignore
 
-              CPUM $ writeByte IF (if pending then bit vector else 0)
-              CPUM $ writeByte IE (if enabled then bit vector else 0)
-              cycles <- CPUM cpuStep
+              CPU.M $ Memory.writeByte IF (if pending then bit vector else 0)
+              CPU.M $ Memory.writeByte IE (if enabled then bit vector else 0)
+              cycles <- CPU.M CPU.step
               liftIO $ cycles `shouldBe` case behavior of
                 Trigger -> isrClocks
                 Wakeup  -> 1
-                Ignore  -> if mode == ModeNormal then 1 else 4
+                Ignore  -> if mode == CPU.ModeNormal then 1 else 4
 
               case behavior of
                 Trigger -> do
@@ -1735,36 +1743,36 @@ interrupts = do
                   IF `atAddressShouldBe` 0
                   IE `atAddressShouldBe` (bit vector)
                   expectPC (fromIntegral vector * 8 + 0x40)
-                  expectMode ModeNormal
+                  expectMode CPU.ModeNormal
                   expectIME False
                 Wakeup -> do
                   RegSP `register16ShouldBe` 0xFFF0
                   IF `atAddressShouldBe` (if pending then bit vector else 0)
                   IE `atAddressShouldBe` (if enabled then bit vector else 0)
                   expectPC 0x4002
-                  expectMode ModeNormal
+                  expectMode CPU.ModeNormal
                   expectIME ime
                 Ignore -> do
                   RegSP `register16ShouldBe` 0xFFF0
                   IF `atAddressShouldBe` (if pending then bit vector else 0)
                   IE `atAddressShouldBe` (if enabled then bit vector else 0)
-                  expectPC (if mode == ModeNormal then 0x4002 else 0x4001)
+                  expectPC (if mode == CPU.ModeNormal then 0x4002 else 0x4001)
                   expectMode mode
                   expectIME ime
 
   describe "Invalid interrupts" $ for_ [5, 6, 7] $ \vector ->
     it ("Does not trigger on invalid interrupt " <> show vector)
       $ withNewCPU
-      $ withMode ModeNormal
+      $ withMode CPU.ModeNormal
       $ withIME True
       $ withPC 0x4001
       $ do
-          CPUM $ do
-            writeByte IF (bit vector)
-            writeByte IE (bit vector)
-            cycles <- cpuStep
+          CPU.M $ do
+            Memory.writeByte IF (bit vector)
+            Memory.writeByte IE (bit vector)
+            cycles <- CPU.step
             liftIO (cycles `shouldBe` 1)
-          expectMode ModeNormal
+          expectMode CPU.ModeNormal
           expectIME True
           expectPC 0x4002
 
@@ -1772,14 +1780,14 @@ interrupts = do
     it ("Triggers " <> show l <> " when " <> show l <> " and " <> show r <> " are both pending")
       $ withNewCPU
       $ withValuesInSSRegisters [(RegSP, 0xFFF0)]
-      $ withMode ModeNormal
+      $ withMode CPU.ModeNormal
       $ withIME True
       $ withPC 0x4001
       $ do
-          CPUM $ do
-            writeByte IF (bit l .|. bit r)
-            writeByte IE (bit l .|. bit r)
-            cycles <- cpuStep
+          CPU.M $ do
+            Memory.writeByte IF (bit l .|. bit r)
+            Memory.writeByte IE (bit l .|. bit r)
+            cycles <- CPU.step
             liftIO (cycles `shouldBe` isrClocks)
           RegSP `register16ShouldBe` 0xFFEE
           0xFFEE `atAddressShouldBe` 0x01
@@ -1787,7 +1795,7 @@ interrupts = do
           IF `atAddressShouldBe` (bit r)
           IE `atAddressShouldBe` (bit l .|. bit r)
           expectPC (fromIntegral l * 8 + 0x40)
-          expectMode ModeNormal
+          expectMode CPU.ModeNormal
           expectIME False
 
  where

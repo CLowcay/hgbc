@@ -1,10 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC
   ( initEmulatorState
-  , reset
+  , CPU.reset
   , parseROM
   , requiresSaveFiles
-  , newGraphicsSync
+  , Graphics.newSync
   , audioBuffer
   , getEmulatorClock
   , writeFgRGBPalette
@@ -12,14 +12,14 @@ module Machine.GBC
   , step
   , keyUp
   , keyDown
-  , getCPUCallDepth 
-  , getCPUBacktrace
+  , CPU.getCallDepth
+  , CPU.getBacktrace
   , ROMPaths(..)
   , ROM(..)
   , ColorCorrection(..)
-  , Key(..)
+  , Keypad.Key(..)
   , Header(..)
-  , GraphicsSync(..)
+  , Graphics.Sync(..)
   , EmulatorMode(..)
   , EmulatorState(..)
   )
@@ -27,31 +27,31 @@ where
 
 import           Control.Monad.Reader
 import           Data.Word
-import           Machine.GBC.Audio
-import           Machine.GBC.CPU
 import           Machine.GBC.Emulator
-import           Machine.GBC.Graphics
 import           Machine.GBC.Graphics.VRAM
-import           Machine.GBC.Keypad
 import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.ROM
+import qualified Machine.GBC.Audio             as Audio
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Keypad            as Keypad
 
 -- | Notify that a key is pressed down.
-keyDown :: Key -> ReaderT EmulatorState IO ()
+keyDown :: Keypad.Key -> ReaderT EmulatorState IO ()
 keyDown key = do
   EmulatorState {..} <- ask
-  lift $ keypadPress keypadState key
+  lift $ Keypad.press keypadState key
 
 -- | Notify that a key is released.
-keyUp :: Key -> ReaderT EmulatorState IO ()
+keyUp :: Keypad.Key -> ReaderT EmulatorState IO ()
 keyUp key = do
   EmulatorState {..} <- ask
-  lift $ keypadRelease keypadState key
+  lift $ Keypad.release keypadState key
 
 -- | Get the audio output buffer.
 audioBuffer :: EmulatorState -> RingBuffer Word16
-audioBuffer = audioOut . audioState
+audioBuffer = Audio.audioOut . audioState
 
 -- | Set a foreground palette.
 writeFgRGBPalette

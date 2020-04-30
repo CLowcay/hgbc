@@ -93,7 +93,7 @@ configure options config = do
 makeEmulatorState
   :: FilePath
   -> Config k Identity
-  -> GBC.GraphicsSync
+  -> GBC.Sync
   -> Ptr Word8
   -> ExceptT FileParseErrors (WriterT [FileParseErrors] IO) GBC.EmulatorState
 makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
@@ -143,7 +143,7 @@ run RuntimeConfig {..} = do
               address <- getCurrentAddress
               updateDisassembly address
               breakpoint <- liftIO $ Breakpoints.check debugState address
-              callDepth  <- GBC.getCPUCallDepth
+              callDepth  <- GBC.getCallDepth
               pure (Just address == runToAddress || breakpoint || Just callDepth == level)
             else pure False
 
@@ -171,12 +171,12 @@ run RuntimeConfig {..} = do
       RunTo address -> runEmulatorLoop (Just address) Nothing
       Step          -> singleStep >> pauseLoop
       StepOver      -> do
-        callDepth0 <- GBC.getCPUCallDepth
+        callDepth0 <- GBC.getCallDepth
         Event.send eventChannel Event.Resumed >> singleStep
-        callDepth1 <- GBC.getCPUCallDepth
+        callDepth1 <- GBC.getCallDepth
         if callDepth1 > callDepth0 then emulatorLoop Nothing (Just callDepth0) else pauseLoop
       StepOut -> do
-        callDepth <- GBC.getCPUCallDepth
+        callDepth <- GBC.getCallDepth
         runEmulatorLoop Nothing (Just (callDepth - 1))
       Restart -> GBC.reset >> pauseLoop
 

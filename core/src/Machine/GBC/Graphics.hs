@@ -5,14 +5,14 @@
 {-# LANGUAGE TupleSections #-}
 
 module Machine.GBC.Graphics
-  ( GraphicsState(..)
-  , GraphicsSync(..)
+  ( State(..)
   , Mode(..)
-  , GraphicsBusEvent(..)
-  , initGraphics
-  , graphicsPorts
-  , newGraphicsSync
-  , graphicsStep
+  , BusEvent(..)
+  , Sync(..)
+  , newSync
+  , init
+  , ports
+  , step
   )
 where
 
@@ -31,13 +31,14 @@ import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import           Prelude                 hiding ( init )
 import qualified Data.Vector.Unboxed.Mutable   as VUM
 
 -- | The current status of the graphics system.
 data Mode = HBlank | VBlank | ScanOAM | ReadVRAM deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | The graphics state.
-data GraphicsState = GraphicsState {
+data State = State {
     lcdState      :: !(StateCycle Mode)
   , lcdLine       :: !(StateCycle Word8)
   , portLCDC      :: !(Port Word8)
@@ -79,7 +80,7 @@ type PixelInfo = (Index, (Layer, Palette, BGPriority))
 -- | Graphics synchronization objects. The output thread should wait on
 -- signalWindow, then draw the buffer, then put to bufferAvailable when it is
 -- safe to write to the frame buffer again.
-data GraphicsSync = GraphicsSync {
+data Sync = Sync {
     bufferAvailable :: !(MVar ())    -- ^ The output window puts a () here when it is safe to write to the frame buffer again.
   , signalWindow    :: !(MVar ())    -- ^ Wait on this MVar before drawing the output buffer.
 }
@@ -92,8 +93,8 @@ lcdLines :: [(Word8, Int)]
 lcdLines = [0 .. 153] <&> (, 456)
 
 -- | The initial graphics state.
-initGraphics :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port Word8 -> IO GraphicsState
-initGraphics vram modeRef frameBufferBytes portIF = mdo
+init :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port Word8 -> IO State
+init vram modeRef frameBufferBytes portIF = mdo
   lcdState <- newStateCycle lcdStates
   lcdLine  <- newStateCycle lcdLines
 
@@ -139,10 +140,10 @@ initGraphics vram modeRef frameBufferBytes portIF = mdo
   assemblySpace  <- VUM.replicate 168 (0, (0, 0, False))
   priorityBuffer <- VUM.replicate 168 0
 
-  pure GraphicsState { .. }
+  pure State { .. }
 
-graphicsPorts :: GraphicsState -> [(Word16, Port Word8)]
-graphicsPorts GraphicsState {..} =
+ports :: State -> [(Word16, Port Word8)]
+ports State {..} =
   [ (LCDC, portLCDC)
   , (STAT, portSTAT)
   , (SCY , portSCY)
@@ -162,11 +163,11 @@ graphicsPorts GraphicsState {..} =
   ]
 
 -- | Make a new Graphics sync object.
-newGraphicsSync :: IO GraphicsSync
-newGraphicsSync = do
+newSync :: IO Sync
+newSync = do
   bufferAvailable <- newEmptyMVar
   signalWindow    <- newEmptyMVar
-  pure GraphicsSync { .. }
+  pure Sync { .. }
 
 -- | LCDC flags
 flagLCDEnable, flagWindowTileMap, flagWindowEnable, flagTileDataSelect, flagBackgroundTileMap, flagOBJSize, flagOBJEnable, flagBackgroundEnable
@@ -226,11 +227,11 @@ checkLY portIF portSTAT ly lyc = do
   directWritePort portSTAT (modifyBits (bit matchBit) matchFlag stat)
   when (stat `testBit` interruptCoincidence && lyc == ly) (raiseInterrupt portIF InterruptLCDCStat)
 
-data GraphicsBusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
+data BusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
 
-{-# INLINABLE graphicsStep #-}
-graphicsStep :: GraphicsState -> GraphicsSync -> Int -> IO GraphicsBusEvent
-graphicsStep graphicsState@GraphicsState {..} graphicsSync clockAdvance = do
+{-# INLINABLE step #-}
+step :: State -> Sync -> Int -> IO BusEvent
+step graphicsState@State {..} graphicsSync clockAdvance = do
   lcdc <- readPort portLCDC
   let lcdEnabled = isFlagSet flagLCDEnable lcdc
   if not lcdEnabled
@@ -283,8 +284,8 @@ getSpriteBlendInfo attrs =
       cgbPalette = (attrs .&. 7) .<<. 2
   in  (layer, cgbPalette, isFlagSet flagDisplayPriority attrs)
 
-renderLine :: GraphicsState -> EmulatorMode -> Word8 -> Ptr Word8 -> IO ()
-renderLine GraphicsState {..} mode line outputBase = do
+renderLine :: State -> EmulatorMode -> Word8 -> Ptr Word8 -> IO ()
+renderLine State {..} mode line outputBase = do
   scx  <- readPort portSCX
   scy  <- readPort portSCY
   wx   <- readPort portWX

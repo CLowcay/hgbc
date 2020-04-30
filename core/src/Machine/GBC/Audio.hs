@@ -3,11 +3,11 @@
 {-# LANGUAGE TupleSections #-}
 
 module Machine.GBC.Audio
-  ( AudioState(..)
-  , initAudioState
+  ( State(..)
+  , init
   , clockFrameSequencer
-  , audioPorts
-  , audioStep
+  , ports
+  , step
   )
 where
 
@@ -23,8 +23,9 @@ import           Machine.GBC.Audio.WaveChannel
 import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import           Prelude                 hiding ( init )
 
-data AudioState = AudioState {
+data State = State {
     audioOut       :: !(RingBuffer Word16)
   , sampler        :: !Counter
   , frameSequencer :: !(StateCycle FrameSequencerOutput)
@@ -42,8 +43,8 @@ data AudioState = AudioState {
 frameSequencerStates :: [(FrameSequencerOutput, Int)]
 frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 1)
 
-initAudioState :: IO AudioState
-initAudioState = mdo
+init :: IO State
+init = mdo
   audioOut       <- newRingBuffer 12
 
   sampler        <- newCounter 0xFF
@@ -74,10 +75,10 @@ initAudioState = mdo
   portPCM12 <- newPort 0x00 0x00 neverUpdate
   portPCM34 <- newPort 0x00 0x00 neverUpdate
 
-  pure AudioState { .. }
+  pure State { .. }
 
-audioPorts :: AudioState -> [(Word16, Port Word8)]
-audioPorts AudioState {..} =
+ports :: State -> [(Word16, Port Word8)]
+ports State {..} =
   [(NR50, port50), (NR51, port51), (NR52, port52), (PCM12, portPCM12), (PCM34, portPCM34)]
     ++ channel1Ports
     ++ channel2Ports
@@ -100,8 +101,8 @@ mixOutputChannel (v1, v2, v3, v4) channelFlags =
       out4 = if channelFlags `testBit` 3 then v4 else 8
   in  fromIntegral (((out1 + out2 + out3 + out4 - 32) * 4) + 128)
 
-clockFrameSequencer :: AudioState -> IO ()
-clockFrameSequencer AudioState {..} = do
+clockFrameSequencer :: State -> IO ()
+clockFrameSequencer State {..} = do
   register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52)
     $ void
@@ -112,8 +113,8 @@ clockFrameSequencer AudioState {..} = do
         frameSequencerClock channel3 state
         frameSequencerClock channel4 state
 
-audioStep :: AudioState -> Int -> IO ()
-audioStep AudioState {..} clockAdvance = do
+step :: State -> Int -> IO ()
+step State {..} clockAdvance = do
   register52 <- directReadPort port52
   when (isFlagSet flagMasterPower register52) $ do
     masterClock channel1 clockAdvance

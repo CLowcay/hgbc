@@ -9,52 +9,52 @@ module Machine.GBC.Emulator
   )
 where
 
-import           Control.Monad.Reader
 import           Control.Applicative
+import           Control.Monad.Reader
+import           Data.Functor
 import           Data.IORef
+import           Data.Maybe
 import           Data.Word
 import           Foreign.Ptr
-import           Machine.GBC.Audio
-import           Machine.GBC.CPU
-import           Machine.GBC.DMA
-import           Machine.GBC.Graphics
 import           Machine.GBC.Graphics.VRAM
-import           Machine.GBC.Keypad
-import           Machine.GBC.Memory
 import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.ROM
 import           Machine.GBC.Registers
-import           Machine.GBC.Timer
 import qualified Data.ByteString               as B
 import qualified Data.Vector.Storable          as VS
-import           Data.Functor
-import           Data.Maybe
+import qualified Machine.GBC.Audio             as Audio
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.DMA               as DMA
+import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Keypad            as Keypad
+import qualified Machine.GBC.Memory            as Memory
+import qualified Machine.GBC.Timer             as Timer
 
 data EmulatorState = EmulatorState {
     mode            :: !EmulatorMode
-  , memory          :: !Memory
+  , memory          :: !Memory.State
   , vram            :: !VRAM
-  , cpu             :: !CPUState
-  , dmaState        :: !DMAState
-  , graphicsState   :: !GraphicsState
-  , graphicsSync    :: !GraphicsSync
-  , keypadState     :: !KeypadState
-  , timerState      :: !TimerState
-  , audioState      :: !AudioState
+  , cpu             :: !CPU.State
+  , dmaState        :: !DMA.State
+  , graphicsState   :: !Graphics.State
+  , graphicsSync    :: !Graphics.Sync
+  , keypadState     :: !Keypad.State
+  , timerState      :: !Timer.State
+  , audioState      :: !Audio.State
   , hblankPending   :: !(IORef Bool) -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
   , currentTime     :: !(UnboxedRef Int) -- Time in clocks
   , lastEventPoll   :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
 }
 
-instance HasMemory EmulatorState where
-  {-# INLINE forMemory #-}
-  forMemory = memory
+instance Memory.Has EmulatorState where
+  {-# INLINE forState #-}
+  forState = memory
 
-instance HasCPU EmulatorState where
-  {-# INLINE forCPUState #-}
-  forCPUState = cpu
+instance CPU.Has EmulatorState where
+  {-# INLINE forState #-}
+  forState = cpu
 
 -- | Create a new 'EmulatorState' given a 'ROM', a 'GraphicsSync', and a pointer
 -- to the output frame buffer. The frame buffer is a 32bit RGB buffer with
@@ -64,7 +64,7 @@ initEmulatorState
   -> ROM
   -> Maybe EmulatorMode
   -> ColorCorrection
-  -> GraphicsSync
+  -> Graphics.Sync
   -> Ptr Word8
   -> IO EmulatorState
 initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBufferBytes = mdo
@@ -84,23 +84,23 @@ initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBu
   portIF        <- newPort 0xE0 0x1F alwaysUpdate
   portIE        <- newPort 0x00 0xFF alwaysUpdate
 
-  cpu           <- initCPU portIF portIE mode (makeCatchupFunction emulatorState)
-  dmaState      <- initDMA
-  graphicsState <- initGraphics vram modeRef frameBufferBytes portIF
-  keypadState   <- initKeypadState portIF
-  audioState    <- initAudioState
-  timerState    <- initTimerState (clockFrameSequencer audioState) (portKEY1 cpu) portIF
+  cpu           <- CPU.init portIF portIE mode (makeCatchupFunction emulatorState)
+  dmaState      <- DMA.init
+  graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
+  keypadState   <- Keypad.init portIF
+  audioState    <- Audio.init
+  timerState    <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
 
   let allPorts =
         (IF, portIF)
-          :  cpuPorts cpu
-          ++ dmaPorts dmaState
-          ++ graphicsPorts graphicsState
-          ++ keypadPorts keypadState
-          ++ timerPorts timerState
-          ++ audioPorts audioState
+          :  CPU.ports cpu
+          ++ DMA.ports dmaState
+          ++ Graphics.ports graphicsState
+          ++ Keypad.ports keypadState
+          ++ Timer.ports timerState
+          ++ Audio.ports audioState
 
-  memory <- initMemoryForROM (VS.fromList . B.unpack <$> bootROM) rom vram allPorts portIE modeRef
+  memory <- Memory.initForROM (VS.fromList . B.unpack <$> bootROM) rom vram allPorts portIE modeRef
 
   hblankPending <- newIORef False
   currentTime   <- newUnboxedRef 0
@@ -121,14 +121,14 @@ getEmulatorClock = do
 step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
-  cycles             <- cpuStep
+  cycles             <- CPU.step
   now                <- liftIO $ readUnboxedRef currentTime
 
-  cycleClocks        <- getCPUCycleClocks
+  cycleClocks        <- CPU.getCycleClocks
   let cpuClocks = cycles * cycleClocks
 
   graphicsEvent   <- updateHardware cycles cpuClocks
-  dmaClockAdvance <- doPendingDMA dmaState
+  dmaClockAdvance <- DMA.doPendingDMA dmaState
 
   liftIO $ writeUnboxedRef currentTime (now + cpuClocks + dmaClockAdvance)
 
@@ -137,29 +137,29 @@ step = do
     else
       let doPendingHBlankDMA = do
             liftIO $ writeIORef hblankPending False
-            hdmaClockAdvance <- doHBlankHDMA dmaState
+            hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
             when (hdmaClockAdvance > 0) $ do
               void $ updateHardware (hdmaClockAdvance `div` cycleClocks) hdmaClockAdvance
               liftIO $ writeUnboxedRef currentTime (now + cpuClocks + hdmaClockAdvance)
       in  case graphicsEvent of
-            NoGraphicsEvent -> do
+            Graphics.NoGraphicsEvent -> do
               pending <- liftIO $ readIORef hblankPending
               when pending doPendingHBlankDMA
-            HBlankEvent -> doPendingHBlankDMA
+            Graphics.HBlankEvent -> doPendingHBlankDMA
 
 makeCatchupFunction :: EmulatorState -> Int -> Int -> IO ()
 makeCatchupFunction emulatorState@EmulatorState {..} cycles clocksPerCycle =
   let cpuClocks = cycles * clocksPerCycle
   in  do
         graphicsEvent <- runReaderT (updateHardware cycles cpuClocks) emulatorState
-        when (graphicsEvent == HBlankEvent) $ writeIORef hblankPending True
+        when (graphicsEvent == Graphics.HBlankEvent) $ writeIORef hblankPending True
         now <- readUnboxedRef currentTime
         writeUnboxedRef currentTime (now + cpuClocks)
 
-updateHardware :: Int -> Int -> ReaderT EmulatorState IO GraphicsBusEvent
+updateHardware :: Int -> Int -> ReaderT EmulatorState IO Graphics.BusEvent
 updateHardware cycles cpuClocks = do
   EmulatorState {..} <- ask
   liftIO $ do
-    updateTimer timerState cycles
-    audioStep audioState cpuClocks
-    graphicsStep graphicsState graphicsSync cpuClocks
+    Timer.update timerState cycles
+    Audio.step audioState cpuClocks
+    Graphics.step graphicsState graphicsSync cpuClocks

@@ -2,11 +2,11 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Machine.GBC.Memory
-  ( Memory
-  , HasMemory(..)
+  ( State
+  , Has(..)
   , resetAndBoot
-  , initMemory
-  , initMemoryForROM
+  , init
+  , initForROM
   , hasBootROM
   , bootROMLength
   , getROMData
@@ -40,13 +40,14 @@ import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.ROM
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import           Prelude                 hiding ( init )
 import qualified Data.ByteString               as B
 import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable          as VS
 import qualified Data.Vector.Storable.Mutable  as VSM
 
 -- | The gameboy memory.
-data Memory = Memory {
+data State = State {
     mbc            :: !MBC
   , mode0          :: !EmulatorMode
   , modeRef        :: !(IORef EmulatorMode)
@@ -69,12 +70,12 @@ data Memory = Memory {
   , checkRAMAccess :: !(IORef Bool)
 }
 
-class HasMemory env where
-  forMemory :: env -> Memory
+class Has env where
+  forState :: env -> State
 
-instance HasMemory Memory where
-  {-# INLINE forMemory #-}
-  forMemory = id
+instance Has State where
+  {-# INLINE forState #-}
+  forState = id
 
 -- | Convert an address into an internal port number.
 portOffset :: Word16 -> Int
@@ -83,9 +84,9 @@ portOffset = subtract 0xFF00 . fromIntegral
 -- | Reset the memory system. If there is no boot ROM, then also run the
 -- supplied boot code.
 {-# INLINABLE resetAndBoot #-}
-resetAndBoot :: HasMemory env => ReaderT env IO () -> ReaderT env IO ()
+resetAndBoot :: Has env => ReaderT env IO () -> ReaderT env IO ()
 resetAndBoot pseudoBootROM = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ do
     writeIORef modeRef        mode0
     writeIORef bootROMLockout False
@@ -98,26 +99,26 @@ resetAndBoot pseudoBootROM = do
     Just content -> liftIO $ writeIORef rom0 content
 
 -- | The initial memory state.
-initMemoryForROM
+initForROM
   :: Maybe (VS.Vector Word8)
   -> ROM
   -> VRAM
   -> [(Word16, Port Word8)]
   -> Port Word8
   -> IORef EmulatorMode
-  -> IO Memory
-initMemoryForROM boot romInfo vram ports portIE modeRef = do
+  -> IO State
+initForROM boot romInfo vram ports portIE modeRef = do
   mbc <- getMBC romInfo
-  initMemory boot
-             (VS.fromList (B.unpack (romContent romInfo)))
-             (romHeader romInfo)
-             mbc
-             vram
-             ports
-             portIE
-             modeRef
+  init boot
+       (VS.fromList (B.unpack (romContent romInfo)))
+       (romHeader romInfo)
+       mbc
+       vram
+       ports
+       portIE
+       modeRef
 
-initMemory
+init
   :: Maybe (VS.Vector Word8)
   -> VS.Vector Word8
   -> Header
@@ -126,8 +127,8 @@ initMemory
   -> [(Word16, Port Word8)]
   -> Port Word8
   -> IORef EmulatorMode
-  -> IO Memory
-initMemory boot rom header mbc vram rawPorts portIE modeRef = do
+  -> IO State
+init boot rom header mbc vram rawPorts portIE modeRef = do
   mode0 <- readIORef modeRef
   let bootROMLength = maybe 0 VS.length boot
   let bootROM = boot <&> \content ->
@@ -194,29 +195,29 @@ initMemory boot rom header mbc vram rawPorts portIE modeRef = do
         )
 
   checkRAMAccess <- newIORef False
-  pure Memory { .. }
+  pure State { .. }
 
 -- | Get the ROM header.
-getROMHeader :: Memory -> Header
-getROMHeader Memory {..} = header
+getROMHeader :: State -> Header
+getROMHeader State {..} = header
 
 -- | Get all of the ROM bytes.
-getROMData :: Memory -> VS.Vector Word8
-getROMData Memory {..} = rom
+getROMData :: State -> VS.Vector Word8
+getROMData State {..} = rom
 
 -- | Get all of the boot ROM bytes.
-getBootROMData :: Memory -> Maybe (VS.Vector Word8)
-getBootROMData Memory {..} = VS.take bootROMLength <$> bootROM
+getBootROMData :: State -> Maybe (VS.Vector Word8)
+getBootROMData State {..} = VS.take bootROMLength <$> bootROM
 
 -- | Check if a BOOT ROM is present.
-hasBootROM :: Memory -> Bool
-hasBootROM Memory {..} = isJust bootROM
+hasBootROM :: State -> Bool
+hasBootROM State {..} = isJust bootROM
 
 -- | Get the current bank loaded at the specified address
 {-# INLINABLE getBank #-}
-getBank :: HasMemory env => Word16 -> ReaderT env IO Word16
+getBank :: Has env => Word16 -> ReaderT env IO Word16
 getBank address = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ case address .>>. 13 of
     0 -> if (address < 0x100 || address >= 0x200) && address < fromIntegral bootROMLength
       then do
@@ -238,13 +239,13 @@ getBank address = do
 
 -- | Get the status of the cartridge RAM gate (True for enabled, False for
 -- disabled).
-getRamGate :: HasMemory env => ReaderT env IO Bool
-getRamGate = liftIO . ramGate . mbc =<< asks forMemory
+getRamGate :: Has env => ReaderT env IO Bool
+getRamGate = liftIO . ramGate . mbc =<< asks forState
 
 -- | Read a byte from a specific memory bank.
-readByteLong :: HasMemory env => Word16 -> Word16 -> ReaderT env IO Word8
+readByteLong :: Has env => Word16 -> Word16 -> ReaderT env IO Word8
 readByteLong bank addr = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ case addr .>>. 13 of
     0 -> pure
       (if bank == 0xFFFF
@@ -278,9 +279,9 @@ oamSize :: Int
 oamSize = 160
 
 -- | Copy data to OAM memory via DMA.
-dmaToOAM :: HasMemory env => Word16 -> ReaderT env IO ()
+dmaToOAM :: Has env => Word16 -> ReaderT env IO ()
 dmaToOAM source = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ case source .>>. 13 of
     0 -> do
       content <- readIORef rom0
@@ -304,9 +305,9 @@ dmaToOAM source = do
 
 -- | Read a byte from memory.
 {-# INLINABLE readByte #-}
-readByte :: HasMemory env => Word16 -> ReaderT env IO Word8
+readByte :: Has env => Word16 -> ReaderT env IO Word8
 readByte addr = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ case addr .>>. 13 of
     0 -> do
       content <- readIORef rom0
@@ -343,15 +344,15 @@ readByte addr = do
   where offset base = fromIntegral addr - base
 
 -- | Write a word to memory.
-writeWord :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
+writeWord :: Has env => Word16 -> Word16 -> ReaderT env IO ()
 writeWord addr value = do
   writeByte addr       (fromIntegral (value .&. 0xFF))
   writeByte (addr + 1) (fromIntegral (value .>>. 8))
 
 -- | Write to memory.
-writeByte :: HasMemory env => Word16 -> Word8 -> ReaderT env IO ()
+writeByte :: Has env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
-  Memory {..} <- asks forMemory
+  State {..} <- asks forState
   liftIO $ case addr .>>. 13 of
     0 -> writeROM mbc addr value
     1 -> writeROM mbc addr value
@@ -380,7 +381,7 @@ writeByte addr value = do
   where offset base = fromIntegral addr - base
 
 -- | Copy 16 bytes from a source address to a destination address.
-copy16 :: HasMemory env => Word16 -> Word16 -> ReaderT env IO ()
+copy16 :: Has env => Word16 -> Word16 -> ReaderT env IO ()
 copy16 source destination = do
   writeByte destination =<< readByte source
   writeByte (destination + 1) =<< readByte (source + 1)
@@ -400,5 +401,5 @@ copy16 source destination = do
   writeByte (destination + 15) =<< readByte (source + 15)
 
 -- | Read a chunk of memory. Useful for debugging.
-readChunk :: HasMemory env => Word16 -> Int -> ReaderT env IO B.ByteString
+readChunk :: Has env => Word16 -> Int -> ReaderT env IO B.ByteString
 readChunk base len = B.pack <$> traverse readByte ((base +) <$> [0 .. fromIntegral len - 1])

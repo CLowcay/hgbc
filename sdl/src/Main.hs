@@ -31,7 +31,7 @@ main = do
   (configErrors, options, config) <- Config.load decodeScancode defaultKeymap
   runtimeConfig                   <- Emulator.configure options config
   let romFileName = Emulator.romFileName runtimeConfig
-  graphicsSync                  <- GBC.newGraphicsSync
+  graphicsSync                  <- GBC.newSync
   (window        , frameBuffer) <- LCD.start romFileName config graphicsSync
   (eEmulatorState, warnings   ) <- runWriterT
     (runExceptT (Emulator.makeEmulatorState romFileName config graphicsSync frameBuffer))

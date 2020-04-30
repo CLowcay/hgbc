@@ -3,9 +3,9 @@
 {-# LANGUAGE RecursiveDo #-}
 
 module Machine.GBC.DMA
-  ( DMAState(..)
-  , initDMA
-  , dmaPorts
+  ( State(..)
+  , init
+  , ports
   , doPendingDMA
   , doHBlankHDMA
   , makeHDMASource
@@ -17,14 +17,15 @@ import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
-import           Machine.GBC.Memory
 import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
+import           Prelude                 hiding ( init )
+import qualified Machine.GBC.Memory            as Memory
 
 data PendingDMA = Pending !Word8 | None deriving (Eq, Ord, Show)
 
-data DMAState = DMAState {
+data State = State {
     hdmaActive      :: !(IORef Bool)
   , hdmaSource      :: !(IORef Word16)
   , hdmaDestination :: !(IORef Word16)
@@ -38,8 +39,8 @@ data DMAState = DMAState {
   , portHDMA5       :: !(Port Word8)
 }
 
-dmaPorts :: DMAState -> [(Word16, Port Word8)]
-dmaPorts DMAState {..} =
+ports :: State -> [(Word16, Port Word8)]
+ports State {..} =
   [ (DMA  , portDMA)
   , (HDMA1, portHDMA1)
   , (HDMA2, portHDMA2)
@@ -48,8 +49,8 @@ dmaPorts DMAState {..} =
   , (HDMA5, portHDMA5)
   ]
 
-initDMA :: IO DMAState
-initDMA = mdo
+init :: IO State
+init = mdo
   hdmaActive      <- newIORef False
   hdmaSource      <- newIORef 0
   hdmaDestination <- newIORef 0
@@ -88,18 +89,18 @@ initDMA = mdo
           writeIORef pendingHDMA $! Pending hdma5'
           pure 0xFF
 
-  pure DMAState { .. }
+  pure State { .. }
 
 -- | Perform any pending DMA actions for this emulation cycle, and return the
 -- number of clocks to stall the CPU.
-doPendingDMA :: HasMemory env => DMAState -> ReaderT env IO Int
-doPendingDMA DMAState {..} = do
+doPendingDMA :: Memory.Has env => State -> ReaderT env IO Int
+doPendingDMA State {..} = do
   maybeDMA <- liftIO $ readIORef pendingDMA
   case maybeDMA of
     None        -> pure ()
     Pending dma -> do
       liftIO $ writeIORef pendingDMA None
-      dmaToOAM (fromIntegral dma `shiftL` 8)
+      Memory.dmaToOAM (fromIntegral dma `shiftL` 8)
 
   maybeHDMA <- liftIO $ readIORef pendingHDMA
   case maybeHDMA of
@@ -112,13 +113,13 @@ doPendingDMA DMAState {..} = do
      where
       go _       _            0      = pure ((fromIntegral hdma + 1) * 8)
       go !source !destination !count = do
-        copy16 source destination
+        Memory.copy16 source destination
         go (source + 16) (destination + 16) (count - 1)
 
 -- | Notify the DMA controller that the LCD has entered the HBlank state. Return
 -- the number of clock cycles to stall the CPU.
-doHBlankHDMA :: HasMemory env => DMAState -> ReaderT env IO Int
-doHBlankHDMA DMAState {..} = do
+doHBlankHDMA :: Memory.Has env => State -> ReaderT env IO Int
+doHBlankHDMA State {..} = do
   isActive <- liftIO $ readIORef hdmaActive
   if not isActive
     then pure 0
@@ -126,7 +127,7 @@ doHBlankHDMA DMAState {..} = do
       source      <- liftIO $ readIORef hdmaSource
       destination <- liftIO $ readIORef hdmaDestination
 
-      copy16 source destination
+      Memory.copy16 source destination
 
       liftIO $ do
         writeIORef hdmaSource $! source + 16

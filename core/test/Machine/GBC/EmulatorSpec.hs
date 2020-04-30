@@ -4,18 +4,18 @@ module Machine.GBC.EmulatorSpec where
 
 import           Data.List
 import           Foreign.Ptr
-import           Machine.GBC.Audio
-import           Machine.GBC.CPU
-import           Machine.GBC.DMA
 import           Machine.GBC.Emulator
-import           Machine.GBC.Graphics
 import           Machine.GBC.Graphics.VRAM
-import           Machine.GBC.Keypad
 import           Machine.GBC.ROM
 import           Machine.GBC.Registers
-import           Machine.GBC.Timer
 import           Test.Hspec
 import qualified Data.ByteString               as B
+import qualified Machine.GBC.Audio             as Audio
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.DMA               as DMA
+import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Keypad            as Keypad
+import qualified Machine.GBC.Timer             as Timer
 
 blankROM :: ROM
 blankROM = ROM paths (blankHeader size) (B.replicate size 0)
@@ -41,15 +41,15 @@ blankHeader romSize = Header { startAddress          = 0
 
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
-  sync     <- newGraphicsSync
+  sync     <- Graphics.newSync
   emulator <- initEmulatorState Nothing blankROM Nothing NoColorCorrection sync nullPtr
   let allPorts =
-        cpuPorts (cpu emulator)
-          ++ dmaPorts (dmaState emulator)
-          ++ graphicsPorts (graphicsState emulator)
-          ++ keypadPorts (keypadState emulator)
-          ++ timerPorts (timerState emulator)
-          ++ audioPorts (audioState emulator)
+        CPU.ports (cpu emulator)
+          ++ DMA.ports (dmaState emulator)
+          ++ Graphics.ports (graphicsState emulator)
+          ++ Keypad.ports (keypadState emulator)
+          ++ Timer.ports (timerState emulator)
+          ++ Audio.ports (audioState emulator)
   nub (fst <$> allPorts) `shouldBe` (fst <$> allPorts)
   sort (fst <$> allPorts) `shouldBe` sort
     (  [0xFF30 .. 0xFF3F]

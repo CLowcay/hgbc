@@ -20,7 +20,7 @@ import           Data.Word
 import           Foreign.Ptr
 import           GLUtils
 import           Graphics.GL.Core44
-import           Machine.GBC                    ( GraphicsSync(..) )
+import           Machine.GBC                    ( Sync(..) )
 import           SDL.Extras
 import qualified HGBC.Config
 import qualified Data.ByteString               as B
@@ -33,7 +33,7 @@ import qualified Window
 data WindowContext = WindowContext {
     sdlWindow       :: !SDL.Window
   , romFileName     :: !FilePath
-  , sync            :: !GraphicsSync
+  , sync            :: !Sync
   , displayIndex    :: !DisplayIndex  -- ^ The SDL display that the current window is centred on.
   , framesPerVsync  :: !Double
   , speed           :: !Double        -- ^ Speed relative to full speed (60fps)
@@ -63,7 +63,7 @@ getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
     in  fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> HGBC.Config.Config k Identity -> GraphicsSync -> IO (Window.Window, Ptr Word8)
+start :: FilePath -> HGBC.Config.Config k Identity -> Sync -> IO (Window.Window, Ptr Word8)
 start romFileName HGBC.Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
