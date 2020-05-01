@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Machine.GBC.EmulatorSpec where
+module Machine.GBC.EmulatorSpec
+  ( spec
+  )
+where
 
 import           Data.List
 import           Foreign.Ptr

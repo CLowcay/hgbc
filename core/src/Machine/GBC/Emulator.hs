@@ -171,6 +171,7 @@ updateHardware :: Int -> Int -> ReaderT EmulatorState IO Graphics.BusEvent
 updateHardware cycles cpuClocks = do
   EmulatorState {..} <- ask
   liftIO $ do
+    Serial.update serialState cycles
     Timer.update timerState cycles
     Audio.step audioState cpuClocks
     Graphics.step graphicsState graphicsSync cpuClocks

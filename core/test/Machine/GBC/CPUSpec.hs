@@ -2,7 +2,10 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
-module Machine.GBC.CPUSpec where
+module Machine.GBC.CPUSpec
+  ( spec
+  )
+where
 
 import           Control.Monad
 import           Control.Monad.IO.Class

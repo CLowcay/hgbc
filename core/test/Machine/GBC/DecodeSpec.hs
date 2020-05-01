@@ -4,7 +4,10 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NumericUnderscores #-}
 
-module Machine.GBC.DecodeSpec where
+module Machine.GBC.DecodeSpec
+  ( spec
+  )
+where
 
 import           Control.Monad.Reader
 import           Control.Monad.State
