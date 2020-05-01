@@ -201,9 +201,6 @@ pattern WY = 0xFF4A
 pattern WX :: Word16
 pattern WX = 0xFF4B
 
--- This undocumented register is suspected to have something to do with DMG
--- compatibility. It is disabled after BLCK is set to 1 and only reads FF after
--- that point.
 pattern R4C :: Word16
 pattern R4C = 0xFF4C
 

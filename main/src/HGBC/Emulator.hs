@@ -13,7 +13,9 @@ module HGBC.Emulator
   )
 where
 
+import           Control.Concurrent.MVar
 import           Control.Concurrent.STM
+import           Control.Concurrent
 import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
@@ -40,6 +42,8 @@ import qualified HGBC.Debugger.Labels          as Labels
 import qualified HGBC.Debugger.State           as DebugState
 import qualified HGBC.Events                   as Event
 import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Serial            as Serial
 
 -- | A notification for the emulator thread.
 data Command
@@ -93,7 +97,7 @@ configure options config = do
 makeEmulatorState
   :: FilePath
   -> Config k Identity
-  -> GBC.Sync
+  -> Graphics.Sync
   -> Ptr Word8
   -> ExceptT FileParseErrors (WriterT [FileParseErrors] IO) GBC.EmulatorState
 makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
@@ -105,7 +109,14 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
     when (GBC.requiresSaveFiles rom)
       $ createDirectoryIfMissing True (takeDirectory (GBC.romSaveFile (GBC.romPaths rom)))
 
-    s <- GBC.initEmulatorState bootROMData rom mode colorCorrection graphicsSync frameBuffer
+    serialSync <- nullSerial
+    s          <- GBC.initEmulatorState bootROMData
+                                        rom
+                                        mode
+                                        colorCorrection
+                                        serialSync
+                                        graphicsSync
+                                        frameBuffer
 
     when (GBC.mode s == GBC.DMG) $ liftIO $ do
       GBC.writeBgRGBPalette s 0 backgroundPalette
@@ -121,6 +132,13 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
     )
   tryReadFile path = ExceptT (first (convertIOException path) <$> liftIO (try (B.readFile path)))
   convertIOException path err = (path, [displayException (err :: IOException)])
+
+  nullSerial = do
+    sync <- Serial.newSync
+    void $ forkIO $ forever $ do
+      void (takeMVar (Serial.out sync))
+      putMVar (Serial.inp sync) 0xFF
+    pure sync
 
 -- | Run the emulator.  Does not return until the Quit command is sent.
 run :: RuntimeConfig -> ReaderT GBC.EmulatorState IO ()
