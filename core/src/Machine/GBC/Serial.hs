@@ -85,8 +85,8 @@ notifyIncoming State {..} period incomingValue = do
     writeIORef transferActiveRef True
 
 -- | Advance the serial clock.
-update :: Int -> State -> IO ()
-update cycles State {..} = do
+update :: State -> Int -> IO ()
+update State {..} cycles = do
   transferActive <- readIORef transferActiveRef
   when transferActive $ do
     reloads <- updateReloadingCounter shiftClock cycles $ readUnboxedRef clockPeriod
