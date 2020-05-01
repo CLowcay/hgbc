@@ -45,7 +45,7 @@ module Machine.GBC.Registers (
   , pattern OBP1
   , pattern WY
   , pattern WX
-  , pattern R4C
+  , pattern KEY0
   , pattern KEY1
   , pattern VBK
   , pattern BLCK
@@ -59,7 +59,7 @@ module Machine.GBC.Registers (
   , pattern BCPD
   , pattern OCPS
   , pattern OCPD
-  , pattern R6C
+  , pattern OPRI
   , pattern SVBK
   , pattern R72
   , pattern R73
@@ -201,11 +201,8 @@ pattern WY = 0xFF4A
 pattern WX :: Word16
 pattern WX = 0xFF4B
 
--- This undocumented register is suspected to have something to do with DMG
--- compatibility. It is disabled after BLCK is set to 1 and only reads FF after
--- that point.
-pattern R4C :: Word16
-pattern R4C = 0xFF4C
+pattern KEY0 :: Word16
+pattern KEY0 = 0xFF4C
 
 pattern KEY1 :: Word16
 pattern KEY1 = 0xFF4D
@@ -247,8 +244,8 @@ pattern OCPD :: Word16
 pattern OCPD = 0xFF6B
 
 -- disabled on DMG, always reads FF. FE on CGB. Can be written in CGB mode only.
-pattern R6C :: Word16
-pattern R6C = 0xFF6C
+pattern OPRI :: Word16
+pattern OPRI = 0xFF6C
 
 pattern SVBK :: Word16
 pattern SVBK = 0xFF70

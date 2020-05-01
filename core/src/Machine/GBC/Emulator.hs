@@ -30,6 +30,7 @@ import qualified Machine.GBC.DMA               as DMA
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Keypad            as Keypad
 import qualified Machine.GBC.Memory            as Memory
+import qualified Machine.GBC.Serial            as Serial
 import qualified Machine.GBC.Timer             as Timer
 
 data EmulatorState = EmulatorState {
@@ -43,6 +44,7 @@ data EmulatorState = EmulatorState {
   , keypadState     :: !Keypad.State
   , timerState      :: !Timer.State
   , audioState      :: !Audio.State
+  , serialState     :: !Serial.State
   , hblankPending   :: !(IORef Bool) -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
   , currentTime     :: !(UnboxedRef Int) -- Time in clocks
   , lastEventPoll   :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
@@ -64,50 +66,59 @@ initEmulatorState
   -> ROM
   -> Maybe EmulatorMode
   -> ColorCorrection
+  -> Serial.Sync
   -> Graphics.Sync
   -> Ptr Word8
   -> IO EmulatorState
-initEmulatorState bootROM rom requestedMode colorCorrection graphicsSync frameBufferBytes = mdo
-  let bootMode = bootROM <&> \content -> if B.length content > 0x100 then CGB else DMG
-  let romMode = case cgbSupport (romHeader rom) of
-        CGBCompatible   -> CGB
-        CGBExclusive    -> CGB
-        CGBIncompatible -> DMG
-  let mode = fromMaybe romMode (requestedMode <|> bootMode)
-  vram <- initVRAM colorCorrection
+initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBufferBytes
+  = mdo
+    let bootMode = bootROM <&> \content -> if B.length content > 0x100 then CGB else DMG
+    let romMode = case cgbSupport (romHeader rom) of
+          CGBCompatible   -> CGB
+          CGBExclusive    -> CGB
+          CGBIncompatible -> DMG
+    let mode = fromMaybe romMode (requestedMode <|> bootMode)
+    vram <- initVRAM colorCorrection
 
-  writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True  0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True  1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+    writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+    writeRGBPalette vram True  0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+    writeRGBPalette vram True  1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
 
-  modeRef       <- newIORef mode
-  portIF        <- newPort 0xE0 0x1F alwaysUpdate
-  portIE        <- newPort 0x00 0xFF alwaysUpdate
+    modeRef       <- newIORef mode
+    portIF        <- newPort 0xE0 0x1F alwaysUpdate
+    portIE        <- newPort 0x00 0xFF alwaysUpdate
 
-  cpu           <- CPU.init portIF portIE mode (makeCatchupFunction emulatorState)
-  dmaState      <- DMA.init
-  graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
-  keypadState   <- Keypad.init portIF
-  audioState    <- Audio.init
-  timerState    <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
+    cpu           <- CPU.init portIF portIE mode (makeCatchupFunction emulatorState)
+    dmaState      <- DMA.init
+    graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
+    keypadState   <- Keypad.init portIF
+    audioState    <- Audio.init
+    timerState    <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
+    serialState   <- Serial.init serialSync portIF
 
-  let allPorts =
-        (IF, portIF)
-          :  CPU.ports cpu
-          ++ DMA.ports dmaState
-          ++ Graphics.ports graphicsState
-          ++ Keypad.ports keypadState
-          ++ Timer.ports timerState
-          ++ Audio.ports audioState
+    let allPorts =
+          (IF, portIF)
+            :  CPU.ports cpu
+            ++ DMA.ports dmaState
+            ++ Graphics.ports graphicsState
+            ++ Keypad.ports keypadState
+            ++ Timer.ports timerState
+            ++ Audio.ports audioState
+            ++ Serial.ports serialState
 
-  memory <- Memory.initForROM (VS.fromList . B.unpack <$> bootROM) rom vram allPorts portIE modeRef
+    memory <- Memory.initForROM (VS.fromList . B.unpack <$> bootROM)
+                                rom
+                                vram
+                                allPorts
+                                portIE
+                                modeRef
 
-  hblankPending <- newIORef False
-  currentTime   <- newUnboxedRef 0
-  lastEventPoll <- newUnboxedRef 0
+    hblankPending <- newIORef False
+    currentTime   <- newUnboxedRef 0
+    lastEventPoll <- newUnboxedRef 0
 
-  let emulatorState = EmulatorState { .. }
-  pure emulatorState
+    let emulatorState = EmulatorState { .. }
+    pure emulatorState
 
 -- | Get the number of clocks since the emulator started.
 getEmulatorClock :: ReaderT EmulatorState IO Int

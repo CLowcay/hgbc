@@ -64,8 +64,8 @@ data State = State {
   , portIE         :: !(Port Word8)
   , portSVBK       :: !(Port Word8)
   , portBLCK       :: !(Port Word8)
-  , portR4C        :: !(Port Word8)
-  , portR6C        :: !(Port Word8)
+  , portKEY0       :: !(Port Word8)
+  , portOPRI       :: !(Port Word8)
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
@@ -92,8 +92,8 @@ resetAndBoot pseudoBootROM = do
     writeIORef bootROMLockout False
     writePort portSVBK 0
     directWritePort portBLCK 0
-    directWritePort portR4C  0
-    writePort portR6C 0
+    directWritePort portKEY0  0
+    writePort portOPRI 0
   case bootROM of
     Nothing      -> pseudoBootROM
     Just content -> liftIO $ writeIORef rom0 content
@@ -153,7 +153,7 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   -- R4C: An undocumented register that appears to control DMG compatibility in
   -- the LCD.
   bootROMLockout <- newIORef False
-  portR4C        <- newPortWithReadAction
+  portKEY0        <- newPortWithReadAction
     0x00
     0xFF
     (\a -> do
@@ -165,14 +165,14 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   -- BLCK: BIOS lockout.
   portBLCK <- newPort 0xFE 0x01 $ \oldValue newValue -> do
     when (isFlagSet 1 newValue) $ do
-      lcdMode <- directReadPort portR4C
+      lcdMode <- directReadPort portKEY0
       when (lcdMode == 4) (writeIORef modeRef DMG)
       writeIORef rom0           rom
       writeIORef bootROMLockout True
     pure (newValue .|. oldValue)
 
   -- Undocumented registers
-  portR6C <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
+  portOPRI <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
   r72     <- newPort 0x00 0xFF alwaysUpdate
   r73     <- newPort 0x00 0xFF alwaysUpdate
   r74     <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
@@ -184,8 +184,8 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
         (   first portOffset
         <$> ( (BLCK, portBLCK)
             : (SVBK, portSVBK)
-            : (R4C , portR4C)
-            : (R6C , portR6C)
+            : (KEY0 , portKEY0)
+            : (OPRI , portOPRI)
             : (R72 , r72)
             : (R73 , r73)
             : (R74 , r74)

@@ -15,6 +15,7 @@ import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.DMA               as DMA
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Keypad            as Keypad
+import qualified Machine.GBC.Serial            as Serial
 import qualified Machine.GBC.Timer             as Timer
 
 blankROM :: ROM
@@ -41,8 +42,9 @@ blankHeader romSize = Header { startAddress          = 0
 
 spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
-  sync     <- Graphics.newSync
-  emulator <- initEmulatorState Nothing blankROM Nothing NoColorCorrection sync nullPtr
+  sync       <- Graphics.newSync
+  serialSync <- Serial.newSync
+  emulator   <- initEmulatorState Nothing blankROM Nothing NoColorCorrection serialSync sync nullPtr
   let allPorts =
         CPU.ports (cpu emulator)
           ++ DMA.ports (dmaState emulator)
@@ -50,10 +52,13 @@ spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
           ++ Keypad.ports (keypadState emulator)
           ++ Timer.ports (timerState emulator)
           ++ Audio.ports (audioState emulator)
+          ++ Serial.ports (serialState emulator)
   nub (fst <$> allPorts) `shouldBe` (fst <$> allPorts)
   sort (fst <$> allPorts) `shouldBe` sort
     (  [0xFF30 .. 0xFF3F]
     ++ [ P1
+       , SB
+       , SC
        , DIV
        , TIMA
        , TMA
