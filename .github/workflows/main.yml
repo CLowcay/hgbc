@@ -53,7 +53,7 @@ jobs:
     - uses: actions/checkout@v2
       with:
         repository: CLowcay/blargg_roms
-        token: ${{ secret.ROMS_TOKEN }}
+        token: ${{ secrets.ROMS_TOKEN }}
         path: blargg
 
     - name: ROM tests
