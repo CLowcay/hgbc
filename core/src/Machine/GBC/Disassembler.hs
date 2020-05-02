@@ -16,6 +16,7 @@ module Machine.GBC.Disassembler
   , Labels
   , fieldAddress
   , fieldBytes
+  , encodeAddress
   , Disassembly
   , DisassemblyState(..)
   , lookupN
@@ -449,10 +450,10 @@ disassembleFromRoots disassembly0 roots = do
       pc
       Banks
         { bankBootLimit = if bank == 0xFFFF then fromIntegral (Memory.bootROMLength memory) else 0
-        , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 0
-        , bankRAM       = 0
-        , bankWRAM      = 0
-        , bankVRAM      = 0
+        , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 1
+        , bankRAM       = 1
+        , bankWRAM      = 1
+        , bankVRAM      = 1
         }
       []
       memory
