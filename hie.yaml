@@ -7,6 +7,6 @@ cradle:
     - path: "./main/src"
       component: "hgbc-main:lib"
     - path: "./testing/src"
-      component: "hgbc-testing:test:hgbc-testing"
+      component: "hgbc-testing:exe:hgbc-tester"
     - path: "./sdl/src"
       component: "hgbc-sdl:exe:hgbc-sdl"

@@ -23,6 +23,7 @@ import           Test.Hspec
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Lazy          as LB
+import           Data.Functor
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Memory            as Memory
@@ -36,31 +37,53 @@ main = do
 blargg :: FilePath -> SpecWith ()
 blargg blarggPath = describe "blargg suite" $ do
   specify "cpu_instrs" $ do
-    output <- blarggTest (blarggPath </> "cpu_instrs.gb") Serial 0x06f1
+    output <- blarggTestSerial (blarggPath </> "cpu_instrs.gb") 0x06f1
     output
       `shouldBe` "cpu_instrs\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  \n\nPassed all tests\n"
   specify "instr_timing" $ do
-    output <- blarggTest (blarggPath </> "instr_timing.gb") Serial 0xC8B0
+    output <- blarggTestSerial (blarggPath </> "instr_timing.gb") 0xC8B0
     output `shouldBe` "instr_timing\n\n\nPassed\n"
   specify "mem_timing" $ do
-    output <- blarggTest (blarggPath </> "mem_timing.gb") InMemory 0x2BDD
+    output <- blarggTestInMemory (blarggPath </> "mem_timing.gb") 0x2BDD
     output `shouldBe` "mem_timing\n\n01:ok  02:ok  03:ok  \n\nPassed\n"
   specify "cgb_sound" $ do
-    output <- blarggTest (blarggPath </> "cgb_sound.gb") InMemory 0x2BD4
+    output <- blarggTestInMemory (blarggPath </> "cgb_sound.gb") 0x2BD4
     output
       `shouldBe` "cgb_sound\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  12:ok  \n\nPassed\n"
   specify "halt_bug" $ do
-    output <- blarggTest (blarggPath </> "halt_bug.gb") InMemory 0xC818
+    output <- blarggTestInMemory (blarggPath </> "halt_bug.gb") 0xC818
     output
       `shouldBe` "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
 
+blarggTestSerial :: FilePath -> Word16 -> IO B.ByteString
+blarggTestSerial filename terminalAddress = romTest filename
+                                                    accumulateSerialOutput
+                                                    (terminateAtAddress terminalAddress)
+                                                    (liftIO . getResult)
+  where getResult buffer = LB.toStrict . BB.toLazyByteString <$> readIORef buffer
+
+blarggTestInMemory :: FilePath -> Word16 -> IO B.ByteString
+blarggTestInMemory filename terminalAddress = romTest filename
+                                                      ignoreSerialOutput
+                                                      (terminateAtAddress terminalAddress)
+                                                      getResult
+ where
+  getResult _ = do
+    Memory.writeByte 0 0x0A
+    LB.toStrict . BB.toLazyByteString <$> readString 0xA004
+
 data TestComplete = TestComplete deriving (Eq, Show)
+data Timeout = Timeout deriving (Eq, Show)
 instance Exception TestComplete
+instance Exception Timeout
 
-data BlarggOutputStyle = Serial | InMemory deriving (Eq, Show)
-
-blarggTest :: FilePath -> BlarggOutputStyle -> Word16 -> IO B.ByteString
-blarggTest filename outputStyle terminalAddress =
+romTest
+  :: FilePath
+  -> SerialHandler
+  -> ReaderT EmulatorState IO Bool
+  -> (IORef BB.Builder -> ReaderT EmulatorState IO a)
+  -> IO a
+romTest filename serialHandler terminate getResult =
   withSystemTempDirectory "rom-testing" $ \tempDir -> do
     let baseName = takeBaseName filename
     createDirectoryIfMissing True (tempDir </> baseName)
@@ -87,38 +110,44 @@ blarggTest filename outputStyle terminalAddress =
                                                serialSync
                                                gs
                                                frameBuffer
-            runReaderT (reset >> runLoop) emulatorState
-            case outputStyle of
-              InMemory -> flip runReaderT emulatorState $ do
-                Memory.writeByte 0 0x0A
-                liftIO . writeIORef buffer =<< readString 0xA004
-              _ -> pure ()
-        LB.toStrict . BB.toLazyByteString <$> readIORef buffer
+            runReaderT (reset >> runLoop timeout >> getResult buffer) emulatorState
 
  where
-  runLoop = do
-    step
-    pc <- CPU.readPC
-    if pc == terminalAddress then pure () else runLoop
-
-  readString = readString0 ""
-   where
-    readString0 !acc addr = do
-      b <- Memory.readByte addr
-      if b == 0 then pure acc else readString0 (acc <> BB.word8 b) (addr + 1)
-
-  serialHandler sync buffer = case outputStyle of
-    Serial   -> accumulateSerialOutput sync buffer
-    InMemory -> ignoreSerialOutput sync
-
-  ignoreSerialOutput sync = forkIO $ foreverUntil TestComplete $ do
-    void (takeMVar (Serial.out sync))
-    putMVar (Serial.inp sync) 0xFF
-  accumulateSerialOutput sync buffer = forkIO $ foreverUntil TestComplete $ do
-    byte <- takeMVar (Serial.out sync)
-    putMVar (Serial.inp sync) 0xFF
-    modifyIORef' buffer (<> BB.word8 byte)
   nullGraphics gs = forkIO $ foreverUntil TestComplete $ do
     takeMVar (Graphics.signalWindow gs)
     putMVar (Graphics.bufferAvailable gs) ()
-  foreverUntil e action = forever action `catch` (\ex -> if e == ex then pure () else throwIO ex)
+
+  runLoop 0               = liftIO (throwIO Timeout)
+  runLoop !remainingSteps = do
+    step
+    terminateNow <- terminate
+    if terminateNow then pure () else runLoop (remainingSteps - 1)
+
+timeout :: Int
+timeout = 1024 * 1024 * 60 * 3
+
+readString :: Word16 -> ReaderT EmulatorState IO BB.Builder
+readString = readString0 ""
+ where
+  readString0 !acc addr = do
+    b <- Memory.readByte addr
+    if b == 0 then pure acc else readString0 (acc <> BB.word8 b) (addr + 1)
+
+type SerialHandler = Serial.Sync -> IORef BB.Builder -> IO ThreadId
+
+accumulateSerialOutput :: SerialHandler
+accumulateSerialOutput sync buffer = forkIO $ foreverUntil TestComplete $ do
+  byte <- takeMVar (Serial.out sync)
+  putMVar (Serial.inp sync) 0xFF
+  modifyIORef' buffer (<> BB.word8 byte)
+
+ignoreSerialOutput :: SerialHandler
+ignoreSerialOutput sync _ = forkIO $ foreverUntil TestComplete $ do
+  void (takeMVar (Serial.out sync))
+  putMVar (Serial.inp sync) 0xFF
+
+foreverUntil :: (Exception e, Eq e) => e -> IO a -> IO ()
+foreverUntil e action = forever action `catch` (\ex -> if e == ex then pure () else throwIO ex)
+
+terminateAtAddress :: Word16 -> ReaderT EmulatorState IO Bool
+terminateAtAddress address = CPU.readPC <&> (== address)
