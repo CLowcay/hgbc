@@ -51,3 +51,9 @@ where `<rom_file_name>` is the name of the ROM file. It is also possible to
 put a `config.toml` file in the `~/.hgbc/<rom_file_name>` directory to set
 default options for a ROM. ROM specific configuration files have the same
 format as the global configuration file.
+
+# Debugger
+
+To debug a ROM file, launch H-GBC with the `--debug` flag.  Then open a web
+browser at `localhost:8080`.  The port number can be changed by a command line
+option (`--debug-port`) or in `~/.hgbc/config.toml`.
