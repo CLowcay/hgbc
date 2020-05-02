@@ -62,4 +62,5 @@ jobs:
       env:
         BLARGG_DIR: blargg
       run: |
+        chmod +x bin/hgbc-tester
         bin/hgbc-tester
