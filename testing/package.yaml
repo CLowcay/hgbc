@@ -28,8 +28,8 @@ dependencies:
 - mtl
 - temporary
 
-tests:
-  hgbc-testing:
+executables:
+  hgbc-tester:
     main:        Main.hs
     source-dirs: src
     ghc-options:

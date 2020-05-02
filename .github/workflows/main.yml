@@ -1,23 +1,17 @@
 name: CI
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the master branch
 on:
   push:
     branches: [ master, ci/** ]
   pull_request:
     branches: [ master ]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
+  # Build and run unit tests
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
     - uses: actions/checkout@v2
       
     - name: Cache
@@ -39,4 +33,31 @@ jobs:
       env:
         HSPEC_OPTIONS: --format=failed-examples
       run: |
-        stack test
+        stack test --copy-bins --local-bin-path bin
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: binaries-linux
+        path: bin/
+
+  # Run test ROMS
+  rom_tests:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/download-artifact@v2
+      with:
+        name: binaries-linux
+        path: bin
+
+    - uses: actions/checkout@v2
+      with:
+        repository: CLowcay/blargg_roms
+        token: ${{ secret.ROMS_TOKEN }}
+        path: blargg
+
+    - name: ROM tests
+      env:
+        BLARGG_DIR: blargg
+      run: |
+        bin/hgbc-tester
