@@ -16,6 +16,7 @@ import           Data.Word
 import           Foreign.Marshal.Alloc
 import           Machine.GBC
 import           System.Directory
+import           System.Environment
 import           System.FilePath
 import           System.IO.Temp
 import           Test.Hspec
@@ -28,23 +29,28 @@ import qualified Machine.GBC.Memory            as Memory
 import qualified Machine.GBC.Serial            as Serial
 
 main :: IO ()
-main = hspec $ describe "blargg suite" $ do
+main = do
+  blarggDir <- lookupEnv "BLARGG_DIR"
+  hspec $ maybe (pure ()) blargg blarggDir
+
+blargg :: FilePath -> SpecWith ()
+blargg blarggPath = describe "blargg suite" $ do
   specify "cpu_instrs" $ do
-    output <- blarggTest "roms/blargg/cpu_instrs.gb" Serial 0x06f1
+    output <- blarggTest (blarggPath </> "cpu_instrs.gb") Serial 0x06f1
     output
       `shouldBe` "cpu_instrs\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  \n\nPassed all tests\n"
   specify "instr_timing" $ do
-    output <- blarggTest "roms/blargg/instr_timing.gb" Serial 0xC8B0
+    output <- blarggTest (blarggPath </> "instr_timing.gb") Serial 0xC8B0
     output `shouldBe` "instr_timing\n\n\nPassed\n"
   specify "mem_timing" $ do
-    output <- blarggTest "roms/blargg/mem_timing.gb" InMemory 0x2BDD
+    output <- blarggTest (blarggPath </> "mem_timing.gb") InMemory 0x2BDD
     output `shouldBe` "mem_timing\n\n01:ok  02:ok  03:ok  \n\nPassed\n"
   specify "cgb_sound" $ do
-    output <- blarggTest "roms/blargg/cgb_sound.gb" InMemory 0x2BD4
+    output <- blarggTest (blarggPath </> "cgb_sound.gb") InMemory 0x2BD4
     output
       `shouldBe` "cgb_sound\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  12:ok  \n\nPassed\n"
   specify "halt_bug" $ do
-    output <- blarggTest "roms/blargg/halt_bug.gb" InMemory 0xC818
+    output <- blarggTest (blarggPath </> "halt_bug.gb") InMemory 0xC818
     output
       `shouldBe` "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
 
