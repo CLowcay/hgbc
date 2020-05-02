@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3162654447ea9adb7faf009f19d31f984aefc9df01d5a54d65de5eb10150579e
+-- hash: 9468a693ddb5c09e68375c418065ebc6bb99e81a07601ddfe4e677311db61c03
 
 name:           hgbc-testing
 version:        0.1.0.0
@@ -23,8 +23,7 @@ source-repository head
   type: git
   location: https://github.com/CLowcay/hgbc
 
-test-suite hgbc-testing
-  type: exitcode-stdio-1.0
+executable hgbc-tester
   main-is: Main.hs
   other-modules:
       Paths_hgbc_testing
