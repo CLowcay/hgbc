@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -11,6 +12,8 @@ import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
+import           Data.Foldable
+import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           Foreign.Marshal.Alloc
@@ -20,10 +23,9 @@ import           System.Environment
 import           System.FilePath
 import           System.IO.Temp
 import           Test.Hspec
-import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
+import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
-import           Data.Functor
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Memory            as Memory
@@ -33,6 +35,9 @@ main :: IO ()
 main = do
   blarggDir <- lookupEnv "BLARGG_DIR"
   hspec $ maybe (pure ()) blargg blarggDir
+
+  mooneyeDir <- lookupEnv "MOONEYE_DIR"
+  hspec $ maybe (pure ()) mooneye mooneyeDir
 
 blargg :: FilePath -> SpecWith ()
 blargg blarggPath = describe "blargg suite" $ do
@@ -55,6 +60,14 @@ blargg blarggPath = describe "blargg suite" $ do
     output
       `shouldBe` "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
 
+mooneye :: FilePath -> Spec
+mooneye mooneyePath = do
+  tests <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory mooneyePath)
+  describe "mooneye suite" $ for_ tests $ \rom -> specify rom $ do
+    (result, output) <- mooneyeTest (mooneyePath </> rom)
+    when (result /= Passed) $ B.putStrLn output
+    result `shouldBe` Passed
+
 blarggTestSerial :: FilePath -> Word16 -> IO B.ByteString
 blarggTestSerial filename terminalAddress = romTest filename
                                                     accumulateSerialOutput
@@ -71,6 +84,30 @@ blarggTestInMemory filename terminalAddress = romTest filename
   getResult _ = do
     Memory.writeByte 0 0x0A
     LB.toStrict . BB.toLazyByteString <$> readString 0xA004
+
+data MooneyeResult = Passed
+                   | HardwareFailures Int
+                   | HardwareTestFailed
+                   deriving (Eq, Show)
+
+mooneyeTest :: FilePath -> IO (MooneyeResult, B.ByteString)
+mooneyeTest filename = romTest filename accumulateSerialOutput terminateOnMagic getResult
+ where
+  terminateOnMagic = do
+    pc              <- CPU.readPC
+    nextInstruction <- Memory.readByte pc
+    pure (nextInstruction == 0x40)
+  getResult buffer = do
+    stringResult          <- LB.toStrict . BB.toLazyByteString <$> liftIO (readIORef buffer)
+    CPU.RegisterFile {..} <- CPU.getRegisterFile
+    let testResult
+          | regA /= 0
+          = HardwareFailures (fromIntegral regA)
+          | regB /= 3 || regC /= 4 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34
+          = HardwareTestFailed
+          | otherwise
+          = Passed
+    pure (testResult, stringResult)
 
 data TestComplete = TestComplete deriving (Eq, Show)
 data Timeout = Timeout deriving (Eq, Show)
