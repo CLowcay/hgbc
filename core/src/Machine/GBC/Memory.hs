@@ -146,7 +146,7 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   internalRamBankOffset <- newUnboxedRef 0
 
   -- SVBK: RAM bank.
-  portSVBK              <- cgbOnlyPort modeRef 0xF8 0x07 $ \_ v' -> v' <$ do
+  portSVBK              <- cgbOnlyPort modeRef 0x40 0xBF $ \_ v' -> v' <$ do
     let bank = fromIntegral (v' .&. 7)
     writeUnboxedRef internalRamBankOffset (0 `max` ((bank - 1) * 0x1000))
 

@@ -62,9 +62,34 @@ blargg blarggPath = describe "blargg suite" $ do
 
 mooneye :: FilePath -> Spec
 mooneye mooneyePath = do
-  tests <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory mooneyePath)
-  describe "mooneye suite" $ for_ tests $ \rom -> specify rom $ do
-    (result, output) <- mooneyeTest (mooneyePath </> rom)
+  let bitsPath       = mooneyePath </> "bits"
+  let instrPath      = mooneyePath </> "instr"
+  let interruptsPath = mooneyePath </> "interrupts"
+  let oamDMAPath     = mooneyePath </> "oam_dma"
+  let ppuPath        = mooneyePath </> "ppu"
+  let serialPath     = mooneyePath </> "serial"
+  let timerPath      = mooneyePath </> "timer"
+  tests           <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory mooneyePath)
+  bitsTests       <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory bitsPath)
+  instrTests      <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory instrPath)
+  interruptsTests <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory interruptsPath)
+  oamDMATests     <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory oamDMAPath)
+  ppuTests        <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory ppuPath)
+  serialTests     <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory serialPath)
+  timerTests      <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory timerPath)
+  describe "mooneye suite" $ do
+    for_ tests (testROM mooneyePath)
+    describe "bits" $ for_ bitsTests (testROM bitsPath)
+    describe "instr" $ for_ instrTests (testROM instrPath)
+    describe "interrupts" $ for_ interruptsTests (testROM interruptsPath)
+    describe "oam_dma" $ for_ oamDMATests (testROM oamDMAPath)
+    describe "ppu" $ for_ ppuTests (testROM ppuPath)
+    describe "serial" $ for_ serialTests (testROM serialPath)
+    describe "timer" $ for_ timerTests (testROM timerPath)
+
+ where
+  testROM path rom = specify rom $ do
+    (result, output) <- mooneyeTest (path </> rom)
     when (result /= Passed) $ B.putStrLn output
     result `shouldBe` Passed
 
@@ -103,7 +128,7 @@ mooneyeTest filename = romTest filename accumulateSerialOutput terminateOnMagic 
     let testResult
           | regA /= 0
           = HardwareFailures (fromIntegral regA)
-          | regB /= 3 || regC /= 4 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34
+          | regB /= 3 || regC /= 5 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34
           = HardwareTestFailed
           | otherwise
           = Passed

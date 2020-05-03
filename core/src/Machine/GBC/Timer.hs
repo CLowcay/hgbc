@@ -65,7 +65,7 @@ init clockAudio portKEY1 portIF = do
   portTMA <- newPort 0x00 0xFF $ \_ v' -> v' <$ do
     timaState <- readIORef timaStateRef
     when (timaState == TIMAReload) $ directWritePort portTIMA v'
-  portTAC <- newPort 0x00 0x07 $ \v v' -> v' <$ do
+  portTAC <- newPort 0xF8 0x07 $ \v v' -> v' <$ do
     systemDIV0 <- readUnboxedRef systemDIV
     timaMask   <- readUnboxedRef timaMaskRef
     let timaMask'    = decodeTimaMask v'

@@ -109,7 +109,7 @@ init vram modeRef frameBufferBytes portIF = mdo
       directWritePort portLY 0
     when (not lcdEnabled' && lcdEnabled) $ directWritePort portLY 0
     pure lcdc'
-  portSTAT <- newPort 0x00 0x78 alwaysUpdate
+  portSTAT <- newPort 0x80 0x78 alwaysUpdate
   portSCY  <- newPort 0x00 0xFF alwaysUpdate
   portSCX  <- newPort 0x00 0xFF alwaysUpdate
   portLY   <- newPort 0x00 0x00 neverUpdate
@@ -134,7 +134,7 @@ init vram modeRef frameBufferBytes portIF = mdo
     ocps <- readPort portOCPS
     writePalette vram True ocps ocpd'
     when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
-  portVBK <- cgbOnlyPort modeRef 0x00 0x01
+  portVBK <- cgbOnlyPort modeRef 0xFE 0x01
     $ \_ vbk' -> vbk' <$ setVRAMBank vram (if vbk' .&. 1 == 0 then 0 else 0x2000)
 
   assemblySpace  <- VUM.replicate 168 (0, (0, 0, False))

@@ -111,7 +111,9 @@ restoreLabels debugState = do
                          (HM.fromList (second (, True) <$> labels) `HM.union`)
             pure ([ (path, errors) | not (null errors) ])
   copyDefaultSymFile path symPath = do
-    r <- try (copyFile symPath path)
+    r <- try $ do
+      createDirectoryIfMissing True (takeDirectory path)
+      copyFile symPath path
     case r of
       Right ()  -> readLabelsFile path
       Left  err -> pure [(symPath, [displayIOException err])]

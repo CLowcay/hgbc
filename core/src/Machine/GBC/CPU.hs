@@ -161,7 +161,7 @@ type BusCatchupFunction = Int -> Int -> IO ()
 init :: Port Word8 -> Port Word8 -> EmulatorMode -> BusCatchupFunction -> IO State
 init portIF portIE cpuType busCatchup = do
   registers   <- VSM.new 1
-  portKEY1    <- newPort 0x00 0x01 alwaysUpdate
+  portKEY1    <- newPort 0x7E 0x01 alwaysUpdate
   cpuMode     <- newIORef ModeNormal
   cycleClocks <- newUnboxedRef 4
   callDepth   <- newUnboxedRef 0
@@ -350,7 +350,7 @@ setIME = do
 clearIME :: Has env => ReaderT env IO ()
 clearIME = do
   ime <- readRegister offsetHidden
-  writeRegister offsetHidden (ime .&. complement flagIME)
+  writeRegister offsetHidden (ime .&. complement (flagIME .|. flagSetIME))
 
 {-# INLINE setIMENext #-}
 setIMENext :: Has env => ReaderT env IO ()
@@ -399,7 +399,7 @@ reset = do
   writePC 0
 
   liftIO $ do
-    directWritePort portKEY1 0
+    directWritePort portKEY1 0x7E
     writeIORef cpuMode ModeNormal
     writeUnboxedRef cycleClocks 4
     writeIORef haltBug False
@@ -1124,10 +1124,10 @@ instance Has env => MonadGMBZ80 (M env) where
     if isFlagSet flagSpeedSwitch key1
       then if isFlagSet flagDoubleSpeed key1
         then liftIO $ do
-          directWritePort portKEY1 0
+          directWritePort portKEY1 0x7E
           writeUnboxedRef cycleClocks 4
         else liftIO $ do
-          directWritePort portKEY1 flagDoubleSpeed
+          directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
           writeUnboxedRef cycleClocks 2
       else setMode ModeStop
     pure 1
