@@ -464,7 +464,7 @@ disassemble state0 disassembly = evalStateT (go (disassembly, [])) state0
  where
   go (!accum, !labels) = do
     addressLong <- currentAddressLong
-    (action, r) <- fetchAndExecute
+    (action, r) <- fetchAndExecute =<< nextByte
     bs          <- takeAccumulatedBytes
     let oldDisassembly = lookup accum addressLong
     if noUpdateRequired oldDisassembly bs
