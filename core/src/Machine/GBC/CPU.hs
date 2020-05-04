@@ -49,6 +49,7 @@ where
 import           Control.Exception              ( throwIO )
 import           Control.Monad.Reader
 import           Data.Bits
+import           Data.Foldable
 import           Data.IORef
 import           Data.Int
 import           Data.Word
@@ -149,7 +150,7 @@ data State = State {
   , cycleClocks :: !(UnboxedRef Int)
   , callDepth   :: !(UnboxedRef Int)
   , backtrace   :: !Backtrace.Backtrace
-  , haltBug     :: !(IORef Bool)
+  , instruction :: !(UnboxedRef Word8)      -- First byte of the next instruction.
 }
 
 class Memory.Has env => Has env where
@@ -166,7 +167,7 @@ init portIF portIE cpuType busCatchup = do
   cycleClocks <- newUnboxedRef 4
   callDepth   <- newUnboxedRef 0
   backtrace   <- Backtrace.new 8
-  haltBug     <- newIORef False
+  instruction <- newUnboxedRef 0
   pure State { .. }
 
 ports :: State -> [(Word16, Port Word8)]
@@ -396,14 +397,14 @@ reset = do
   writeR16 RegSP 0
   writeRegister offsetHidden (0 :: Word8)
   setIME
-  writePC 0
+  writePC 0xFFFF
 
   liftIO $ do
     directWritePort portKEY1 0x7E
     writeIORef cpuMode ModeNormal
     writeUnboxedRef cycleClocks 4
-    writeIORef haltBug False
-    writeUnboxedRef callDepth 0
+    writeUnboxedRef instruction 0
+    writeUnboxedRef callDepth   0
     Backtrace.reset backtrace
 
   Memory.writeByte P1 0xFF
@@ -474,7 +475,7 @@ reset = do
     writeR16 RegSP 0xFFFE
     writeRegister offsetHidden (0 :: Word8)
     setIME
-    writePC 0x100
+    writePC 0xFF
 
     Memory.writeByte NR11 0xBF
     Memory.writeByte NR12 0xF3
@@ -485,6 +486,18 @@ reset = do
     Memory.writeByte BGP 0xFC
     Memory.writeByte OBP0 0xFF
     Memory.writeByte OBP1 0xFF
+
+    for_ ([0xFF80 ..] `zip` atFF80) (uncurry Memory.writeByte)
+
+ where
+  -- Values that would be written by the boot ROM if we had one.
+  atFF80 =
+    [0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B]
+      ++ [0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D]
+      ++ [0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E]
+      ++ [0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99]
+      ++ [0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC]
+      ++ [0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E]
 
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}
@@ -564,7 +577,10 @@ step = do
   handleInterrupt interrupts = do
     -- Handle an interrupt
     let nextInterrupt = getNextInterrupt interrupts
-    doCall (interruptVector nextInterrupt)
+    let vector = interruptVector nextInterrupt
+    callStackPushed vector
+    push16 =<< readPC
+    jumpTo vector
     clearIME
     State {..} <- asks forState
     liftIO $ clearInterrupt portIF nextInterrupt
@@ -619,109 +635,152 @@ callStackPopped = do
 executeInstruction :: Has env => ReaderT env IO Int
 executeInstruction = run fetchAndExecute
 
+{-# INLINE readNextByte #-}
+readNextByte :: Has env => ReaderT env IO Word8
+readNextByte = do
+  pc <- readPC
+  let pc' = pc + 1
+  writePC pc'
+  Memory.readByte pc'
+
+{-# INLINE advancePC #-}
+advancePC :: Has env => ReaderT env IO ()
+advancePC = do
+  State {..} <- asks forState
+  liftIO . writeUnboxedRef instruction =<< readNextByte
+
 newtype M env a = M {run :: ReaderT env IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
 
 instance Has env => MonadFetch (M env) where
-  nextByte = M $ do
-    pc         <- readPC
+  firstByte = M $ do
     State {..} <- asks forState
-    doHaltBug  <- liftIO $ readIORef haltBug
-    if doHaltBug then liftIO $ writeIORef haltBug False else writePC (pc + 1)
-    Memory.readByte pc
+    liftIO (readUnboxedRef instruction)
+  nextByte = M readNextByte
+  nextWord = M $ do
+    State {..} <- asks forState
+    pc         <- readPC
+    let pc' = pc + 2
+    writePC pc'
+    l <- Memory.readByte (pc' - 1)
+    h <- Memory.readByte pc'
+    pure ((fromIntegral h .<<. 8) .|. fromIntegral l)
 
 instance Has env => MonadGMBZ80 (M env) where
   type ExecuteResult (M env) = Int
   ldrr r r' = M $ do
     writeR8 r =<< readR8 r'
+    advancePC
     pure 1
   ldrn r n = M $ do
     writeR8 r n
+    advancePC
     pure 2
   ldrHL r = M $ do
     hl <- readR16 RegHL
     writeR8 r =<< Memory.readByte hl
+    advancePC
     pure 2
   ldHLr r = M $ do
     hl <- readR16 RegHL
     Memory.writeByte hl =<< readR8 r
+    advancePC
     pure 2
   ldHLn n = M $ do
     runBusCatchup 1
     hl <- readR16 RegHL
     Memory.writeByte hl n
+    advancePC
     pure 2
   ldaBC = M $ do
     bc <- readR16 RegBC
     writeR8 RegA =<< Memory.readByte bc
+    advancePC
     pure 2
   ldaDE = M $ do
     de <- readR16 RegDE
     writeR8 RegA =<< Memory.readByte de
+    advancePC
     pure 2
   ldaC = M $ do
     c <- readR8 RegC
     writeR8 RegA =<< Memory.readByte (0xFF00 + fromIntegral c)
+    advancePC
     pure 2
   ldCa = M $ do
     c <- readR8 RegC
     Memory.writeByte (0xFF00 + fromIntegral c) =<< readR8 RegA
+    advancePC
     pure 2
   ldan n = M $ do
     runBusCatchup 1
     writeR8 RegA =<< Memory.readByte (0xFF00 + fromIntegral n)
+    advancePC
     pure 2
   ldna n = M $ do
     runBusCatchup 1
     Memory.writeByte (0xFF00 + fromIntegral n) =<< readR8 RegA
+    advancePC
     pure 2
   ldann nn = M $ do
     runBusCatchup 2
     writeR8 RegA =<< Memory.readByte nn
+    advancePC
     pure 2
   ldnna nn = M $ do
     runBusCatchup 2
     Memory.writeByte nn =<< readR8 RegA
+    advancePC
     pure 2
   ldaHLI = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
     writeR8 RegA =<< Memory.readByte hl
+    advancePC
     pure 2
   ldaHLD = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
     writeR8 RegA =<< Memory.readByte hl
+    advancePC
     pure 2
   ldBCa = M $ do
     bc <- readR16 RegBC
     Memory.writeByte bc =<< readR8 RegA
+    advancePC
     pure 2
   ldDEa = M $ do
     de <- readR16 RegDE
     Memory.writeByte de =<< readR8 RegA
+    advancePC
     pure 2
   ldHLIa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
     Memory.writeByte hl =<< readR8 RegA
+    advancePC
     pure 2
   ldHLDa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
     Memory.writeByte hl =<< readR8 RegA
+    advancePC
     pure 2
   ldddnn dd nn = M $ do
     writeR16 dd nn
+    advancePC
     pure 3
   ldSPHL = M $ do
     writeR16 RegSP =<< readR16 RegHL
+    advancePC
     pure 2
   push qq = M $ do
     push16 =<< readR16pp qq
+    advancePC
     pure 4
   pop qq = M $ do
     writeR16pp qq =<< pop16
+    advancePC
     pure 3
   ldhl i = M $ do
     sp <- fromIntegral <$> readR16 RegSP
@@ -731,109 +790,136 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (sp .&. 0x00000100) `xor` (wi .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
     setFlags ((if carryCY then flagCY else 0) .|. (if carryH then flagH else 0))
+    advancePC
     pure 3
   ldnnSP nn = M $ do
     Memory.writeWord nn =<< readR16 RegSP
+    advancePC
     pure 5
   addr r = M $ do
     v <- readR8 r
     add8 v 0
+    advancePC
     pure 1
   addn n = M $ do
     add8 n 0
+    advancePC
     pure 2
   addhl = M $ do
     v <- Memory.readByte =<< readR16 RegHL
     add8 v 0
+    advancePC
     pure 2
   adcr r = M $ do
     v     <- readR8 r
     carry <- getCarry
     add8 v carry
+    advancePC
     pure 1
   adcn n = M $ do
     carry <- getCarry
     add8 n carry
+    advancePC
     pure 2
   adchl = M $ do
     v     <- Memory.readByte =<< readR16 RegHL
     carry <- getCarry
     add8 v carry
+    advancePC
     pure 2
   subr r = M $ do
     v <- readR8 r
     sub8 v 0
+    advancePC
     pure 1
   subn n = M $ do
     sub8 n 0
+    advancePC
     pure 2
   subhl = M $ do
     v <- Memory.readByte =<< readR16 RegHL
     sub8 v 0
+    advancePC
     pure 2
   sbcr r = M $ do
     v     <- readR8 r
     carry <- getCarry
     sub8 v (negate carry)
+    advancePC
     pure 1
   sbcn n = M $ do
     carry <- getCarry
     sub8 n (negate carry)
+    advancePC
     pure 2
   sbchl = M $ do
     v     <- Memory.readByte =<< readR16 RegHL
     carry <- getCarry
     sub8 v (negate carry)
+    advancePC
     pure 2
   andr r = M $ do
     andOp8 =<< readR8 r
+    advancePC
     pure 1
   andn n = M $ do
     andOp8 n
+    advancePC
     pure 2
   andhl = M $ do
     andOp8 =<< Memory.readByte =<< readR16 RegHL
+    advancePC
     pure 2
   orr r = M $ do
     orOp8 =<< readR8 r
+    advancePC
     pure 1
   orn n = M $ do
     orOp8 n
+    advancePC
     pure 2
   orhl = M $ do
     orOp8 =<< Memory.readByte =<< readR16 RegHL
+    advancePC
     pure 2
   xorr r = M $ do
     xorOp8 =<< readR8 r
+    advancePC
     pure 1
   xorn n = M $ do
     xorOp8 n
+    advancePC
     pure 2
   xorhl = M $ do
     xorOp8 =<< Memory.readByte =<< readR16 RegHL
+    advancePC
     pure 2
   cpr r = M $ do
     a <- readR8 RegA
     v <- readR8 r
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
+    advancePC
     pure 1
   cpn n = M $ do
     a <- readR8 RegA
     let (_, flags) = adder8 a n (negate (fromIntegral n)) 0
     setFlags (flagN .|. flags)
+    advancePC
     pure 2
   cphl = M $ do
     a <- readR8 RegA
     v <- Memory.readByte =<< readR16 RegHL
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
+    advancePC
     pure 2
   incr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v 1
     writeR8 r v'
     setFlagsMask allExceptCY flags
+    advancePC
     pure 1
   inchl = M $ do
     hl <- readR16 RegHL
@@ -842,12 +928,14 @@ instance Has env => MonadGMBZ80 (M env) where
     let (v', flags) = inc8 v 1
     setFlagsMask allExceptCY flags
     Memory.writeByte hl v'
+    advancePC
     pure 2
   decr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v negative1
     writeR8 r v'
     setFlagsMask allExceptCY (flags .|. flagN)
+    advancePC
     pure 1
   dechl = M $ do
     hl <- readR16 RegHL
@@ -856,6 +944,7 @@ instance Has env => MonadGMBZ80 (M env) where
     let (v', flags) = inc8 v negative1
     setFlagsMask allExceptCY (flags .|. flagN)
     Memory.writeByte hl v'
+    advancePC
     pure 2
   addhlss ss = M $ do
     hl <- readR16 RegHL
@@ -867,6 +956,7 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
     setFlagsMask allExceptZ ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
+    advancePC
     pure 2
   addSP e = M $ do
     sp <- readR16 RegSP
@@ -877,19 +967,23 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
+    advancePC
     pure 4
   incss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v + 1)
+    advancePC
     pure 2
   decss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v - 1)
+    advancePC
     pure 2
   rlca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (rotateL v 1)
+    advancePC
     pure 1
   rla = M $ do
     v <- readR8 RegA
@@ -897,11 +991,13 @@ instance Has env => MonadGMBZ80 (M env) where
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
+    advancePC
     pure 1
   rrca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (rotateR v 1)
+    advancePC
     pure 1
   rra = M $ do
     v <- readR8 RegA
@@ -909,9 +1005,11 @@ instance Has env => MonadGMBZ80 (M env) where
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
+    advancePC
     pure 1
   rlcr r = M $ do
     writeR8 r =<< rlc =<< readR8 r
+    advancePC
     pure 2
   rlchl = M $ do
     hl <- readR16 RegHL
@@ -919,9 +1017,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< rlc v
+    advancePC
     pure 2
   rlr r = M $ do
     writeR8 r =<< rl =<< readR8 r
+    advancePC
     pure 2
   rlhl = M $ do
     hl <- readR16 RegHL
@@ -929,9 +1029,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< rl v
+    advancePC
     pure 2
   rrcr r = M $ do
     writeR8 r =<< rrc =<< readR8 r
+    advancePC
     pure 2
   rrchl = M $ do
     hl <- readR16 RegHL
@@ -939,9 +1041,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< rrc v
+    advancePC
     pure 2
   rrr r = M $ do
     writeR8 r =<< rr =<< readR8 r
+    advancePC
     pure 2
   rrhl = M $ do
     hl <- readR16 RegHL
@@ -949,9 +1053,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< rr v
+    advancePC
     pure 2
   slar r = M $ do
     writeR8 r =<< sla =<< readR8 r
+    advancePC
     pure 2
   slahl = M $ do
     hl <- readR16 RegHL
@@ -959,9 +1065,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< sla v
+    advancePC
     pure 2
   srar r = M $ do
     writeR8 r =<< sra =<< readR8 r
+    advancePC
     pure 2
   srahl = M $ do
     hl <- readR16 RegHL
@@ -969,9 +1077,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< sra v
+    advancePC
     pure 2
   srlr r = M $ do
     writeR8 r =<< srl =<< readR8 r
+    advancePC
     pure 2
   srlhl = M $ do
     hl <- readR16 RegHL
@@ -979,9 +1089,11 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< srl v
+    advancePC
     pure 2
   swapr r = M $ do
     writeR8 r =<< swap =<< readR8 r
+    advancePC
     pure 2
   swaphl = M $ do
     hl <- readR16 RegHL
@@ -989,19 +1101,23 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl =<< swap v
+    advancePC
     pure 2
   bitr r b = M $ do
     v <- readR8 r
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    advancePC
     pure 2
   bithl b = M $ do
     runBusCatchup 1
     v <- Memory.readByte =<< readR16 RegHL
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+    advancePC
     pure 2
   setr r b = M $ do
     v <- readR8 r
     writeR8 r (v `setBit` fromIntegral b)
+    advancePC
     pure 2
   sethl b = M $ do
     hl <- readR16 RegHL
@@ -1009,10 +1125,12 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl (v `setBit` fromIntegral b)
+    advancePC
     pure 2
   resr r b = M $ do
     v <- readR8 r
     writeR8 r (v `clearBit` fromIntegral b)
+    advancePC
     pure 2
   reshl b = M $ do
     hl <- readR16 RegHL
@@ -1020,53 +1138,42 @@ instance Has env => MonadGMBZ80 (M env) where
     v <- Memory.readByte hl
     runBusCatchup 1
     Memory.writeByte hl (v `clearBit` fromIntegral b)
+    advancePC
     pure 2
-  jpnn nn = M $ do
-    writePC nn
-    pure 4
-  jphl = M $ do
-    writePC =<< readR16 RegHL
-    pure 1
+  jpnn nn = 4 <$ M (jumpTo nn)
+  jphl = 1 <$ M (jumpTo =<< readR16 RegHL)
   jpccnn cc nn = M $ do
     shouldJump <- testCondition cc
-    if shouldJump
-      then do
-        writePC nn
-        pure 4
-      else pure 3
+    if shouldJump then 4 <$ jumpTo nn else 3 <$ advancePC
   jr e = M $ do
     pc <- readPC
-    writePC (pc + fromIntegral e)
+    jumpTo (pc + fromIntegral e + 1)
     pure 3
   jrcc cc e = M $ do
     shouldJump <- testCondition cc
     if shouldJump
-      then do
+      then 3 <$ do
         pc <- readPC
-        writePC (pc + fromIntegral e)
-        pure 3
-      else pure 2
+        jumpTo (pc + fromIntegral e + 1)
+      else 2 <$ advancePC
   call nn = 6 <$ M (doCall nn)
   callcc cc nn = M $ do
     shouldJump <- testCondition cc
-    if shouldJump then 6 <$ doCall nn else pure 3
+    if shouldJump then 6 <$ doCall nn else 3 <$ advancePC
   ret = M $ do
     callStackPopped
-    writePC =<< pop16
-    pure 4
+    4 <$ (jumpTo =<< pop16)
   reti = M $ do
     callStackPopped
-    writePC =<< pop16
     setIME
-    pure 4
+    4 <$ (jumpTo =<< pop16)
   retcc cc = M $ do
     shouldJump <- testCondition cc
     if shouldJump
       then do
         callStackPopped
-        writePC =<< pop16
-        pure 5
-      else pure 2
+        5 <$ (jumpTo =<< pop16)
+      else 2 <$ advancePC
   rst t = 4 <$ M (doCall (8 * fromIntegral t))
   daa = M $ do
     flags <- readF
@@ -1089,25 +1196,31 @@ instance Has env => MonadGMBZ80 (M env) where
     setFlagsMask
       allExceptN
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
+    advancePC
     pure 1
   cpl = M $ do
     a <- readR8 RegA
     writeR8 RegA (complement a)
     let flagHN = flagH .|. flagN in setFlagsMask flagHN flagHN
+    advancePC
     pure 1
-  nop = pure 1
+  nop = M $ advancePC >> pure 1
   ccf = M $ do
     cf <- testFlag flagCY
     setFlagsMask allExceptZ (if cf then 0 else flagCY)
+    advancePC
     pure 1
   scf = M $ do
     setFlagsMask allExceptZ flagCY
+    advancePC
     pure 1
   di = M $ do
     clearIME
+    advancePC
     pure 1
   ei = M $ do
     setIMENext
+    advancePC
     pure 1
   halt = M $ do
     ime <- testIME
@@ -1115,8 +1228,14 @@ instance Has env => MonadGMBZ80 (M env) where
       then do
         State {..} <- asks forState
         interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
-        if interrupts == 0 then setMode ModeHalt else liftIO $ writeIORef haltBug True
-      else setMode ModeHalt
+        if interrupts == 0
+          then advancePC >> setMode ModeHalt
+          else do
+            -- The famous HALT bug. We fetch the next instruction byte, but we
+            -- don't increment the PC.
+            pc <- readPC
+            liftIO . writeUnboxedRef instruction =<< Memory.readByte (pc + 1)
+      else advancePC >> setMode ModeHalt
     pure 1
   stop = M $ do
     State {..} <- asks forState
@@ -1130,6 +1249,7 @@ instance Has env => MonadGMBZ80 (M env) where
           directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
           writeUnboxedRef cycleClocks 2
       else setMode ModeStop
+    advancePC
     pure 1
   invalid b = liftIO (throwIO (InvalidInstruction b))
 
@@ -1137,8 +1257,16 @@ instance Has env => MonadGMBZ80 (M env) where
 doCall :: Has env => Word16 -> ReaderT env IO ()
 doCall nn = do
   callStackPushed nn
-  push16 =<< readPC
-  writePC nn
+  pc <- readPC
+  push16 (pc + 1)
+  jumpTo nn
+
+{-# INLINE jumpTo #-}
+jumpTo :: Has env => Word16 -> ReaderT env IO ()
+jumpTo address = do
+  State {..} <- asks forState
+  writePC address
+  liftIO . writeUnboxedRef instruction =<< Memory.readByte address
 
 {-# INLINE push16 #-}
 push16 :: Has env => Word16 -> ReaderT env IO ()

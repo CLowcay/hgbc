@@ -139,7 +139,7 @@ step = do
   let cpuClocks = cycles * cycleClocks
 
   graphicsEvent   <- updateHardware cycles cpuClocks
-  dmaClockAdvance <- DMA.doPendingDMA dmaState
+  dmaClockAdvance <- DMA.doPendingHDMA dmaState
 
   liftIO $ writeUnboxedRef currentTime (now + cpuClocks + dmaClockAdvance)
 
@@ -170,6 +170,7 @@ makeCatchupFunction emulatorState@EmulatorState {..} cycles clocksPerCycle =
 updateHardware :: Int -> Int -> ReaderT EmulatorState IO Graphics.BusEvent
 updateHardware cycles cpuClocks = do
   EmulatorState {..} <- ask
+  DMA.update dmaState cycles
   liftIO $ do
     Serial.update serialState cycles
     Timer.update timerState cycles

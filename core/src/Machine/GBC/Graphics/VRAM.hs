@@ -21,8 +21,6 @@ module Machine.GBC.Graphics.VRAM
   , readVRAM
   , readVRAMBankOffset
   , writeVRAM
-  , copyToOAM
-  , copyVRAMToOAM
   )
 where
 
@@ -199,15 +197,6 @@ writeVRAM VRAM {..} addr value = do
     else do
       bankOffset <- readUnboxedRef vramBank
       VSM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
-
--- Copy a slice of memory into OAM.  The slice MUST have length 160.
-copyToOAM :: VRAM -> VSM.IOVector Word8 -> IO ()
-copyToOAM VRAM {..} = VSM.unsafeMove oam
-
--- DMA from VRAM to OAM does not respect the VRAM bank according to the docs.
-copyVRAMToOAM :: VRAM -> Word16 -> IO ()
-copyVRAMToOAM VRAM {..} from =
-  VSM.unsafeMove oam (VSM.unsafeSlice (fromIntegral from - 0x8000) 160 vram)
 
 encodeColor :: ColorFunction -> Word16 -> Word32
 encodeColor correction color =

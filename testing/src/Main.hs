@@ -15,9 +15,11 @@ import           Control.Monad.Writer
 import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
+import           Data.List
 import           Data.Word
 import           Foreign.Marshal.Alloc
 import           Machine.GBC
+import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.Environment
 import           System.FilePath
@@ -69,14 +71,14 @@ mooneye mooneyePath = do
   let ppuPath        = mooneyePath </> "ppu"
   let serialPath     = mooneyePath </> "serial"
   let timerPath      = mooneyePath </> "timer"
-  tests           <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory mooneyePath)
-  bitsTests       <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory bitsPath)
-  instrTests      <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory instrPath)
-  interruptsTests <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory interruptsPath)
-  oamDMATests     <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory oamDMAPath)
-  ppuTests        <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory ppuPath)
-  serialTests     <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory serialPath)
-  timerTests      <- runIO (filter ((".gb" ==) . takeExtension) <$> listDirectory timerPath)
+  tests           <- runIO (getRomsInOrder <$> listDirectory mooneyePath)
+  bitsTests       <- runIO (getRomsInOrder <$> listDirectory bitsPath)
+  instrTests      <- runIO (getRomsInOrder <$> listDirectory instrPath)
+  interruptsTests <- runIO (getRomsInOrder <$> listDirectory interruptsPath)
+  oamDMATests     <- runIO (getRomsInOrder <$> listDirectory oamDMAPath)
+  ppuTests        <- runIO (getRomsInOrder <$> listDirectory ppuPath)
+  serialTests     <- runIO (getRomsInOrder <$> listDirectory serialPath)
+  timerTests      <- runIO (getRomsInOrder <$> listDirectory timerPath)
   describe "mooneye suite" $ do
     for_ tests (testROM mooneyePath)
     describe "bits" $ for_ bitsTests (testROM bitsPath)
@@ -88,6 +90,7 @@ mooneye mooneyePath = do
     describe "timer" $ for_ timerTests (testROM timerPath)
 
  where
+  getRomsInOrder = sort . filter ((".gb" ==) . takeExtension)
   testROM path rom = specify rom $ do
     (result, output) <- mooneyeTest (path </> rom)
     when (result /= Passed) $ B.putStrLn output
@@ -111,9 +114,14 @@ blarggTestInMemory filename terminalAddress = romTest filename
     LB.toStrict . BB.toLazyByteString <$> readString 0xA004
 
 data MooneyeResult = Passed
-                   | HardwareFailures Int
+                   | HardwareFailures Int Word16
                    | HardwareTestFailed
-                   deriving (Eq, Show)
+                   deriving Eq
+
+instance Show MooneyeResult where
+  show Passed                  = "Passed"
+  show HardwareTestFailed      = "HardwareTestFailed"
+  show (HardwareFailures n pc) = "HardwareFailures " <> show n <> " " <> formatHex pc
 
 mooneyeTest :: FilePath -> IO (MooneyeResult, B.ByteString)
 mooneyeTest filename = romTest filename accumulateSerialOutput terminateOnMagic getResult
@@ -126,12 +134,9 @@ mooneyeTest filename = romTest filename accumulateSerialOutput terminateOnMagic 
     stringResult          <- LB.toStrict . BB.toLazyByteString <$> liftIO (readIORef buffer)
     CPU.RegisterFile {..} <- CPU.getRegisterFile
     let testResult
-          | regA /= 0
-          = HardwareFailures (fromIntegral regA)
-          | regB /= 3 || regC /= 5 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34
-          = HardwareTestFailed
-          | otherwise
-          = Passed
+          | regA /= 0 = HardwareFailures (fromIntegral regA) regPC
+          | regB /= 3 || regC /= 5 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34 = HardwareTestFailed
+          | otherwise = Passed
     pure (testResult, stringResult)
 
 data TestComplete = TestComplete deriving (Eq, Show)

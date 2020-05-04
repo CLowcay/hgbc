@@ -20,6 +20,8 @@ import qualified Data.Vector                   as V
 
 class Monad m => MonadFetch m where
   nextByte :: m Word8
+  firstByte :: m Word8
+  firstByte = nextByte
   nextWord :: m Word16
   nextWord = do
     l <- nextByte
@@ -30,7 +32,7 @@ class Monad m => MonadFetch m where
 {-# INLINE fetchAndExecute #-}
 fetchAndExecute :: (MonadGMBZ80 m, MonadFetch m) => m (ExecuteResult m)
 fetchAndExecute = do
-  b0 <- nextByte
+  b0 <- firstByte
   V.unsafeIndex table0 (fromIntegral b0)
 
 {-# INLINABLE table0 #-}

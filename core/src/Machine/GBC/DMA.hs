@@ -6,7 +6,8 @@ module Machine.GBC.DMA
   ( State(..)
   , init
   , ports
-  , doPendingDMA
+  , update
+  , doPendingHDMA
   , doHBlankHDMA
   , makeHDMASource
   , makeHDMADestination
@@ -29,7 +30,8 @@ data State = State {
     hdmaActive      :: !(IORef Bool)
   , hdmaSource      :: !(IORef Word16)
   , hdmaDestination :: !(IORef Word16)
-  , pendingDMA      :: !(IORef PendingDMA)
+  , dmaOffset       :: !(IORef Word16)
+  , dmaBase         :: !(IORef Word16)
   , pendingHDMA     :: !(IORef PendingDMA)
   , portDMA         :: !(Port Word8)
   , portHDMA1       :: !(Port Word8)
@@ -49,12 +51,16 @@ ports State {..} =
   , (HDMA5, portHDMA5)
   ]
 
+oamBytes :: Word16
+oamBytes = 160
+
 init :: IO State
 init = mdo
   hdmaActive      <- newIORef False
   hdmaSource      <- newIORef 0
   hdmaDestination <- newIORef 0
-  pendingDMA      <- newIORef None
+  dmaOffset       <- newIORef 0
+  dmaBase         <- newIORef 0
   pendingHDMA     <- newIORef None
 
   let loadHDMATargets = do
@@ -66,7 +72,8 @@ init = mdo
         writeIORef hdmaDestination $! makeHDMADestination hdma3 hdma4
 
   portDMA <- newPort 0x00 0xFF $ \_ dma -> do
-    writeIORef pendingDMA $! Pending dma
+    writeIORef dmaOffset oamBytes
+    writeIORef dmaBase $! fromIntegral dma .<<. 8
     pure dma
 
   portHDMA1 <- newPort 0x00 0xFF alwaysUpdate
@@ -91,17 +98,26 @@ init = mdo
 
   pure State { .. }
 
--- | Perform any pending DMA actions for this emulation cycle, and return the
--- number of clocks to stall the CPU.
-doPendingDMA :: Memory.Has env => State -> ReaderT env IO Int
-doPendingDMA State {..} = do
-  maybeDMA <- liftIO $ readIORef pendingDMA
-  case maybeDMA of
-    None        -> pure ()
-    Pending dma -> do
-      liftIO $ writeIORef pendingDMA None
-      Memory.dmaToOAM (fromIntegral dma `shiftL` 8)
+update :: Memory.Has env => State -> Int -> ReaderT env IO ()
+update State {..} cycles0 = do
+  offset <- liftIO $ readIORef dmaOffset
+  when (offset > 0) $ do
+    base <- liftIO $ readIORef dmaBase
+    liftIO . writeIORef dmaOffset =<< loop base cycles0 offset
+ where
+  loop base = innerLoop
+   where
+    innerLoop !cycles !offset = if cycles == 0 || offset == 0
+      then pure offset
+      else do
+        let baseOffset = oamBytes - offset
+        Memory.writeByte (0xFE00 + baseOffset) =<< Memory.readByte (base + baseOffset)
+        innerLoop (cycles - 1) (offset - 1)
 
+-- | Perform any pending HDMA actions for this emulation cycle, and return the
+-- number of clocks to stall the CPU.
+doPendingHDMA :: Memory.Has env => State -> ReaderT env IO Int
+doPendingHDMA State {..} = do
   maybeHDMA <- liftIO $ readIORef pendingHDMA
   case maybeHDMA of
     None         -> pure 0

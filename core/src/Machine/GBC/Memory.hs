@@ -15,7 +15,6 @@ module Machine.GBC.Memory
   , getRamGate
   , readByteLong
   , getROMHeader
-  , dmaToOAM
   , readByte
   , writeByte
   , writeWord
@@ -69,7 +68,6 @@ data State = State {
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
-
 class Has env where
   forState :: env -> State
 
@@ -273,35 +271,6 @@ readByteLong bank addr = do
  where
   offset base = fromIntegral addr - base
   offsetWithBank s base = fromIntegral addr - base + (fromIntegral bank .<<. s)
-
--- | Total number of bytes of OAM memory.
-oamSize :: Int
-oamSize = 160
-
--- | Copy data to OAM memory via DMA.
-dmaToOAM :: Has env => Word16 -> ReaderT env IO ()
-dmaToOAM source = do
-  State {..} <- asks forState
-  liftIO $ case source .>>. 13 of
-    0 -> do
-      content <- readIORef rom0
-      copyToOAM vram . VSM.unsafeSlice (fromIntegral source) oamSize =<< VS.unsafeThaw content
-    1 -> copyToOAM vram . VSM.unsafeSlice (fromIntegral source) oamSize =<< VS.unsafeThaw rom
-    2 -> do
-      bank <- bankOffset mbc
-      copyToOAM vram . VSM.unsafeSlice (bank + offset 0x4000) oamSize =<< VS.unsafeThaw rom
-    3 -> do
-      bank <- bankOffset mbc
-      copyToOAM vram . VSM.unsafeSlice (bank + offset 0x4000) oamSize =<< VS.unsafeThaw rom
-    4 -> copyVRAMToOAM vram source
-    5 -> copyToOAM vram =<< sliceRAM mbc (source - 0xA000) oamSize
-    6
-      | source < 0xD000 -> copyToOAM vram (VSM.unsafeSlice (offset 0xC000) oamSize memRam)
-      | otherwise -> do
-        bank <- readUnboxedRef internalRamBankOffset
-        copyToOAM vram (VSM.unsafeSlice (bank + offset 0xC000) oamSize memRam)
-    _ -> liftIO (throwIO (InvalidSourceForDMA source))
-  where offset base = fromIntegral source - base
 
 -- | Read a byte from memory.
 {-# INLINABLE readByte #-}
