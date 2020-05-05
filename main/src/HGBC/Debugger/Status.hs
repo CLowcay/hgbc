@@ -65,6 +65,7 @@ getStatus emulatorState =
         , field "ramGate" (\g -> if g then 'O' else 'C') <$> getRamGate
         , field "ramBank" formatHex <$> getBank 0xA000
         , allBitsOf "lcdc" <$> readByte LCDC
+        , field "dma" formatHex <$> readByte DMA
         , hdma5
         , field "hdma4" formatHex <$> readByte HDMA4
         , field "hdma3" formatHex <$> readByte HDMA3

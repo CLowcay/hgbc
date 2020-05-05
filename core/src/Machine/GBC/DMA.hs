@@ -22,6 +22,7 @@ import           Machine.GBC.Primitive
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( init )
+import qualified Machine.GBC.Graphics.VRAM     as VRAM
 import qualified Machine.GBC.Memory            as Memory
 
 data PendingDMA = Pending !Word8 | None deriving (Eq, Ord, Show)
@@ -32,6 +33,7 @@ data State = State {
   , hdmaDestination :: !(IORef Word16)
   , dmaOffset       :: !(IORef Word16)
   , dmaBase         :: !(IORef Word16)
+  , vram            :: !VRAM.VRAM
   , pendingHDMA     :: !(IORef PendingDMA)
   , portDMA         :: !(Port Word8)
   , portHDMA1       :: !(Port Word8)
@@ -54,8 +56,8 @@ ports State {..} =
 oamBytes :: Word16
 oamBytes = 160
 
-init :: IO State
-init = mdo
+init :: VRAM.VRAM -> IO State
+init vram = mdo
   hdmaActive      <- newIORef False
   hdmaSource      <- newIORef 0
   hdmaDestination <- newIORef 0
@@ -72,7 +74,7 @@ init = mdo
         writeIORef hdmaDestination $! makeHDMADestination hdma3 hdma4
 
   portDMA <- newPort 0x00 0xFF $ \_ dma -> do
-    writeIORef dmaOffset oamBytes
+    writeIORef dmaOffset (oamBytes + 2)
     writeIORef dmaBase $! fromIntegral dma .<<. 8
     pure dma
 
@@ -102,16 +104,21 @@ update :: Memory.Has env => State -> Int -> ReaderT env IO ()
 update State {..} cycles0 = do
   offset <- liftIO $ readIORef dmaOffset
   when (offset > 0) $ do
-    base <- liftIO $ readIORef dmaBase
-    liftIO . writeIORef dmaOffset =<< loop base cycles0 offset
+    base    <- liftIO $ readIORef dmaBase
+    offset' <- loop base cycles0 offset
+    liftIO $ do
+      when (offset' == oamBytes) $ VRAM.setOAMAccessible vram False
+      when (offset' == 0) $ VRAM.setOAMAccessible vram True
+    liftIO (writeIORef dmaOffset offset')
  where
   loop base = innerLoop
    where
     innerLoop !cycles !offset = if cycles == 0 || offset == 0
       then pure offset
       else do
-        let baseOffset = oamBytes - offset
-        Memory.writeByte (0xFE00 + baseOffset) =<< Memory.readByte (base + baseOffset)
+        when (offset <= oamBytes) $ do
+          let baseOffset = oamBytes - offset
+          liftIO . VRAM.writeOAMDirect vram baseOffset =<< Memory.readByte (base + baseOffset)
         innerLoop (cycles - 1) (offset - 1)
 
 -- | Perform any pending HDMA actions for this emulation cycle, and return the

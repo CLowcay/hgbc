@@ -4,6 +4,7 @@ module Machine.GBC.Graphics.VRAM
   , ColorCorrection(..)
   , initVRAM
   , setVRAMAccessible
+  , setOAMAccessible
   , getVRAMBank
   , setVRAMBank
   , writePalette
@@ -18,12 +19,14 @@ module Machine.GBC.Graphics.VRAM
   , readBankedTileData
   , readOAM
   , writeOAM
+  , writeOAMDirect
   , readVRAM
   , readVRAMBankOffset
   , writeVRAM
   )
 where
 
+import           Control.Monad
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
@@ -44,6 +47,7 @@ data VRAM = VRAM {
   , oam            :: !(VSM.IOVector Word8)
   , rawPalettes    :: !(VSM.IOVector Word16)
   , rgbPalettes    :: !(VSM.IOVector Word32)
+  , oamAccessible  :: !(IORef Bool)
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(UnboxedRef Int)
   , colorFunction  :: !ColorFunction
@@ -56,6 +60,7 @@ initVRAM :: ColorCorrection -> IO VRAM
 initVRAM colorCorrection = do
   vram           <- VSM.new 0x4000
   oam            <- VSM.new 160
+  oamAccessible  <- newIORef True
   vramAccessible <- newIORef True
   vramBank       <- newUnboxedRef 0
   rawPalettes    <- VSM.replicate totalPaletteEntries 0x7FFF
@@ -69,6 +74,10 @@ initVRAM colorCorrection = do
 {-# INLINE setVRAMAccessible #-}
 setVRAMAccessible :: VRAM -> Bool -> IO ()
 setVRAMAccessible VRAM {..} = writeIORef vramAccessible
+
+{-# INLINE setOAMAccessible #-}
+setOAMAccessible :: VRAM -> Bool -> IO ()
+setOAMAccessible VRAM {..} = writeIORef oamAccessible
 
 {-# INLINE getVRAMBank #-}
 getVRAMBank :: VRAM -> IO Int
@@ -165,11 +174,19 @@ readBankedTileData VRAM {..} tile = do
 
 {-# INLINE readOAM #-}
 readOAM :: VRAM -> Word16 -> IO Word8
-readOAM VRAM {..} addr = VSM.unsafeRead oam (fromIntegral (addr - 0xFE00))
+readOAM VRAM {..} addr = do
+  accessible <- readIORef oamAccessible
+  if accessible then VSM.unsafeRead oam (fromIntegral (addr - 0xFE00)) else pure 0xFF
 
 {-# INLINE writeOAM #-}
 writeOAM :: VRAM -> Word16 -> Word8 -> IO ()
-writeOAM VRAM {..} addr = VSM.unsafeWrite oam (fromIntegral (addr - 0xFE00))
+writeOAM VRAM {..} addr value = do
+  accessible <- readIORef oamAccessible
+  when accessible $ VSM.unsafeWrite oam (fromIntegral (addr - 0xFE00)) value
+
+{-# INLINE writeOAMDirect #-}
+writeOAMDirect :: VRAM -> Word16 -> Word8 -> IO ()
+writeOAMDirect VRAM {..} addr = VSM.unsafeWrite oam (fromIntegral addr)
 
 {-# INLINE readVRAM #-}
 readVRAM :: VRAM -> Word16 -> IO Word8

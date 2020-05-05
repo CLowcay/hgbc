@@ -89,7 +89,7 @@ initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsS
     portIE        <- newPort 0x00 0xFF alwaysUpdate
 
     cpu           <- CPU.init portIF portIE mode (makeCatchupFunction emulatorState)
-    dmaState      <- DMA.init
+    dmaState      <- DMA.init vram
     graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
     keypadState   <- Keypad.init portIF
     audioState    <- Audio.init
