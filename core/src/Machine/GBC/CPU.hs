@@ -1217,11 +1217,10 @@ jumpTo address = do
 push16 :: Has env => Word16 -> ReaderT env IO ()
 push16 value = do
   sp <- readR16 RegSP
-  let sp' = sp - 2
-  writeR16 RegSP sp'
-  Memory.writeByte sp' (fromIntegral (value .&. 0xFF))
+  writeR16 RegSP (sp - 2)
+  Memory.writeByte (sp - 1) (fromIntegral (value .>>. 8))
   runBusCatchup 1
-  Memory.writeByte (sp' + 1) (fromIntegral (value .>>. 8))
+  Memory.writeByte (sp - 2) (fromIntegral (value .&. 0xFF))
   runBusCatchup 1
 
 {-# INLINE pop16 #-}
