@@ -2,6 +2,7 @@
 
 module Machine.GBC.CPU.ISA
   ( Register8(..)
+  , RegisterHalf(..)
   , Register16(..)
   , RegisterPushPop(..)
   , ConditionCode(..)
@@ -14,6 +15,9 @@ import           Data.Word
 
 -- | An 8-bit register
 data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Bounded, Enum)
+
+-- | Half-words of 16-bit registers.
+data RegisterHalf = RegSPH | RegSPL | RegPCH | RegPCL deriving (Eq, Ord, Bounded, Enum)
 
 -- | A 16-bit register.
 data Register16 = RegSP | RegBC | RegDE | RegHL deriving (Eq, Ord, Bounded, Enum)

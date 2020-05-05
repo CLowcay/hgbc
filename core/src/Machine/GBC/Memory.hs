@@ -17,7 +17,6 @@ module Machine.GBC.Memory
   , getROMHeader
   , readByte
   , writeByte
-  , writeWord
   , copy16
   , readChunk
   )
@@ -311,12 +310,6 @@ readByte addr = do
       | otherwise -> VSM.unsafeRead memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address " ++ show x)
   where offset base = fromIntegral addr - base
-
--- | Write a word to memory.
-writeWord :: Has env => Word16 -> Word16 -> ReaderT env IO ()
-writeWord addr value = do
-  writeByte addr       (fromIntegral (value .&. 0xFF))
-  writeByte (addr + 1) (fromIntegral (value .>>. 8))
 
 -- | Write to memory.
 writeByte :: Has env => Word16 -> Word8 -> ReaderT env IO ()

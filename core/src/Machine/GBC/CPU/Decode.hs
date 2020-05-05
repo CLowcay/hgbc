@@ -20,12 +20,13 @@ import qualified Data.Vector                   as V
 
 class Monad m => MonadFetch m where
   nextByte :: m Word8
-  nextWord :: m Word16
-  nextWord = do
-    l <- nextByte
-    h <- nextByte
-    pure (fromIntegral l .|. (fromIntegral h .<<. 8))
-  {-# MINIMAL nextByte #-}
+
+{-# INLINE nextWord #-}
+nextWord :: MonadFetch m => m Word16
+nextWord = do
+  l <- nextByte
+  h <- nextByte
+  pure (fromIntegral l .|. (fromIntegral h .<<. 8))
 
 {-# INLINE fetchAndExecute #-}
 fetchAndExecute :: (MonadGMBZ80 m, MonadFetch m) => Word8 -> m (ExecuteResult m)

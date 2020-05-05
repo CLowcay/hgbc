@@ -132,16 +132,14 @@ getEmulatorClock = do
 step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
-  cycles             <- CPU.step
-  now                <- liftIO $ readUnboxedRef currentTime
+  CPU.step
+  now             <- liftIO $ readUnboxedRef currentTime
 
-  cycleClocks        <- CPU.getCycleClocks
-  let cpuClocks = cycles * cycleClocks
-
-  graphicsEvent   <- updateHardware cycles cpuClocks
+  cycleClocks     <- CPU.getCycleClocks
+  graphicsEvent   <- updateHardware 1 cycleClocks
   dmaClockAdvance <- DMA.doPendingHDMA dmaState
 
-  liftIO $ writeUnboxedRef currentTime (now + cpuClocks + dmaClockAdvance)
+  liftIO $ writeUnboxedRef currentTime (now + cycleClocks + dmaClockAdvance)
 
   if dmaClockAdvance > 0
     then void $ updateHardware (dmaClockAdvance `div` cycleClocks) dmaClockAdvance
@@ -151,7 +149,7 @@ step = do
             hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
             when (hdmaClockAdvance > 0) $ do
               void $ updateHardware (hdmaClockAdvance `div` cycleClocks) hdmaClockAdvance
-              liftIO $ writeUnboxedRef currentTime (now + cpuClocks + hdmaClockAdvance)
+              liftIO $ writeUnboxedRef currentTime (now + cycleClocks + hdmaClockAdvance)
       in  case graphicsEvent of
             Graphics.NoGraphicsEvent -> do
               pending <- liftIO $ readIORef hblankPending
