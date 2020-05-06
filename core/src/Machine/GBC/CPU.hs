@@ -578,15 +578,16 @@ step = do
   case mode of
     ModeNormal -> if interrupts /= 0 && ime
       then handleInterrupt interrupts
-      else do
-        incPC
-        executeInstruction
+      else incPC >> executeInstruction
     ModeHalt -> when (interrupts /= 0) $ do
       liftIO (writeIORef cpuMode ModeNormal)
+      -- Don't increment the PC before calling executeInstruction in this case.
+      -- The code in the HALT instruction will increment PC for us, unless it
+      -- doesn't in which case the HALT bug is triggered.
       if ime then handleInterrupt interrupts else executeInstruction
     ModeStop -> when (interrupts /= 0) $ do
       liftIO (writeIORef cpuMode ModeNormal)
-      if ime then handleInterrupt interrupts else executeInstruction
+      if ime then handleInterrupt interrupts else incPC >> executeInstruction
 
  where
   handleInterrupt interrupts = do
@@ -653,30 +654,20 @@ executeInstruction = do
   State {..} <- asks forState
   run . fetchAndExecute =<< liftIO (readUnboxedRef instruction)
 
-{-# INLINABLE readNextByte #-}
-readNextByte :: Has env => ReaderT env IO Word8
-readNextByte = do
-  pc <- readPC
-  writePC (pc + 1)
-  Memory.readByte pc
-
 {-# INLINABLE fetchNextByte #-}
 fetchNextByte :: Has env => ReaderT env IO ()
 fetchNextByte = do
   State {..} <- asks forState
   liftIO . writeUnboxedRef instruction =<< Memory.readByte =<< readPC
 
-{-# INLINABLE fetchAndAdvancePC #-}
-fetchAndAdvancePC :: Has env => ReaderT env IO ()
-fetchAndAdvancePC = do
-  State {..} <- asks forState
-  liftIO . writeUnboxedRef instruction =<< readNextByte
-
 newtype M env a = M {run :: ReaderT env IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
 
 instance Has env => MonadFetch (M env) where
-  nextByte = M (readNextByte <* runBusCatchup 1)
+  nextByte = M $ do
+    pc <- readPC
+    writePC (pc + 1)
+    Memory.readByte pc <* runBusCatchup 1
 
 instance Has env => MonadGMBZ80 (M env) where
   type ExecuteResult (M env) = ()
@@ -1157,30 +1148,26 @@ instance Has env => MonadGMBZ80 (M env) where
   di   = M (clearIME >> fetchNextByte)
   ei   = M (setIMENext >> fetchNextByte)
   halt = M $ do
+    State {..} <- asks forState
+    interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
     ime <- testIME
-    if ime
-      then fetchAndAdvancePC >> setMode ModeHalt
-      else do
-        State {..} <- asks forState
-        interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
-        if interrupts == 0
-          then fetchAndAdvancePC >> setMode ModeHalt
-          -- Normally we must increment the PC before entering HALT mode, but in
-          -- this case we "forget". This will simulate the famous HALT bug.
-          else fetchNextByte >> setMode ModeHalt
+    fetchNextByte
+    when (not ime && interrupts == 0) incPC
+    setMode ModeHalt
   stop = M $ do
     State {..} <- asks forState
     key1       <- liftIO (directReadPort portKEY1)
     if isFlagSet flagSpeedSwitch key1
-      then if isFlagSet flagDoubleSpeed key1
-        then liftIO $ do
-          directWritePort portKEY1 0x7E
-          writeUnboxedRef cycleClocks 4
-        else liftIO $ do
-          directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
-          writeUnboxedRef cycleClocks 2
-      else setMode ModeStop
-    fetchAndAdvancePC
+      then do
+        liftIO $ if isFlagSet flagDoubleSpeed key1
+          then do
+            directWritePort portKEY1 0x7E
+            writeUnboxedRef cycleClocks 4
+          else do
+            directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
+            writeUnboxedRef cycleClocks 2
+        fetchNextByte
+      else fetchNextByte >> setMode ModeStop
   invalid b = liftIO (throwIO (InvalidInstruction b))
 
 {-# INLINE doCall #-}

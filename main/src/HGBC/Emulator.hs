@@ -13,10 +13,8 @@ module HGBC.Emulator
   )
 where
 
-import           Control.Concurrent.MVar
-import           Control.Concurrent.STM
 import           Control.Concurrent
-import           Control.Exception
+import           Control.Concurrent.STM
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
@@ -31,8 +29,10 @@ import           HGBC.Errors
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
+import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.FilePath
+import           UnliftIO.Exception
 import qualified Data.ByteString               as B
 import qualified HGBC.Config.CommandLine       as CommandLine
 import qualified HGBC.Config.Paths             as Path
@@ -144,7 +144,14 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
 run :: RuntimeConfig -> ReaderT GBC.EmulatorState IO ()
 run RuntimeConfig {..} = do
   GBC.reset
-  if debugMode then pauseLoop else runEmulatorLoop Nothing Nothing
+  (if debugMode then pauseLoop else runEmulatorLoop Nothing Nothing)
+    `catch` (\fault -> do
+              pc   <- readPC
+              bank <- getBank pc
+              liftIO $ do
+                putStrLn ("At " <> formatHex bank <> ":" <> formatHex pc)
+                putStrLn (displayException (fault :: GBC.Fault))
+            )
 
  where
   runEmulatorLoop runToAddress level = do

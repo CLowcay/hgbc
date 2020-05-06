@@ -30,8 +30,8 @@ data TIMAState
 -- | The current state of the timer hardware.
 data State = State {
     systemDIV    :: !(UnboxedRef Word16)
-  , extraClockRef:: !(IORef Bool)
-  , timaMaskRef  :: !(UnboxedRef Word16)
+  , edgeMaskRef  :: !(UnboxedRef Word16)
+  , lastEdgeRef  :: !(UnboxedRef Word16)
   , timaStateRef :: !(IORef TIMAState)
   , clockAudio   :: !(IO ())
   , portDIV      :: !(Port Word8)
@@ -45,11 +45,11 @@ data State = State {
 -- | Create the initial timer state.
 init :: IO () -> Port Word8 -> Port Word8 -> IO State
 init clockAudio portKEY1 portIF = do
-  systemDIV     <- newUnboxedRef 0
-  extraClockRef <- newIORef False
-  timaMaskRef   <- newUnboxedRef (decodeTimaMask 0)
-  timaStateRef  <- newIORef TIMANormal
-  portDIV       <- newPortWithReadAction
+  systemDIV    <- newUnboxedRef 0
+  edgeMaskRef  <- newUnboxedRef (decodeTimaMask 0)
+  lastEdgeRef  <- newUnboxedRef 0
+  timaStateRef <- newIORef TIMANormal
+  portDIV      <- newPortWithReadAction
     0x00
     0x00
     (\_ -> do
@@ -63,18 +63,16 @@ init clockAudio portKEY1 portIF = do
   portTMA <- newPort 0x00 0xFF $ \_ v' -> v' <$ do
     timaState <- readIORef timaStateRef
     when (timaState == TIMAReload) $ directWritePort portTIMA v'
-  portTAC <- newPort 0xF8 0x07 $ \v v' -> v' <$ do
-    systemDIV0 <- readUnboxedRef systemDIV
-    timaMask   <- readUnboxedRef timaMaskRef
-    let timaMask'    = decodeTimaMask v'
-    let timerSwitch0 = systemDIV0 .&. timaMask /= 0 && timerStarted v
-    let timerSwitch1 = systemDIV0 .&. timaMask' /= 0 && timerStarted v'
-    when (timerSwitch0 && not timerSwitch1) $ writeIORef extraClockRef True
-    writeUnboxedRef timaMaskRef timaMask'
+  portTAC <- newPort 0xF8 0x07 $ \_ v' -> v' <$ do
+    edgeMask <- readUnboxedRef edgeMaskRef
+    writeUnboxedRef edgeMaskRef ((edgeMask .&. complement allTimaBits) .|. decodeTimaMask v')
   pure State { .. }
 
 ports :: State -> [(Word16, Port Word8)]
 ports State {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
+
+allTimaBits :: Word16
+allTimaBits = 0x02A8
 
 decodeTimaMask :: Word8 -> Word16
 decodeTimaMask tac = case tac .&. 3 of
@@ -93,38 +91,41 @@ timerInterrupt = flagInterrupt InterruptTimerOverflow
 
 -- | Detect a falling edge.
 fallingEdge :: (Bits a, Integral a) => a -> a -> a -> Bool
-fallingEdge mask v v' = mask .&. v .&. complement (mask .&. v') /= 0
+fallingEdge mask v v' = mask .&. v /= 0 && mask .&. v' == 0
 
 -- | Update the systemDIV, IF, TIMA, and TIMA state.
 updateClocks
   :: Word16                            -- ^ TIMA edge detector bit
   -> Word8                             -- ^ TMA register
-  -> Bool                              -- ^ TIMA enabled
+  -> Word16                            -- ^ TIMA enabled
   -> Word8                             -- ^ Initial IF register
   -> Word8                             -- ^ Initial TIMA register
   -> TIMAState                         -- ^ Initial TIMA state
-  -> Bool                              -- ^ True if TIMA needs an extra clock
+  -> Word16                            -- ^ Previous edge detector input
   -> Word16                            -- ^ Initial systemDIV
   -> Int                               -- ^ Clocks to advance
-  -> (Word16, Word8, Word8, TIMAState) -- ^ (systemDIV, IF, TIMA, TIMA state)
-updateClocks timaMask tma timaEnabled = outerLoop
+  -> (Word16, Word16, Word8, Word8, TIMAState) -- ^ (systemDIV, edge, IF, TIMA, TIMA state)
+updateClocks edgeMask tma timaEnabled = outerLoop
  where
-  outerLoop !rif !tima !timaState !extraClock = innerLoop
+  outerLoop !rif !tima !timaState = innerLoop
    where
-    innerLoop !systemClock 0 = (systemClock, rif, tima, timaState)
-    innerLoop !systemClock !cycles =
+    innerLoop !systemClock !edge 0 = (systemClock, edge, rif, tima, timaState)
+    innerLoop !systemClock !edge !cycles =
       let systemClock' = systemClock + 4
           cycles'      = cycles - 1
+          edge'        = edgeMask .&. systemClock' .&. timaEnabled
       in  case timaState of
-            TIMANormal ->
-              if extraClock || (timaEnabled && fallingEdge timaMask systemClock systemClock')
-                then if tima == 0xFF
-                  then outerLoop rif 0 TIMAOverflow False systemClock' cycles'
-                  else outerLoop rif (tima + 1) TIMANormal False systemClock' cycles'
-                else innerLoop systemClock' cycles'
+            TIMANormal -> if fallingEdge allTimaBits edge edge'
+              then if tima == 0xFF
+                then outerLoop rif 0 TIMAOverflow systemClock' edge' cycles'
+                else outerLoop rif (tima + 1) TIMANormal systemClock' edge' cycles'
+              else innerLoop systemClock' edge' cycles'
             TIMAOverflow ->
-              outerLoop (rif .|. timerInterrupt) tma TIMAReload False systemClock' cycles'
-            TIMAReload -> outerLoop rif tma TIMANormal False systemClock' cycles'
+              outerLoop (rif .|. timerInterrupt) tma TIMAReload systemClock' edge' cycles'
+            TIMAReload -> outerLoop rif tma TIMANormal systemClock' edge' cycles'
+
+allAudioFrameBits :: Word16
+allAudioFrameBits = 0x3000
 
 update :: State -> Int -> IO ()
 update State {..} advance = do
@@ -135,17 +136,17 @@ update State {..} advance = do
   tma  <- directReadPort portTMA
   tac  <- directReadPort portTAC
   rif  <- directReadPort portIF
-  let timaEnabled = timerStarted tac
+  let timaEnabled = if timerStarted tac then 0xFFFF else 0
   systemDIV0 <- readUnboxedRef systemDIV
-  timaMask   <- readUnboxedRef timaMaskRef
+  timaMask   <- readUnboxedRef edgeMaskRef
   timaState  <- readIORef timaStateRef
-  extraClock <- readIORef extraClockRef
-  let (systemDIV1, rif', tima', timaState') =
-        updateClocks timaMask tma timaEnabled rif tima timaState extraClock systemDIV0 advance
+  lastEdge   <- readUnboxedRef lastEdgeRef
+  let (systemDIV1, edge, rif', tima', timaState') =
+        updateClocks timaMask tma timaEnabled rif tima timaState systemDIV0 lastEdge advance
+  let edge' = edge .|. (audioFrameMask .&. systemDIV1)
+  writeUnboxedRef lastEdgeRef edge'
   directWritePort portTIMA tima'
   directWritePort portIF   rif'
   writeIORef timaStateRef $! timaState'
   writeUnboxedRef systemDIV systemDIV1
-  when extraClock $ writeIORef extraClockRef False
-
-  when (fallingEdge audioFrameMask systemDIV0 systemDIV1) clockAudio
+  when (fallingEdge allAudioFrameBits lastEdge edge') clockAudio

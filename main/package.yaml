@@ -39,6 +39,7 @@ dependencies:
 - stm
 - text
 - time
+- unliftio
 - unordered-containers
 - vector
 - wai

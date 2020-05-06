@@ -22,12 +22,14 @@ module Machine.GBC
   , Graphics.Sync(..)
   , EmulatorMode(..)
   , EmulatorState(..)
+  , Fault(..)
   )
 where
 
 import           Control.Monad.Reader
 import           Data.Word
 import           Machine.GBC.Emulator
+import           Machine.GBC.Errors
 import           Machine.GBC.Graphics.VRAM
 import           Machine.GBC.Mode
 import           Machine.GBC.Primitive

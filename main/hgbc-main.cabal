@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1fbcac6a079fc98f4434e364ed6a79f6e7f262396cde4293afc897fbc4da82df
+-- hash: 2899039651917745480fc34f2a14400eda0aa6521dd875111c164fdd00cb5e40
 
 name:           hgbc-main
 version:        0.1.0.0
@@ -78,6 +78,7 @@ library
     , stm
     , text
     , time
+    , unliftio
     , unordered-containers
     , vector
     , wai
