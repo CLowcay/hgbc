@@ -561,6 +561,7 @@ interruptVector InterruptLCDCStat          = 0x48
 interruptVector InterruptTimerOverflow     = 0x50
 interruptVector InterruptEndSerialTransfer = 0x58
 interruptVector InterruptP1Low             = 0x60
+interruptVector InterruptCancelled         = 0
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE step #-}
@@ -576,9 +577,8 @@ step = do
   -- Deal with HALT mode
   mode <- liftIO (readIORef cpuMode)
   case mode of
-    ModeNormal -> if interrupts /= 0 && ime
-      then handleInterrupt interrupts
-      else incPC >> executeInstruction
+    ModeNormal ->
+      if interrupts /= 0 && ime then handleInterrupt interrupts else incPC >> executeInstruction
     ModeHalt -> when (interrupts /= 0) $ do
       liftIO (writeIORef cpuMode ModeNormal)
       -- Don't increment the PC before calling executeInstruction in this case.
@@ -591,16 +591,25 @@ step = do
 
  where
   handleInterrupt interrupts = do
-    -- Handle an interrupt
-    let nextInterrupt = getNextInterrupt interrupts
+    State {..} <- asks forState
+
+    runBusCatchup 2
+
+    sp <- readR16 RegSP
+    writeR16 RegSP (sp - 2)
+
+    Memory.writeByte (sp - 1) =<< readRHalf RegPCH
+    runBusCatchup 1
+
+    ie <- liftIO (directReadPort portIE)
+    Memory.writeByte (sp - 2) =<< readRHalf RegPCL
+    runBusCatchup 1
+
+    let nextInterrupt = getNextInterrupt (interrupts .&. ie)
     let vector        = interruptVector nextInterrupt
     callStackPushed vector
-    runBusCatchup 2
-    push16 =<< readPC
-    runBusCatchup 1
     jumpTo vector
     clearIME
-    State {..} <- asks forState
     liftIO $ clearInterrupt portIF nextInterrupt
 
 {-# INLINE getCycleClocks #-}
@@ -1150,7 +1159,7 @@ instance Has env => MonadGMBZ80 (M env) where
   halt = M $ do
     State {..} <- asks forState
     interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
-    ime <- testIME
+    ime        <- testIME
     fetchNextByte
     when (not ime && interrupts == 0) incPC
     setMode ModeHalt

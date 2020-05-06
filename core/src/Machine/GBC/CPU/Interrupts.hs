@@ -17,6 +17,7 @@ data Interrupt = InterruptVBlank
                | InterruptTimerOverflow
                | InterruptEndSerialTransfer
                | InterruptP1Low
+               | InterruptCancelled
                deriving (Eq, Ord, Show, Bounded, Enum)
 
 flagInterrupt :: Interrupt -> Word8
@@ -25,6 +26,7 @@ flagInterrupt InterruptLCDCStat          = 0x02
 flagInterrupt InterruptTimerOverflow     = 0x04
 flagInterrupt InterruptEndSerialTransfer = 0x08
 flagInterrupt InterruptP1Low             = 0x10
+flagInterrupt InterruptCancelled         = 0
 
 {-# INLINE raiseInterrupt #-}
 raiseInterrupt :: Port Word8 -> Interrupt -> IO ()
@@ -51,4 +53,4 @@ getNextInterrupt pendingInterrupts = case countTrailingZeros pendingInterrupts o
   2 -> InterruptTimerOverflow
   3 -> InterruptEndSerialTransfer
   4 -> InterruptP1Low
-  n -> error ("Invalid pending interrupt " <> show n)
+  _ -> InterruptCancelled
