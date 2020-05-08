@@ -592,7 +592,8 @@ step = do
   handleInterrupt interrupts = do
     State {..} <- asks forState
 
-    runBusCatchup 2
+    runBusCatchup 1
+    runBusCatchup 1
 
     sp <- readR16 RegSP
     writeR16 RegSP (sp - 2)
@@ -951,7 +952,8 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    runBusCatchup 2
+    runBusCatchup 1
+    runBusCatchup 1
     fetchNextByte
   incss ss = M $ do
     v <- readR16 ss

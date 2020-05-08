@@ -88,21 +88,18 @@ notifyIncoming State {..} period incomingValue = do
 update :: State -> Int -> IO ()
 update State {..} cycles = do
   transferActive <- readIORef transferActiveRef
-  when transferActive $ do
-    reloads <- updateReloadingCounter shiftClock cycles $ readUnboxedRef clockPeriod
-    when (reloads > 0) $ do
-      counter <- readUnboxedRef bitCounter
-      writeUnboxedRef bitCounter =<< clockSerial counter reloads
+  when transferActive $ updateCounter shiftClock cycles $ do
+    counter <- readUnboxedRef bitCounter
+    writeUnboxedRef bitCounter =<< clockSerial counter
+    readUnboxedRef clockPeriod
 
  where
-  clockSerial counter 0      = pure counter
-  clockSerial counter clocks = do
+  clockSerial counter = do
     value <- if counter /= 0
       then readUnboxedRef incoming
       else do
         v <- takeMVar (inp sync)
-        writeUnboxedRef incoming v
-        pure v
+        v <$ writeUnboxedRef incoming v
 
     sb <- directReadPort portSB
     let value' = rotateL value 1
@@ -110,11 +107,9 @@ update State {..} cycles = do
     directWritePort portSB (sb .<<. 1 .|. (value' .&. 1))
 
     let counter' = (counter + 1) .&. 3
-    if counter' /= 0
-      then clockSerial counter' (clocks - 1)
-      else do
-        sc <- directReadPort portSC
-        directWritePort portSC (sc .&. 0x7F)
-        raiseInterrupt portIF InterruptEndSerialTransfer
-        writeIORef transferActiveRef False
-        pure counter'
+    when (counter' == 0) $ do
+      sc <- directReadPort portSC
+      directWritePort portSC (sc .&. 0x7F)
+      raiseInterrupt portIF InterruptEndSerialTransfer
+      writeIORef transferActiveRef False
+    pure counter'

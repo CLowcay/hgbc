@@ -127,19 +127,17 @@ instance Channel WaveChannel where
 
   masterClock channel@WaveChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
-    when isEnabled $ do
-      reloads <- updateReloadingCounter frequencyCounter clockAdvance $ do
-        register3 <- directReadPort port3
-        register4 <- directReadPort port4
-        pure (getTimerPeriod (getFrequency register3 register4))
+    when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
+      i0 <- readUnboxedRef sample
+      let i = (i0 + 1) .&. 0x1F
+      writeUnboxedRef sample i
+      sampleByte <- directReadPort (portWaveTable V.! (i .>>. 1))
+      writeUnboxedRef sampleBuffer sampleByte
+      generateOutput channel sampleByte i
 
-      when (reloads > 0) $ do
-        i0 <- readUnboxedRef sample
-        let i = (i0 + reloads) .&. 0x1F
-        writeUnboxedRef sample i
-        sampleByte <- directReadPort (portWaveTable V.! (i .>>. 1))
-        writeUnboxedRef sampleBuffer sampleByte
-        generateOutput channel sampleByte i
+      register3 <- directReadPort port3
+      register4 <- directReadPort port4
+      pure (getTimerPeriod (getFrequency register3 register4))
 
   directReadPorts WaveChannel {..} =
     (,,,,)

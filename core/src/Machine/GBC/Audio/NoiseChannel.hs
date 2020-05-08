@@ -125,4 +125,4 @@ ratio :: Word8 -> Int
 ratio register3 = fromIntegral register3 .&. 0x07
 
 timerPeriod :: Word8 -> Int
-timerPeriod register3 = 32 `max` (4 * (ratio register3 + 1) * (1 .<<. (shiftClock register3 + 1)))
+timerPeriod register3 = 4 `max` (4 * (ratio register3 + 1) * (1 .<<. (shiftClock register3 + 1)))

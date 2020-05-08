@@ -133,19 +133,19 @@ instance Channel PulseChannel where
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
-    when isEnabled $ do
-      reloads <- updateReloadingCounter frequencyCounter clockAdvance $ do
-        register3 <- directReadPort port3
-        register4 <- directReadPort port4
-        pure (getTimerPeriod (getFrequency register3 register4))
-
+    when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
       i0 <- readUnboxedRef dutyCycle
-      let i = (i0 + reloads) .&. 7
+      let i = (i0 + 1) .&. 7
       writeUnboxedRef dutyCycle i
 
       register1 <- directReadPort port1
       sample    <- envelopeVolume envelope
       writeUnboxedRef output (if dutyCycleOutput register1 i then sample else 0)
+
+      register3 <- directReadPort port3
+      register4 <- directReadPort port4
+      pure (getTimerPeriod (getFrequency register3 register4))
+
 
   directReadPorts PulseChannel {..} =
     (,,,,)

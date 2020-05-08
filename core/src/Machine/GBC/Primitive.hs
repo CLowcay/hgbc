@@ -8,7 +8,6 @@ module Machine.GBC.Primitive
   , getCounter
   , reloadCounter
   , updateCounter
-  , updateReloadingCounter
   , UpdateResult(..)
   , StateCycle
   , newStateCycle
@@ -61,46 +60,37 @@ data Counter = Counter {
 
 newCounter :: MonadIO m => Int -> m Counter
 newCounter counterMask = do
-  counterValue <- liftIO $ newUnboxedRef 0
+  counterValue <- newUnboxedRef 0
   pure Counter { .. }
 
 {-# INLINE reloadCounter #-}
 reloadCounter :: MonadIO m => Counter -> Int -> m ()
 reloadCounter Counter {..} reload =
-  liftIO $ writeUnboxedRef counterValue (if reload == 0 then counterMask + 1 else reload)
+  writeUnboxedRef counterValue (if reload == 0 then counterMask + 1 else reload)
 
 {-# INLINE getCounter #-}
 getCounter :: MonadIO m => Counter -> m Int
 getCounter Counter {..} = do
-  v <- liftIO $ readUnboxedRef counterValue
+  v <- readUnboxedRef counterValue
   pure (v .&. counterMask)
 
 {-# INLINE updateCounter #-}
 updateCounter :: MonadIO m => Counter -> Int -> m Int -> m ()
-updateCounter counter update k = void $ updateReloadingCounter counter update k
-
-{-# INLINE updateReloadingCounter #-}
-updateReloadingCounter :: MonadIO m => Counter -> Int -> m Int -> m Int
-updateReloadingCounter Counter {..} update getReloadValue = do
-  count <- liftIO $ readUnboxedRef counterValue
+updateCounter Counter {..} update getReloadValue = do
+  count <- readUnboxedRef counterValue
   if update < count
-    then do
-      liftIO $ writeUnboxedRef counterValue (count - update)
-      pure 0
+    then writeUnboxedRef counterValue (count - update)
     else do
       reload <- getReloadValue
       let period = if reload == 0 then counterMask + 1 else reload
-      let update'             = update - count
-      let (reloads, update'') = update' `divMod` period
-      liftIO $ writeUnboxedRef counterValue (period - update'')
-      pure (reloads + 1)
+      writeUnboxedRef counterValue (count - update + period)
 
 data StateCycle a = StateCycle !(UnboxedRef Int) !(IORef [(a, Int)])
 
 newStateCycle :: MonadIO m => [(a, Int)] -> m (StateCycle a)
 newStateCycle [] = error "Tried to create a counter with no states!"
 newStateCycle states@((_, count0) : _) =
-  liftIO $ StateCycle <$> newUnboxedRef count0 <*> newIORef (cycle states)
+  StateCycle <$> newUnboxedRef count0 <*> liftIO (newIORef (cycle states))
 
 {-# INLINE getStateCycle #-}
 getStateCycle :: (MonadIO m, MonadFail m) => StateCycle a -> m a
@@ -117,18 +107,18 @@ getUpdateResult (HasChangedTo x) = x
 {-# INLINE updateStateCycle #-}
 updateStateCycle :: MonadIO m => StateCycle a -> Int -> (a -> m ()) -> m (UpdateResult a)
 updateStateCycle (StateCycle cycles states) update k = do
-  count <- liftIO $ readUnboxedRef cycles
+  count <- readUnboxedRef cycles
   let count' = count - update
   if count' > 0
-    then liftIO $ do
+    then do
       writeUnboxedRef cycles count'
-      NoChange . fst . head <$> readIORef states
+      NoChange . fst . head <$> liftIO (readIORef states)
     else do
       stateList <- liftIO $ readIORef states
       let stateList'                   = tail stateList
       let (nextState, nextStateLength) = head stateList'
       liftIO $ writeIORef states $! stateList'
-      liftIO $ writeUnboxedRef cycles (count' + nextStateLength)
+      writeUnboxedRef cycles (count' + nextStateLength)
       k nextState
       pure (HasChangedTo nextState)
 
@@ -136,8 +126,8 @@ updateStateCycle (StateCycle cycles states) update k = do
 resetStateCycle :: MonadIO m => StateCycle a -> [(a, Int)] -> m ()
 resetStateCycle (StateCycle cycles states) states' = case states' of
   []                -> error "Tried to reset a counter with no states!"
-  ((_, count0) : _) -> liftIO $ do
-    writeIORef states $! cycle states'
+  ((_, count0) : _) -> do
+    liftIO (writeIORef states $! cycle states')
     writeUnboxedRef cycles count0
 
 data RingBuffer a = RingBuffer {
