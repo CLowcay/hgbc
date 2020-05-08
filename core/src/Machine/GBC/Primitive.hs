@@ -273,46 +273,40 @@ neverUpdate = const . pure
 
 -- | Read from the port
 {-# INLINE readPort #-}
-readPort :: Prim a => Port a -> IO a
-readPort Port {..} = portRead =<< readUnboxedRef portValue
+readPort :: (MonadIO m, Prim a) => Port a -> m a
+readPort Port {..} = liftIO . portRead =<< readUnboxedRef portValue
 
 -- | Read from the port directly skipping the read mask.
 {-# INLINE directReadPort #-}
-{-# SPECIALIZE directReadPort :: Port Word8 -> IO Word8 #-}
-directReadPort :: Prim a => Port a -> IO a
+directReadPort :: (MonadIO m, Prim a) => Port a -> m a
 directReadPort Port {..} = readUnboxedRef portValue
 
 -- | Write to the port and notify any listeners.
 {-# INLINE writePort #-}
-{-# SPECIALIZE writePort :: Port Word8 -> Word8 ->IO () #-}
-writePort :: (Prim a, Bits a) => Port a -> a -> IO ()
+writePort :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
 writePort Port {..} newValue = do
   oldValue  <- readUnboxedRef portValue
-  newValue' <- portNotify oldValue
-                          ((oldValue .&. complement portWriteMask) .|. newValue .&. portWriteMask)
+  newValue' <- liftIO
+    (portNotify oldValue ((oldValue .&. complement portWriteMask) .|. newValue .&. portWriteMask))
   writeUnboxedRef portValue newValue'
 
 -- | Write the value of the port directly without any checks or notifications.
 {-# INLINE directWritePort #-}
-{-# SPECIALIZE directWritePort :: Port Word8 -> Word8 ->IO () #-}
-{-# ANN directWritePort ("HLint: ignore Eta reduce") #-}
-directWritePort :: Prim a => Port a -> a -> IO ()
-directWritePort Port {..} v = writeUnboxedRef portValue v
+directWritePort :: (MonadIO m, Prim a) => Port a -> a -> m ()
+directWritePort Port {..} v = liftIO (writeUnboxedRef portValue v)
 
 -- | Set writable bits and notify all listeners.
 {-# INLINE setPortBits #-}
-{-# SPECIALIZE setPortBits :: Port Word8 -> Word8 ->IO () #-}
-setPortBits :: (Prim a, Bits a) => Port a -> a -> IO ()
+setPortBits :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
 setPortBits Port {..} newValue = do
   oldValue  <- readUnboxedRef portValue
-  newValue' <- portNotify oldValue (oldValue .|. (newValue .&. portWriteMask))
+  newValue' <- liftIO (portNotify oldValue (oldValue .|. (newValue .&. portWriteMask)))
   writeUnboxedRef portValue newValue'
 
 -- | Clear writable bits and notify all listeners.
 {-# INLINE clearPortBits #-}
-{-# SPECIALIZE clearPortBits :: Port Word8 -> Word8 ->IO () #-}
-clearPortBits :: (Prim a, Bits a) => Port a -> a -> IO ()
+clearPortBits :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
 clearPortBits Port {..} newValue = do
   oldValue  <- readUnboxedRef portValue
-  newValue' <- portNotify oldValue (oldValue .&. complement (newValue .&. portWriteMask))
+  newValue' <- liftIO (portNotify oldValue (oldValue .&. complement (newValue .&. portWriteMask)))
   writeUnboxedRef portValue newValue'

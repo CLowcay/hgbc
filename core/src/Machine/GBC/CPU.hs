@@ -412,13 +412,12 @@ reset = do
   setIME
   writePC 0xFFFF
 
-  liftIO $ do
-    directWritePort portKEY1 0x7E
-    writeIORef cpuMode ModeNormal
-    writeUnboxedRef cycleClocks 4
-    writeUnboxedRef instruction 0
-    writeUnboxedRef callDepth   0
-    Backtrace.reset backtrace
+  directWritePort portKEY1 0x7E
+  liftIO $ writeIORef cpuMode ModeNormal
+  writeUnboxedRef cycleClocks 4
+  writeUnboxedRef instruction 0
+  writeUnboxedRef callDepth   0
+  Backtrace.reset backtrace
 
   Memory.writeByte P1 0xFF
   Memory.writeByte TIMA 0
@@ -570,7 +569,7 @@ step = do
   State {..} <- asks forState
 
   -- Check if we have an interrupt
-  interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
+  interrupts <- pendingEnabledInterrupts portIF portIE
   ime        <- testIME
   updateIME
 
@@ -601,7 +600,7 @@ step = do
     Memory.writeByte (sp - 1) =<< readRHalf RegPCH
     runBusCatchup 1
 
-    ie <- liftIO (directReadPort portIE)
+    ie <- directReadPort portIE
     Memory.writeByte (sp - 2) =<< readRHalf RegPCL
     runBusCatchup 1
 
@@ -610,49 +609,47 @@ step = do
     callStackPushed vector
     jumpTo vector
     clearIME
-    liftIO $ clearInterrupt portIF nextInterrupt
+    clearInterrupt portIF nextInterrupt
 
 {-# INLINE getCycleClocks #-}
 getCycleClocks :: Has env => ReaderT env IO Int
 getCycleClocks = do
   State {..} <- asks forState
-  liftIO (readUnboxedRef cycleClocks)
+  readUnboxedRef cycleClocks
 
 {-# INLINE setCycleClocks #-}
 setCycleClocks :: Has env => Int -> ReaderT env IO ()
 setCycleClocks clocks = do
   State {..} <- asks forState
-  liftIO (writeUnboxedRef cycleClocks clocks)
+  writeUnboxedRef cycleClocks clocks
 
 {-# INLINE getCallDepth #-}
 getCallDepth :: Has env => ReaderT env IO Int
 getCallDepth = do
   State {..} <- asks forState
-  liftIO (readUnboxedRef callDepth)
+  readUnboxedRef callDepth
 
 getBacktrace :: Has env => ReaderT env IO [(Word16, Word16)]
 getBacktrace = do
   State {..} <- asks forState
-  liftIO (Backtrace.toList backtrace)
+  Backtrace.toList backtrace
 
 {-# INLINE callStackPushed #-}
 callStackPushed :: Has env => Word16 -> ReaderT env IO ()
 callStackPushed offset = do
   State {..} <- asks forState
   bank       <- Memory.getBank offset
-  liftIO $ do
-    d <- readUnboxedRef callDepth
-    writeUnboxedRef callDepth (d + 1)
-    Backtrace.push backtrace bank offset
+  d <- readUnboxedRef callDepth
+  writeUnboxedRef callDepth (d + 1)
+  Backtrace.push backtrace bank offset
 
 {-# INLINE callStackPopped #-}
 callStackPopped :: Has env => ReaderT env IO ()
 callStackPopped = do
   State {..} <- asks forState
-  liftIO $ do
-    d <- readUnboxedRef callDepth
-    writeUnboxedRef callDepth (d - 1)
-    Backtrace.pop backtrace
+  d <- readUnboxedRef callDepth
+  writeUnboxedRef callDepth (d - 1)
+  Backtrace.pop backtrace
 
 {-# SPECIALIZE table0 :: Has env => V.Vector (M env ()) #-}
 {-# SPECIALIZE table1 :: Has env => V.Vector (M env ()) #-}
@@ -661,13 +658,13 @@ callStackPopped = do
 executeInstruction :: Has env => ReaderT env IO ()
 executeInstruction = do
   State {..} <- asks forState
-  run . fetchAndExecute =<< liftIO (readUnboxedRef instruction)
+  run . fetchAndExecute =<< readUnboxedRef instruction
 
 {-# INLINABLE fetchNextByte #-}
 fetchNextByte :: Has env => ReaderT env IO ()
 fetchNextByte = do
   State {..} <- asks forState
-  liftIO . writeUnboxedRef instruction =<< Memory.readByte =<< readPC
+  writeUnboxedRef instruction =<< Memory.readByte =<< readPC
 
 newtype M env a = M {run :: ReaderT env IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
@@ -1158,17 +1155,17 @@ instance Has env => MonadGMBZ80 (M env) where
   ei   = M (setIMENext >> fetchNextByte)
   halt = M $ do
     State {..} <- asks forState
-    interrupts <- liftIO $ pendingEnabledInterrupts portIF portIE
+    interrupts <- pendingEnabledInterrupts portIF portIE
     ime        <- testIME
     fetchNextByte
     when (not ime && interrupts == 0) incPC
     setMode ModeHalt
   stop = M $ do
     State {..} <- asks forState
-    key1       <- liftIO (directReadPort portKEY1)
+    key1       <- directReadPort portKEY1
     if isFlagSet flagSpeedSwitch key1
       then do
-        liftIO $ if isFlagSet flagDoubleSpeed key1
+        if isFlagSet flagDoubleSpeed key1
           then do
             directWritePort portKEY1 0x7E
             writeUnboxedRef cycleClocks 4
@@ -1207,7 +1204,7 @@ jumpTo :: Has env => Word16 -> ReaderT env IO ()
 jumpTo address = do
   State {..} <- asks forState
   writePC address
-  liftIO . writeUnboxedRef instruction =<< Memory.readByte address
+  writeUnboxedRef instruction =<< Memory.readByte address
 
 {-# INLINE push16 #-}
 push16 :: Has env => Word16 -> ReaderT env IO ()

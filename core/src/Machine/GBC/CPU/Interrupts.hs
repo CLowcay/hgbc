@@ -8,6 +8,7 @@ module Machine.GBC.CPU.Interrupts
   )
 where
 
+import           Control.Monad.IO.Class
 import           Data.Bits
 import           Data.Word
 import           Machine.GBC.Primitive
@@ -29,16 +30,16 @@ flagInterrupt InterruptP1Low             = 0x10
 flagInterrupt InterruptCancelled         = 0
 
 {-# INLINE raiseInterrupt #-}
-raiseInterrupt :: Port Word8 -> Interrupt -> IO ()
+raiseInterrupt :: MonadIO m => Port Word8 -> Interrupt -> m ()
 raiseInterrupt portIF interrupt = setPortBits portIF (flagInterrupt interrupt)
 
 {-# INLINE clearInterrupt #-}
-clearInterrupt :: Port Word8 -> Interrupt -> IO ()
+clearInterrupt :: MonadIO m => Port Word8 -> Interrupt -> m ()
 clearInterrupt portIF interrupt = clearPortBits portIF (flagInterrupt interrupt)
 
 -- | Get all of the pending interrupts that are ready to service.
 {-# INLINE pendingEnabledInterrupts #-}
-pendingEnabledInterrupts :: Port Word8 -> Port Word8 -> IO Word8
+pendingEnabledInterrupts :: MonadIO m => Port Word8 -> Port Word8 -> m Word8
 pendingEnabledInterrupts portIF portIE = do
   interrupt <- readPort portIF
   enabled   <- readPort portIE

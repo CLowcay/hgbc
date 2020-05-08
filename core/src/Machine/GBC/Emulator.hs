@@ -124,7 +124,7 @@ initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsS
 getEmulatorClock :: ReaderT EmulatorState IO Int
 getEmulatorClock = do
   EmulatorState {..} <- ask
-  liftIO $ readUnboxedRef currentTime
+  readUnboxedRef currentTime
 
 -- | Execute one CPU instruction and update all of the emulated hardware
 -- accordingly. This may cause the audio queue to fill up, or it may trigger a
@@ -133,13 +133,13 @@ step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
   CPU.step
-  now             <- liftIO $ readUnboxedRef currentTime
+  now             <- readUnboxedRef currentTime
 
   cycleClocks     <- CPU.getCycleClocks
   graphicsEvent   <- updateHardware 1 cycleClocks
   dmaClockAdvance <- DMA.doPendingHDMA dmaState
 
-  liftIO $ writeUnboxedRef currentTime (now + cycleClocks + dmaClockAdvance)
+  writeUnboxedRef currentTime (now + cycleClocks + dmaClockAdvance)
 
   if dmaClockAdvance > 0
     then void $ updateHardware (dmaClockAdvance `div` cycleClocks) dmaClockAdvance
@@ -149,7 +149,7 @@ step = do
             hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
             when (hdmaClockAdvance > 0) $ do
               void $ updateHardware (hdmaClockAdvance `div` cycleClocks) hdmaClockAdvance
-              liftIO $ writeUnboxedRef currentTime (now + cycleClocks + hdmaClockAdvance)
+              writeUnboxedRef currentTime (now + cycleClocks + hdmaClockAdvance)
       in  case graphicsEvent of
             Graphics.NoGraphicsEvent -> do
               pending <- liftIO $ readIORef hblankPending
