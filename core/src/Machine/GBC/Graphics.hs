@@ -92,7 +92,7 @@ lcdStates =
   concat (replicate 144 [(ScanOAM, 80), (ReadVRAM, 172), (HBlank, 204)]) ++ [(VBlank, 4560)]
 
 lcdLines :: [(Word8, Int)]
-lcdLines = ([0 .. 152] <&> (, 456)) ++ [(153, 6), (0, 450)]
+lcdLines = [0 .. 153] <&> (, 456)
 
 -- | The initial graphics state.
 init :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port Word8 -> IO State

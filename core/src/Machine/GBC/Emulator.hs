@@ -88,7 +88,7 @@ initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsS
     portIF        <- newPort 0xE0 0x1F alwaysUpdate
     portIE        <- newPort 0x00 0xFF alwaysUpdate
 
-    cpu           <- CPU.init portIF portIE mode (makeCatchupFunction emulatorState)
+    cpu           <- CPU.init portIF portIE mode
     dmaState      <- DMA.init vram
     graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
     keypadState   <- Keypad.init portIF
@@ -120,6 +120,18 @@ initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsS
     let emulatorState = EmulatorState { .. }
     pure emulatorState
 
+instance CPU.Bus EmulatorState where
+  busRead address = do
+    clocks <- CPU.getCycleClocks
+    Memory.readByte address <* updateHardware clocks
+  busWrite address value = do
+    clocks <- CPU.getCycleClocks
+    Memory.writeByte address value
+    updateHardware clocks
+  busDelay = do
+    clocks <- CPU.getCycleClocks
+    updateHardware clocks
+
 -- | Get the number of clocks since the emulator started.
 getEmulatorClock :: ReaderT EmulatorState IO Int
 getEmulatorClock = do
@@ -133,44 +145,31 @@ step :: ReaderT EmulatorState IO ()
 step = do
   EmulatorState {..} <- ask
   CPU.step
-  now             <- readUnboxedRef currentTime
 
-  cycleClocks     <- CPU.getCycleClocks
-  graphicsEvent   <- updateHardware 1 cycleClocks
   dmaClockAdvance <- DMA.doPendingHDMA dmaState
-
-  writeUnboxedRef currentTime (now + cycleClocks + dmaClockAdvance)
-
   if dmaClockAdvance > 0
-    then void $ updateHardware (dmaClockAdvance `div` cycleClocks) dmaClockAdvance
-    else
-      let doPendingHBlankDMA = do
-            liftIO $ writeIORef hblankPending False
-            hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
-            when (hdmaClockAdvance > 0) $ do
-              void $ updateHardware (hdmaClockAdvance `div` cycleClocks) hdmaClockAdvance
-              writeUnboxedRef currentTime (now + cycleClocks + hdmaClockAdvance)
-      in  case graphicsEvent of
-            Graphics.NoGraphicsEvent -> do
-              pending <- liftIO $ readIORef hblankPending
-              when pending doPendingHBlankDMA
-            Graphics.HBlankEvent -> doPendingHBlankDMA
+    then do
+      cycleClocks <- CPU.getCycleClocks
+      replicateM_ (dmaClockAdvance `div` cycleClocks) (updateHardware cycleClocks)
+    else do
+      pending <- liftIO $ readIORef hblankPending
+      when pending $ do
+        liftIO $ writeIORef hblankPending False
+        hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
+        when (hdmaClockAdvance > 0) $ do
+          cycleClocks <- CPU.getCycleClocks
+          replicateM_ (hdmaClockAdvance `div` cycleClocks) (updateHardware cycleClocks)
 
-makeCatchupFunction :: EmulatorState -> Int -> Int -> IO ()
-makeCatchupFunction emulatorState@EmulatorState {..} cycles clocksPerCycle =
-  let cpuClocks = cycles * clocksPerCycle
-  in  do
-        graphicsEvent <- runReaderT (updateHardware cycles cpuClocks) emulatorState
-        when (graphicsEvent == Graphics.HBlankEvent) $ writeIORef hblankPending True
-        now <- readUnboxedRef currentTime
-        writeUnboxedRef currentTime (now + cpuClocks)
-
-updateHardware :: Int -> Int -> ReaderT EmulatorState IO Graphics.BusEvent
-updateHardware cycles cpuClocks = do
+updateHardware :: Int -> ReaderT EmulatorState IO ()
+updateHardware clocksPerCycle = do
   EmulatorState {..} <- ask
-  DMA.update dmaState cycles
+  now                <- readUnboxedRef currentTime
+  writeUnboxedRef currentTime (now + clocksPerCycle)
+
+  DMA.update dmaState
   liftIO $ do
-    Serial.update serialState cycles
-    Timer.update timerState cycles
-    Audio.step audioState cpuClocks
-    Graphics.step graphicsState graphicsSync cpuClocks
+    Serial.update serialState
+    Timer.update timerState
+    Audio.step audioState clocksPerCycle
+    graphicsEvent <- Graphics.step graphicsState graphicsSync clocksPerCycle
+    when (graphicsEvent == Graphics.HBlankEvent) $ writeIORef hblankPending True

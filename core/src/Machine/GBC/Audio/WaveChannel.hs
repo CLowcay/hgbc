@@ -147,6 +147,7 @@ instance Channel WaveChannel where
       <*> directReadPort port3
       <*> directReadPort port4
 
+{-# INLINE generateOutput #-}
 generateOutput :: WaveChannel -> Word8 -> Int -> IO ()
 generateOutput WaveChannel {..} sampleByte i = do
   register2 <- directReadPort port2

@@ -85,10 +85,10 @@ notifyIncoming State {..} period incomingValue = do
     writeIORef transferActiveRef True
 
 -- | Advance the serial clock.
-update :: State -> Int -> IO ()
-update State {..} cycles = do
+update :: State -> IO ()
+update State {..} = do
   transferActive <- readIORef transferActiveRef
-  when transferActive $ updateCounter shiftClock cycles $ do
+  when transferActive $ updateCounter shiftClock 1 $ do
     counter <- readUnboxedRef bitCounter
     writeUnboxedRef bitCounter =<< clockSerial counter
     readUnboxedRef clockPeriod

@@ -146,7 +146,6 @@ instance Channel PulseChannel where
       register4 <- directReadPort port4
       pure (getTimerPeriod (getFrequency register3 register4))
 
-
   directReadPorts PulseChannel {..} =
     (,,,,)
       <$> directReadPort port0
@@ -155,6 +154,7 @@ instance Channel PulseChannel where
       <*> directReadPort port3
       <*> directReadPort port4
 
+{-# INLINE dutyCycleOutput #-}
 dutyCycleOutput :: Word8 -> Int -> Bool
 dutyCycleOutput register1 i = case register1 .>>. 6 of
   0 -> i == 0

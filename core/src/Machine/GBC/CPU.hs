@@ -8,6 +8,7 @@ module Machine.GBC.CPU
   , Mode(..)
   , State(..)
   , Has(..)
+  , Bus(..)
   , M(..)
   , init
   , ports
@@ -65,7 +66,6 @@ import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( init )
-import qualified Data.Vector                   as V
 import qualified Data.Vector.Storable.Mutable  as VSM
 import qualified Machine.GBC.CPU.Backtrace     as Backtrace
 import qualified Machine.GBC.Memory            as Memory
@@ -138,10 +138,14 @@ instance Storable RegisterFile where
 -- | The current CPU mode.
 data Mode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, Enum)
 
+class Bus env where
+  busRead :: Word16 -> ReaderT env IO Word8
+  busWrite :: Word16 -> Word8 -> ReaderT env IO ()
+  busDelay :: ReaderT env IO ()
+
 -- | The internal CPU state.
 data State = State {
     cpuType     :: !EmulatorMode
-  , busCatchup  :: BusCatchupFunction
   , registers   :: !(VSM.IOVector RegisterFile)
   , portIF      :: !(Port Word8)
   , portIE      :: !(Port Word8)
@@ -156,11 +160,9 @@ data State = State {
 class Memory.Has env => Has env where
   forState :: env -> State
 
-type BusCatchupFunction = Int -> Int -> IO ()
-
 -- | Initialize a new CPU.
-init :: Port Word8 -> Port Word8 -> EmulatorMode -> BusCatchupFunction -> IO State
-init portIF portIE cpuType busCatchup = do
+init :: Port Word8 -> Port Word8 -> EmulatorMode -> IO State
+init portIF portIE cpuType = do
   registers   <- VSM.new 1
   portKEY1    <- newPort 0x7E 0x01 alwaysUpdate
   cpuMode     <- newIORef ModeNormal
@@ -386,13 +388,6 @@ testIME = do
   ime <- readRegister offsetHidden
   pure (ime .&. flagIME /= 0)
 
-{-# INLINE runBusCatchup #-}
-runBusCatchup :: Has env => Int -> ReaderT env IO ()
-runBusCatchup cycles = do
-  State {..} <- asks forState
-  clocks     <- getCycleClocks
-  liftIO (busCatchup cycles clocks)
-
 -- | Reset the CPU.
 {-# INLINABLE reset #-}
 reset :: Has env => ReaderT env IO ()
@@ -410,7 +405,7 @@ reset = do
   writeR16 RegSP 0
   writeRegister offsetHidden (0 :: Word8)
   setIME
-  writePC 0xFFFF
+  writePC 0
 
   directWritePort portKEY1 0x7E
   liftIO $ writeIORef cpuMode ModeNormal
@@ -487,7 +482,7 @@ reset = do
     writeR16 RegSP 0xFFFE
     writeRegister offsetHidden (0 :: Word8)
     setIME
-    writePC 0xFF
+    writePC 0x100
 
     Memory.writeByte NR11 0xBF
     Memory.writeByte NR12 0xF3
@@ -500,8 +495,6 @@ reset = do
     Memory.writeByte OBP1 0xFF
 
     for_ ([0xFF80 ..] `zip` atFF80) (uncurry Memory.writeByte)
-
-  void step
 
  where
   -- Values that would be written by the boot ROM if we had one.
@@ -564,65 +557,69 @@ interruptVector InterruptCancelled         = 0
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE step #-}
-step :: Has env => ReaderT env IO ()
+step :: (Has env, Bus env) => ReaderT env IO ()
 step = do
   State {..} <- asks forState
 
-  -- Check if we have an interrupt
-  interrupts <- pendingEnabledInterrupts portIF portIE
   ime        <- testIME
   updateIME
 
   -- Deal with HALT mode
   mode <- liftIO (readIORef cpuMode)
   case mode of
-    ModeNormal ->
-      if interrupts /= 0 && ime then handleInterrupt interrupts else incPC >> executeInstruction
-    ModeHalt -> when (interrupts /= 0) $ do
-      liftIO (writeIORef cpuMode ModeNormal)
-      -- Don't increment the PC before calling executeInstruction in this case.
-      -- The code in the HALT instruction will increment PC for us, unless it
-      -- doesn't in which case the HALT bug is triggered.
-      if ime then handleInterrupt interrupts else executeInstruction
-    ModeStop -> when (interrupts /= 0) $ do
-      liftIO (writeIORef cpuMode ModeNormal)
-      if ime then handleInterrupt interrupts else incPC >> executeInstruction
+    ModeNormal -> do
+      pc         <- readPC
+      byte       <- busRead pc
+      interrupts <- pendingEnabledInterrupts portIF portIE
+      if interrupts /= 0 && ime
+        then handleInterrupt interrupts
+        else do
+          writePC (pc + 1)
+          run (fetchAndExecute byte)
+    ModeHalt -> do
+      interrupts <- pendingEnabledInterrupts portIF portIE
+      if interrupts == 0
+        then busDelay
+        else do
+          liftIO (writeIORef cpuMode ModeNormal)
+          if ime
+            then handleInterrupt interrupts
+            else run . fetchAndExecute =<< readUnboxedRef instruction
+    ModeStop -> do
+      interrupts <- pendingEnabledInterrupts portIF portIE
+      when (interrupts /= 0) $ do
+        liftIO (writeIORef cpuMode ModeNormal)
+        if ime then handleInterrupt interrupts else run (fetchAndExecute =<< nextByte)
 
  where
   handleInterrupt interrupts = do
     State {..} <- asks forState
-
-    runBusCatchup 1
-    runBusCatchup 1
-
+    busDelay
+    busDelay
     sp <- readR16 RegSP
     writeR16 RegSP (sp - 2)
-
-    Memory.writeByte (sp - 1) =<< readRHalf RegPCH
-    runBusCatchup 1
-
+    busWrite (sp - 1) =<< readRHalf RegPCH
     ie <- directReadPort portIE
-    Memory.writeByte (sp - 2) =<< readRHalf RegPCL
-    runBusCatchup 1
+    busWrite (sp - 2) =<< readRHalf RegPCL
 
     let nextInterrupt = getNextInterrupt (interrupts .&. ie)
     let vector        = interruptVector nextInterrupt
     callStackPushed vector
-    jumpTo vector
+    writePC vector
     clearIME
     clearInterrupt portIF nextInterrupt
 
 {-# INLINE getCycleClocks #-}
 getCycleClocks :: Has env => ReaderT env IO Int
 getCycleClocks = do
-  State {..} <- asks forState
-  readUnboxedRef cycleClocks
+  ref <- asks (cycleClocks . forState)
+  readUnboxedRef ref
 
 {-# INLINE setCycleClocks #-}
 setCycleClocks :: Has env => Int -> ReaderT env IO ()
 setCycleClocks clocks = do
-  State {..} <- asks forState
-  writeUnboxedRef cycleClocks clocks
+  ref <- asks (cycleClocks . forState)
+  writeUnboxedRef ref clocks
 
 {-# INLINE getCallDepth #-}
 getCallDepth :: Has env => ReaderT env IO Int
@@ -640,7 +637,7 @@ callStackPushed :: Has env => Word16 -> ReaderT env IO ()
 callStackPushed offset = do
   State {..} <- asks forState
   bank       <- Memory.getBank offset
-  d <- readUnboxedRef callDepth
+  d          <- readUnboxedRef callDepth
   writeUnboxedRef callDepth (d + 1)
   Backtrace.push backtrace bank offset
 
@@ -648,141 +645,72 @@ callStackPushed offset = do
 callStackPopped :: Has env => ReaderT env IO ()
 callStackPopped = do
   State {..} <- asks forState
-  d <- readUnboxedRef callDepth
+  d          <- readUnboxedRef callDepth
   writeUnboxedRef callDepth (d - 1)
   Backtrace.pop backtrace
-
-{-# SPECIALIZE table0 :: Has env => V.Vector (M env ()) #-}
-{-# SPECIALIZE table1 :: Has env => V.Vector (M env ()) #-}
-{-# SPECIALIZE fetchAndExecute :: Has env => Word8 -> M env () #-}
-{-# INLINABLE executeInstruction #-}
-executeInstruction :: Has env => ReaderT env IO ()
-executeInstruction = do
-  State {..} <- asks forState
-  run . fetchAndExecute =<< readUnboxedRef instruction
-
-{-# INLINABLE fetchNextByte #-}
-fetchNextByte :: Has env => ReaderT env IO ()
-fetchNextByte = do
-  State {..} <- asks forState
-  writeUnboxedRef instruction =<< Memory.readByte =<< readPC
 
 newtype M env a = M {run :: ReaderT env IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
 
-instance Has env => MonadFetch (M env) where
+instance (Bus env, Has env) => MonadFetch (M env) where
   nextByte = M $ do
     pc <- readPC
     writePC (pc + 1)
-    Memory.readByte pc <* runBusCatchup 1
+    busRead pc
 
-instance Has env => MonadGMBZ80 (M env) where
+instance (Bus env, Has env) => MonadGMBZ80 (M env) where
   type ExecuteResult (M env) = ()
-  ldrr r r' = M $ do
-    writeR8 r =<< readR8 r'
-    fetchNextByte
-  ldrn r n = M $ do
-    writeR8 r n
-    fetchNextByte
-  ldrHL r = M $ do
-    hl <- readR16 RegHL
-    writeR8 r =<< Memory.readByte hl
-    runBusCatchup 1
-    fetchNextByte
+  ldrr r r' = M (writeR8 r =<< readR8 r')
+  ldrn r n = M (writeR8 r n)
+  ldrHL r = M (writeR8 r =<< busRead =<< readR16 RegHL)
   ldHLr r = M $ do
     hl <- readR16 RegHL
-    Memory.writeByte hl =<< readR8 r
-    runBusCatchup 1
-    fetchNextByte
+    busWrite hl =<< readR8 r
   ldHLn n = M $ do
     hl <- readR16 RegHL
-    Memory.writeByte hl n
-    runBusCatchup 1
-    fetchNextByte
-  ldaBC = M $ do
-    bc <- readR16 RegBC
-    writeR8 RegA =<< Memory.readByte bc
-    runBusCatchup 1
-    fetchNextByte
-  ldaDE = M $ do
-    de <- readR16 RegDE
-    writeR8 RegA =<< Memory.readByte de
-    runBusCatchup 1
-    fetchNextByte
-  ldaC = M $ do
+    busWrite hl n
+  ldaBC = M (writeR8 RegA =<< busRead =<< readR16 RegBC)
+  ldaDE = M (writeR8 RegA =<< busRead =<< readR16 RegDE)
+  ldaC  = M $ do
     c <- readR8 RegC
-    writeR8 RegA =<< Memory.readByte (0xFF00 + fromIntegral c)
-    runBusCatchup 1
-    fetchNextByte
+    writeR8 RegA =<< busRead (0xFF00 + fromIntegral c)
   ldCa = M $ do
     c <- readR8 RegC
-    Memory.writeByte (0xFF00 + fromIntegral c) =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
-  ldan n = M $ do
-    writeR8 RegA =<< Memory.readByte (0xFF00 + fromIntegral n)
-    runBusCatchup 1
-    fetchNextByte
-  ldna n = M $ do
-    Memory.writeByte (0xFF00 + fromIntegral n) =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
-  ldann nn = M $ do
-    writeR8 RegA =<< Memory.readByte nn
-    runBusCatchup 1
-    fetchNextByte
-  ldnna nn = M $ do
-    Memory.writeByte nn =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
+    busWrite (0xFF00 + fromIntegral c) =<< readR8 RegA
+  ldan n = M (writeR8 RegA =<< busRead (0xFF00 + fromIntegral n))
+  ldna n = M (busWrite (0xFF00 + fromIntegral n) =<< readR8 RegA)
+  ldann nn = M (writeR8 RegA =<< busRead nn)
+  ldnna nn = M (busWrite nn =<< readR8 RegA)
   ldaHLI = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    writeR8 RegA =<< Memory.readByte hl
-    runBusCatchup 1
-    fetchNextByte
+    writeR8 RegA =<< busRead hl
   ldaHLD = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    writeR8 RegA =<< Memory.readByte hl
-    runBusCatchup 1
-    fetchNextByte
+    writeR8 RegA =<< busRead hl
   ldBCa = M $ do
     bc <- readR16 RegBC
-    Memory.writeByte bc =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
+    busWrite bc =<< readR8 RegA
   ldDEa = M $ do
     de <- readR16 RegDE
-    Memory.writeByte de =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
+    busWrite de =<< readR8 RegA
   ldHLIa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    Memory.writeByte hl =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
+    busWrite hl =<< readR8 RegA
   ldHLDa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    Memory.writeByte hl =<< readR8 RegA
-    runBusCatchup 1
-    fetchNextByte
-  ldddnn dd nn = M $ do
-    writeR16 dd nn
-    fetchNextByte
+    busWrite hl =<< readR8 RegA
+  ldddnn dd nn = M (writeR16 dd nn)
   ldSPHL = M $ do
     writeR16 RegSP =<< readR16 RegHL
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
   push qq = M $ do
-    runBusCatchup 1
+    busDelay
     push16 =<< readR16pp qq
-    fetchNextByte
-  pop qq = M $ do
-    writeR16pp qq =<< pop16
-    fetchNextByte
+  pop qq = M (writeR16pp qq =<< pop16)
   ldhl i = M $ do
     sp <- fromIntegral <$> readR16 RegSP
     let wi      = fromIntegral i :: Int32
@@ -791,146 +719,87 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (sp .&. 0x00000100) `xor` (wi .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
     setFlags ((if carryCY then flagCY else 0) .|. (if carryH then flagH else 0))
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
   ldnnSP nn = M $ do
-    Memory.writeByte nn =<< readRHalf RegSPL
-    runBusCatchup 1
-    Memory.writeByte (nn + 1) =<< readRHalf RegSPH
-    runBusCatchup 1
-    fetchNextByte
+    busWrite nn =<< readRHalf RegSPL
+    busWrite (nn + 1) =<< readRHalf RegSPH
   addr r = M $ do
     v <- readR8 r
     add8 v 0
-    fetchNextByte
-  addn n = M $ do
-    add8 n 0
-    fetchNextByte
+  addn n = M (add8 n 0)
   addhl = M $ do
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
+    v <- busRead =<< readR16 RegHL
     add8 v 0
-    fetchNextByte
   adcr r = M $ do
-    v     <- readR8 r
-    carry <- getCarry
-    add8 v carry
-    fetchNextByte
-  adcn n = M $ do
-    carry <- getCarry
-    add8 n carry
-    fetchNextByte
+    v <- readR8 r
+    add8 v =<< getCarry
+  adcn n = M (add8 n =<< getCarry)
   adchl = M $ do
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
-    carry <- getCarry
-    add8 v carry
-    fetchNextByte
+    v <- busRead =<< readR16 RegHL
+    add8 v =<< getCarry
   subr r = M $ do
     v <- readR8 r
     sub8 v 0
-    fetchNextByte
-  subn n = M $ do
-    sub8 n 0
-    fetchNextByte
+  subn n = M (sub8 n 0)
   subhl = M $ do
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
+    v <- busRead =<< readR16 RegHL
     sub8 v 0
-    fetchNextByte
   sbcr r = M $ do
     v     <- readR8 r
     carry <- getCarry
     sub8 v (negate carry)
-    fetchNextByte
   sbcn n = M $ do
     carry <- getCarry
     sub8 n (negate carry)
-    fetchNextByte
   sbchl = M $ do
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
+    v     <- busRead =<< readR16 RegHL
     carry <- getCarry
     sub8 v (negate carry)
-    fetchNextByte
-  andr r = M $ do
-    andOp8 =<< readR8 r
-    fetchNextByte
-  andn n = M $ do
-    andOp8 n
-    fetchNextByte
-  andhl = M $ do
-    andOp8 =<< Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
-    fetchNextByte
-  orr r = M $ do
-    orOp8 =<< readR8 r
-    fetchNextByte
-  orn n = M $ do
-    orOp8 n
-    fetchNextByte
-  orhl = M $ do
-    orOp8 =<< Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
-    fetchNextByte
-  xorr r = M $ do
-    xorOp8 =<< readR8 r
-    fetchNextByte
-  xorn n = M $ do
-    xorOp8 n
-    fetchNextByte
-  xorhl = M $ do
-    xorOp8 =<< Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
-    fetchNextByte
+  andr r = M (andOp8 =<< readR8 r)
+  andn n = M (andOp8 n)
+  andhl = M (andOp8 =<< busRead =<< readR16 RegHL)
+  orr r = M (orOp8 =<< readR8 r)
+  orn n = M (orOp8 n)
+  orhl = M (orOp8 =<< busRead =<< readR16 RegHL)
+  xorr r = M (xorOp8 =<< readR8 r)
+  xorn n = M (xorOp8 n)
+  xorhl = M (xorOp8 =<< busRead =<< readR16 RegHL)
   cpr r = M $ do
     a <- readR8 RegA
     v <- readR8 r
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
-    fetchNextByte
   cpn n = M $ do
     a <- readR8 RegA
     let (_, flags) = adder8 a n (negate (fromIntegral n)) 0
     setFlags (flagN .|. flags)
-    fetchNextByte
   cphl = M $ do
     a <- readR8 RegA
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
+    v <- busRead =<< readR16 RegHL
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
-    fetchNextByte
   incr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v 1
     writeR8 r v'
     setFlagsMask allExceptCY flags
-    fetchNextByte
   inchl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
+    v  <- busRead hl
     let (v', flags) = inc8 v 1
     setFlagsMask allExceptCY flags
-    Memory.writeByte hl v'
-    runBusCatchup 1
-    fetchNextByte
+    busWrite hl v'
   decr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v negative1
     writeR8 r v'
     setFlagsMask allExceptCY (flags .|. flagN)
-    fetchNextByte
   dechl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
+    v  <- busRead hl
     let (v', flags) = inc8 v negative1
     setFlagsMask allExceptCY (flags .|. flagN)
-    Memory.writeByte hl v'
-    runBusCatchup 1
-    fetchNextByte
+    busWrite hl v'
   addhlss ss = M $ do
     hl <- readR16 RegHL
     v  <- readR16 ss
@@ -941,8 +810,7 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
     setFlagsMask allExceptZ ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
   addSP e = M $ do
     sp <- readR16 RegSP
     let sp'     = fromIntegral sp
@@ -952,173 +820,115 @@ instance Has env => MonadGMBZ80 (M env) where
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    runBusCatchup 1
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
+    busDelay
   incss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v + 1)
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
   decss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v - 1)
-    runBusCatchup 1
-    fetchNextByte
+    busDelay
   rlca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (rotateL v 1)
-    fetchNextByte
   rla = M $ do
     v <- readR8 RegA
     let ir = rotateL v 1
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
-    fetchNextByte
   rrca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (rotateR v 1)
-    fetchNextByte
   rra = M $ do
     v <- readR8 RegA
     let ir = rotateR v 1
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
-    fetchNextByte
-  rlcr r = M $ do
-    writeR8 r =<< rlc =<< readR8 r
-    fetchNextByte
+  rlcr r = M (writeR8 r =<< rlc =<< readR8 r)
   rlchl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< rlc v
-    runBusCatchup 1
-    fetchNextByte
-  rlr r = M $ do
-    writeR8 r =<< rl =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< rlc v
+  rlr r = M (writeR8 r =<< rl =<< readR8 r)
   rlhl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< rl v
-    runBusCatchup 1
-    fetchNextByte
-  rrcr r = M $ do
-    writeR8 r =<< rrc =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< rl v
+  rrcr r = M (writeR8 r =<< rrc =<< readR8 r)
   rrchl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< rrc v
-    runBusCatchup 1
-    fetchNextByte
-  rrr r = M $ do
-    writeR8 r =<< rr =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< rrc v
+  rrr r = M (writeR8 r =<< rr =<< readR8 r)
   rrhl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< rr v
-    runBusCatchup 1
-    fetchNextByte
-  slar r = M $ do
-    writeR8 r =<< sla =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< rr v
+  slar r = M (writeR8 r =<< sla =<< readR8 r)
   slahl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< sla v
-    runBusCatchup 1
-    fetchNextByte
-  srar r = M $ do
-    writeR8 r =<< sra =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< sla v
+  srar r = M (writeR8 r =<< sra =<< readR8 r)
   srahl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< sra v
-    runBusCatchup 1
-    fetchNextByte
-  srlr r = M $ do
-    writeR8 r =<< srl =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< sra v
+  srlr r = M (writeR8 r =<< srl =<< readR8 r)
   srlhl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< srl v
-    runBusCatchup 1
-    fetchNextByte
-  swapr r = M $ do
-    writeR8 r =<< swap =<< readR8 r
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< srl v
+  swapr r = M (writeR8 r =<< swap =<< readR8 r)
   swaphl = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl =<< swap v
-    runBusCatchup 1
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl =<< swap v
   bitr r b = M $ do
     v <- readR8 r
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
-    fetchNextByte
   bithl b = M $ do
-    v <- Memory.readByte =<< readR16 RegHL
-    runBusCatchup 1
+    v <- busRead =<< readR16 RegHL
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
-    fetchNextByte
   setr r b = M $ do
     v <- readR8 r
     writeR8 r (v `setBit` fromIntegral b)
-    fetchNextByte
   sethl b = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl (v `setBit` fromIntegral b)
-    runBusCatchup 1
-    fetchNextByte
+    v  <- busRead hl
+    busWrite hl (v `setBit` fromIntegral b)
   resr r b = M $ do
     v <- readR8 r
     writeR8 r (v `clearBit` fromIntegral b)
-    fetchNextByte
   reshl b = M $ do
     hl <- readR16 RegHL
-    v  <- Memory.readByte hl
-    runBusCatchup 1
-    Memory.writeByte hl (v `clearBit` fromIntegral b)
-    runBusCatchup 1
-    fetchNextByte
-  jpnn nn = M (runBusCatchup 1 >> jumpTo nn)
-  jphl = M (jumpTo =<< readR16 RegHL)
+    v  <- busRead hl
+    busWrite hl (v `clearBit` fromIntegral b)
+  jpnn nn = M (busDelay >> writePC nn)
+  jphl = M (writePC =<< readR16 RegHL)
   jpccnn cc nn = M $ do
     shouldJump <- testCondition cc
-    if shouldJump then runBusCatchup 1 >> jumpTo nn else fetchNextByte
+    when shouldJump $ busDelay >> writePC nn
   jr e = M (doJR e)
   jrcc cc e = M $ do
     shouldJump <- testCondition cc
-    if shouldJump then doJR e else fetchNextByte
+    when shouldJump $ doJR e
   call nn = M (doCall nn)
   callcc cc nn = M $ do
     shouldJump <- testCondition cc
-    if shouldJump then doCall nn else fetchNextByte
+    when shouldJump $ doCall nn
   ret  = M doRet
   reti = M (setIME >> doRet)
   retcc cc = M $ do
-    runBusCatchup 1
+    busDelay
     shouldJump <- testCondition cc
-    if shouldJump then doRet else fetchNextByte
+    when shouldJump doRet
   rst t = M (doCall (8 * fromIntegral t))
   daa = M $ do
     flags <- readF
@@ -1141,91 +951,79 @@ instance Has env => MonadGMBZ80 (M env) where
     setFlagsMask
       allExceptN
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
-    fetchNextByte
   cpl = M $ do
     a <- readR8 RegA
     writeR8 RegA (complement a)
     let flagHN = flagH .|. flagN in setFlagsMask flagHN flagHN
-    fetchNextByte
-  nop = M fetchNextByte
+  nop = M (pure ())
   ccf = M $ do
     cf <- testFlag flagCY
     setFlagsMask allExceptZ (if cf then 0 else flagCY)
-    fetchNextByte
-  scf  = M (setFlagsMask allExceptZ flagCY >> fetchNextByte)
-  di   = M (clearIME >> fetchNextByte)
-  ei   = M (setIMENext >> fetchNextByte)
+  scf  = M (setFlagsMask allExceptZ flagCY)
+  di   = M clearIME
+  ei   = M setIMENext
   halt = M $ do
     State {..} <- asks forState
     interrupts <- pendingEnabledInterrupts portIF portIE
     ime        <- testIME
-    fetchNextByte
+    -- prefetch the next instruction to execute. On the real hardware all
+    -- instructions prefetch, but it's more convenient for emulation to make the
+    -- prefetch cycle part of the next instruction. We have to be a little more
+    -- carefull though with HALT so that we correctly simulate the HALT bug.
+    writeUnboxedRef instruction =<< Memory.readByte =<< readPC
     when (not ime && interrupts == 0) incPC
     setMode ModeHalt
   stop = M $ do
     State {..} <- asks forState
     key1       <- directReadPort portKEY1
     if isFlagSet flagSpeedSwitch key1
-      then do
-        if isFlagSet flagDoubleSpeed key1
-          then do
-            directWritePort portKEY1 0x7E
-            writeUnboxedRef cycleClocks 4
-          else do
-            directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
-            writeUnboxedRef cycleClocks 2
-        fetchNextByte
-      else fetchNextByte >> setMode ModeStop
+      then if isFlagSet flagDoubleSpeed key1
+        then do
+          directWritePort portKEY1 0x7E
+          writeUnboxedRef cycleClocks 4
+        else do
+          directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
+          writeUnboxedRef cycleClocks 2
+      else setMode ModeStop
   invalid b = liftIO (throwIO (InvalidInstruction b))
 
 {-# INLINE doCall #-}
-doCall :: Has env => Word16 -> ReaderT env IO ()
+doCall :: (Has env, Bus env) => Word16 -> ReaderT env IO ()
 doCall nn = do
   callStackPushed nn
-  runBusCatchup 1
+  busDelay
   push16 =<< readPC
-  jumpTo nn
+  writePC nn
 
 {-# INLINE doRet #-}
-doRet :: Has env => ReaderT env IO ()
+doRet :: (Has env, Bus env) => ReaderT env IO ()
 doRet = do
   callStackPopped
   r <- pop16
-  runBusCatchup 1
-  jumpTo r
+  busDelay
+  writePC r
 
 {-# INLINE doJR #-}
-doJR :: Has env => Int8 -> ReaderT env IO ()
+doJR :: (Has env, Bus env) => Int8 -> ReaderT env IO ()
 doJR e = do
-  runBusCatchup 1
+  busDelay
   pc <- readPC
-  jumpTo (pc + fromIntegral e)
-
-{-# INLINE jumpTo #-}
-jumpTo :: Has env => Word16 -> ReaderT env IO ()
-jumpTo address = do
-  State {..} <- asks forState
-  writePC address
-  writeUnboxedRef instruction =<< Memory.readByte address
+  writePC (pc + fromIntegral e)
 
 {-# INLINE push16 #-}
-push16 :: Has env => Word16 -> ReaderT env IO ()
+push16 :: (Has env, Bus env) => Word16 -> ReaderT env IO ()
 push16 value = do
   sp <- readR16 RegSP
   writeR16 RegSP (sp - 2)
-  Memory.writeByte (sp - 1) (fromIntegral (value .>>. 8))
-  runBusCatchup 1
-  Memory.writeByte (sp - 2) (fromIntegral (value .&. 0xFF))
-  runBusCatchup 1
+  busWrite (sp - 1) (fromIntegral (value .>>. 8))
+  busWrite (sp - 2) (fromIntegral (value .&. 0xFF))
 
 {-# INLINE pop16 #-}
-pop16 :: Has env => ReaderT env IO Word16
+pop16 :: (Has env, Bus env) => ReaderT env IO Word16
 pop16 = do
   sp     <- readR16 RegSP
-  valueL <- Memory.readByte sp
-  runBusCatchup 1
-  valueH <- Memory.readByte (sp + 1)
-  runBusCatchup 1
+  valueL <- busRead sp
+  valueH <- busRead (sp + 1)
   writeR16 RegSP (sp + 2)
   pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
 
