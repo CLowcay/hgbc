@@ -55,17 +55,23 @@ commandLine =
           )
     <*> option
           (Just <$> eitherReader (decodeColorCorrection . T.pack))
-          (long "color-correction" <> value Nothing <> metavar "CORRECTION_MODE" <> help
-            "Color correction mode. Recognized values are 'none' and 'default'"
+          (  long "color-correction"
+          <> value Nothing
+          <> metavar "CORRECTION_MODE"
+          <> completeWith ["none", "default"]
+          <> help "Color correction mode. Recognized values are 'none' and 'default'"
           )
     <*> option
           (Just <$> str)
-          (long "boot-rom" <> value Nothing <> metavar "BOOT_FILE" <> help
+          (long "boot-rom" <> value Nothing <> metavar "BOOT_FILE" <> action "file" <> help
             "Use an optional boot ROM"
           )
     <*> option
           (eitherReader (decodeMode . T.pack))
-          (long "mode" <> value Nothing <> metavar "MODE" <> help
-            "Graphics mode at startup. Can be 'dmg', 'cgb', or 'auto' (default)."
+          (  long "mode"
+          <> value Nothing
+          <> metavar "MODE"
+          <> completeWith ["dmg", "cgb", "auto"]
+          <> help "Graphics mode at startup. Can be 'dmg', 'cgb', or 'auto' (default)."
           )
-    <*> strArgument (metavar "ROM_FILE" <> help "The ROM file to run")
+    <*> strArgument (metavar "ROM_FILE" <> action "file" <> help "The ROM file to run")
