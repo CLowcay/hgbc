@@ -33,6 +33,7 @@ import qualified Data.ByteString               as B
 import qualified Data.Vector.Storable          as VS
 import qualified Machine.GBC.Bus               as Bus
 import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Memory            as Memory
 
 spec :: Spec
@@ -96,7 +97,7 @@ instance Bus.Has CPUTestState where
 
 withNewCPU :: CPU.M CPUTestState () -> IO ()
 withNewCPU computation = mdo
-  vram    <- initVRAM NoColorCorrection
+  vram    <- initVRAM (Color.correction Color.NoCorrection)
   portIF  <- newPort 0x00 0x1F alwaysUpdate
   portIE  <- newPort 0x00 0xFF alwaysUpdate
   mbc     <- nullMBC
@@ -450,16 +451,12 @@ loads = do
           RegL `registerShouldBe` 0xD0
           0xC0D0 `atAddressShouldBe` expected
 
-  describe "LD (HL), n"
-    $ it "Works for LD (HL), 42"
-    $ withNewCPU
-    $ withValueAt RegHL 0xC000 32
-    $ do
-        ldHLn 42
-        expectExtraCycles 1
-        0xC000 `atAddressShouldBe` 42
-        RegH `registerShouldBe` 0xC0
-        RegL `registerShouldBe` 0
+  describe "LD (HL), n" $ it "Works for LD (HL), 42" $ withNewCPU $ withValueAt RegHL 0xC000 32 $ do
+    ldHLn 42
+    expectExtraCycles 1
+    0xC000 `atAddressShouldBe` 42
+    RegH `registerShouldBe` 0xC0
+    RegL `registerShouldBe` 0
 
   describe "LD A, (BC)"
     $ it "Works for LD A, (BC)"
@@ -511,16 +508,12 @@ loads = do
         RegC `registerShouldBe` 0x80
         0xFF80 `atAddressShouldBe` 42
 
-  describe "LD A, (n)"
-    $ it "Works for LD A, (80)"
-    $ withNewCPU
-    $ alteringRegisters [RegA]
-    $ do
-        CPU.M $ Memory.writeByte 0xFF80 42
-        ldan 0x80
-        expectExtraCycles 1
-        RegA `registerShouldBe` 42
-        0xFF80 `atAddressShouldBe` 42
+  describe "LD A, (n)" $ it "Works for LD A, (80)" $ withNewCPU $ alteringRegisters [RegA] $ do
+    CPU.M $ Memory.writeByte 0xFF80 42
+    ldan 0x80
+    expectExtraCycles 1
+    RegA `registerShouldBe` 42
+    0xFF80 `atAddressShouldBe` 42
 
   describe "LD (n), A"
     $ it "Works for LD (80), A"
@@ -533,16 +526,12 @@ loads = do
         RegA `registerShouldBe` 42
         0xFF80 `atAddressShouldBe` 42
 
-  describe "LD A, (nn)"
-    $ it "Works for LD A, (C000)"
-    $ withNewCPU
-    $ alteringRegisters [RegA]
-    $ do
-        CPU.M $ Memory.writeByte 0xC000 42
-        ldann 0xC000
-        expectExtraCycles 1
-        RegA `registerShouldBe` 42
-        0xC000 `atAddressShouldBe` 42
+  describe "LD A, (nn)" $ it "Works for LD A, (C000)" $ withNewCPU $ alteringRegisters [RegA] $ do
+    CPU.M $ Memory.writeByte 0xC000 42
+    ldann 0xC000
+    expectExtraCycles 1
+    RegA `registerShouldBe` 42
+    0xC000 `atAddressShouldBe` 42
 
   describe "LD (nn), A"
     $ it "Works for LD (C000), A"
@@ -1426,14 +1415,11 @@ bitOperations = do
           r `registerShouldBe` (v `setBit` b)
 
   describe "SET b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
-    it ("Works for " <> formatSetHL b v)
-      $ withNewCPU
-      $ withValueAt RegHL 0xC000 v
-      $ do
-          sethl (fromIntegral b)
-          expectExtraCycles 2
-          0xC000 `atAddressShouldBe` (v `setBit` b)
-          RegHL `register16ShouldBe` 0xC000
+    it ("Works for " <> formatSetHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
+      sethl (fromIntegral b)
+      expectExtraCycles 2
+      0xC000 `atAddressShouldBe` (v `setBit` b)
+      RegHL `register16ShouldBe` 0xC000
 
   describe "RES b, r"
     $ for_ [ (r, b, 1 .<<. v) | r <- allRegisters, b <- [0 .. 7], v <- [0 .. 7] ]
@@ -1444,14 +1430,11 @@ bitOperations = do
           r `registerShouldBe` (v `clearBit` b)
 
   describe "RES b, (HL)" $ for_ [ (b, 1 .<<. v) | b <- [0 .. 7], v <- [0 .. 7] ] $ \(b, v) ->
-    it ("Works for " <> formatResHL b v)
-      $ withNewCPU
-      $ withValueAt RegHL 0xC000 v
-      $ do
-          reshl (fromIntegral b)
-          expectExtraCycles 2
-          0xC000 `atAddressShouldBe` (v `clearBit` b)
-          RegHL `register16ShouldBe` 0xC000
+    it ("Works for " <> formatResHL b v) $ withNewCPU $ withValueAt RegHL 0xC000 v $ do
+      reshl (fromIntegral b)
+      expectExtraCycles 2
+      0xC000 `atAddressShouldBe` (v `clearBit` b)
+      RegHL `register16ShouldBe` 0xC000
 
  where
   formatBitR r b v =

@@ -15,16 +15,19 @@ import           Test.Hspec
 import qualified Data.ByteString               as B
 import qualified Machine.GBC.Audio             as Audio
 import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.DMA               as DMA
+import qualified Machine.GBC.Emulator          as Emulator
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Keypad            as Keypad
+import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
 import qualified Machine.GBC.Timer             as Timer
 
-blankROM :: ROM
-blankROM = ROM paths (blankHeader size) (B.replicate size 0)
+blankROM :: ROM.ROM
+blankROM = ROM.ROM paths (blankHeader size) (B.replicate size 0)
  where
-  paths = ROMPaths "testRom" "testRom.sav" "testRom.rtc"
+  paths = ROM.Paths "testRom" "testRom.sav" "testRom.rtc"
   size  = 32 * 1024 * 1024
 
 blankHeader :: Int -> Header
@@ -47,7 +50,13 @@ spec :: Spec
 spec = describe "allPorts" $ it "all hardware ports are accounted for" $ do
   sync       <- Graphics.newSync
   serialSync <- Serial.newSync
-  emulator   <- initEmulatorState Nothing blankROM Nothing NoColorCorrection serialSync sync nullPtr
+  emulator   <- Emulator.init Nothing
+                              blankROM
+                              Nothing
+                              (Color.correction Color.NoCorrection)
+                              serialSync
+                              sync
+                              nullPtr
   let allPorts =
         CPU.ports (cpu emulator)
           ++ DMA.ports (dmaState emulator)
