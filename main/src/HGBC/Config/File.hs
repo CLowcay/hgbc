@@ -18,6 +18,7 @@ import           Data.Either
 import           Data.Monoid
 import           Data.Word
 import           HGBC.Config.Decode
+import           Machine.GBC.Mode
 import qualified Data.ByteString               as B
 import qualified Data.HashMap.Strict           as HM
 import qualified Data.Text                     as T
@@ -25,7 +26,7 @@ import qualified Data.Text.Encoding            as T
 import qualified Data.Text.Encoding.Error      as T
 import qualified Data.Vector                   as V
 import qualified HGBC.Keymap                   as Keymap
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Color             as Color
 import qualified Text.Toml                     as Toml
 import qualified Text.Toml.Types               as Toml
 
@@ -42,8 +43,8 @@ data Config k f = Config
   , noVsync :: HKD f Bool
   , debugPort :: HKD f Int
   , bootROM :: HKD f (Maybe FilePath)
-  , mode :: HKD f (Maybe GBC.EmulatorMode)
-  , colorCorrection :: HKD f GBC.ColorCorrection
+  , mode :: HKD f (Maybe EmulatorMode)
+  , colorCorrection :: HKD f Color.CorrectionMode
   , keypad :: HKD f (Keymap.Keymap k)
   , backgroundPalette :: HKD f Palette
   , sprite1Palette :: HKD f Palette

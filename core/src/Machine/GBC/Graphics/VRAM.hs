@@ -1,7 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 module Machine.GBC.Graphics.VRAM
   ( VRAM
-  , ColorCorrection(..)
   , initVRAM
   , setVRAMAccessible
   , setOAMAccessible
@@ -33,14 +32,7 @@ import           Data.Word
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
-
--- | The color correction scheme to use.
-data ColorCorrection
-  = NoColorCorrection
-  | DefaultColorCorrection
-  deriving (Eq, Ord, Show)
-
-type ColorFunction = (Word16, Word16, Word16) -> (Word32, Word32, Word32)
+import qualified Machine.GBC.Color             as Color
 
 data VRAM = VRAM {
     vram           :: !(VSM.IOVector Word8)
@@ -50,14 +42,14 @@ data VRAM = VRAM {
   , oamAccessible  :: !(IORef Bool)
   , vramAccessible :: !(IORef Bool)
   , vramBank       :: !(UnboxedRef Int)
-  , colorFunction  :: !ColorFunction
+  , colorFunction  :: !(Color.Correction)
 }
 
 totalPaletteEntries :: Int
 totalPaletteEntries = 8 * 4 * 2 -- 2 sets of 8 palettes with 4 colors each.
 
-initVRAM :: ColorCorrection -> IO VRAM
-initVRAM colorCorrection = do
+initVRAM :: Color.Correction -> IO VRAM
+initVRAM colorFunction = do
   vram           <- VSM.new 0x4000
   oam            <- VSM.new 160
   oamAccessible  <- newIORef True
@@ -65,10 +57,6 @@ initVRAM colorCorrection = do
   vramBank       <- newUnboxedRef 0
   rawPalettes    <- VSM.replicate totalPaletteEntries 0x7FFF
   rgbPalettes    <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
-  let colorFunction = case colorCorrection of
-        NoColorCorrection      -> vgaColors
-        DefaultColorCorrection -> defaultColors
-
   pure VRAM { .. }
 
 {-# INLINE setVRAMAccessible #-}
@@ -215,20 +203,10 @@ writeVRAM VRAM {..} addr value = do
       bankOffset <- readUnboxedRef vramBank
       VSM.unsafeWrite vram (fromIntegral (addr - 0x8000) + bankOffset) value
 
-encodeColor :: ColorFunction -> Word16 -> Word32
+encodeColor :: Color.Correction -> Word16 -> Word32
 encodeColor correction color =
   let b            = (color .>>. 10) .&. 0x1F
       g            = (color .>>. 5) .&. 0x1F
       r            = color .&. 0x1F
       (r', g', b') = correction (r, g, b)
   in  (b' .<<. 16) .|. (g' .<<. 8) .|. r'
-
-vgaColors :: ColorFunction
-vgaColors (r, g, b) = (fromIntegral (8 * r), fromIntegral (8 * g), fromIntegral (8 * b))
-
-defaultColors :: ColorFunction
-defaultColors (r, g, b) =
-  let r' = 960 `min` (r * 26 + g * 4 + b * 2)
-      g' = 960 `min` (g * 24 + b * 8)
-      b' = 960 `min` (r * 6 + g * 4 + b * 22)
-  in  (fromIntegral (r' `div` 4), fromIntegral (g' `div` 4), fromIntegral (b' `div` 4))

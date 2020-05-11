@@ -8,13 +8,12 @@ import           Control.Monad.Reader
 import           Data.Maybe
 import qualified HGBC.Emulator                 as Emulator
 import qualified HGBC.Keymap                   as Keymap
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Emulator          as Emulator
 import qualified SDL
 import qualified Window
 
 -- | Start the event loop.
-start
-  :: Window.Window -> Keymap.Keymap SDL.Scancode -> Emulator.Channel -> GBC.EmulatorState -> IO ()
+start :: Window.Window -> Keymap.Keymap SDL.Scancode -> Emulator.Channel -> Emulator.State -> IO ()
 start window keymap commandChannel emulatorState = void $ forkOS go
  where
   isMainWindow w = if Window.sdlWindow window == w then Just window else Nothing
@@ -28,12 +27,12 @@ start window keymap commandChannel emulatorState = void $ forkOS go
               SDL.Pressed ->
                 case Keymap.lookup keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
                   Nothing                  -> pure ()
-                  Just (Keymap.GBCKey key) -> runReaderT (GBC.keyDown key) emulatorState
+                  Just (Keymap.GBCKey key) -> Emulator.keyDown emulatorState key
                   Just Keymap.Pause        -> Emulator.send commandChannel Emulator.Pause
                   Just Keymap.Quit         -> Emulator.send commandChannel Emulator.Quit
               SDL.Released ->
                 case Keymap.lookup keymap (decodeKeysym (SDL.keyboardEventKeysym eventData)) of
-                  Just (Keymap.GBCKey key) -> runReaderT (GBC.keyUp key) emulatorState
+                  Just (Keymap.GBCKey key) -> Emulator.keyUp emulatorState key
                   _                        -> pure ()
       SDL.QuitEvent -> Emulator.send commandChannel Emulator.Quit
       payload       -> Window.dispatchEvent isMainWindow payload

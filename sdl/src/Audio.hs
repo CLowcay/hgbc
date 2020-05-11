@@ -15,19 +15,21 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Ptr
 import           Foreign.Storable
-import           Machine.GBC
 import           Machine.GBC.Primitive
 import           Machine.GBC.Util
+import qualified Machine.GBC.Audio             as Audio
+import qualified Machine.GBC.Emulator          as Emulator
 import qualified SDL.Raw
 
 newtype Audio = Audio SDL.Raw.AudioDeviceID
 
 -- | Start the audio handler. The audio starts in the paused state, so it must
 -- be resumed before any output will be heard.
-start :: EmulatorState -> IO Audio
+start :: Emulator.State -> IO Audio
 start emulatorState = do
-  pAudioCallback <- SDL.Raw.mkAudioCallback (audioCallback (audioBuffer emulatorState))
-  audioDevice    <- alloca $ \desired -> alloca $ \actual -> do
+  pAudioCallback <-
+    SDL.Raw.mkAudioCallback . audioCallback . Audio.audioOut . Emulator.audioState $ emulatorState
+  audioDevice <- alloca $ \desired -> alloca $ \actual -> do
     poke desired (desiredAudioSpec pAudioCallback)
     SDL.Raw.openAudioDevice nullPtr 0 desired actual 0
   pure (Audio audioDevice)

@@ -22,7 +22,8 @@ import           System.FilePath
 import qualified Data.ByteString               as B
 import qualified HGBC.Config.CommandLine       as CommandLine
 import qualified HGBC.Config.Paths             as Paths
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Color             as Color
+import qualified Machine.GBC.ROM               as ROM
 
 -- | Configure HGBC.
 load
@@ -54,9 +55,8 @@ loadMainConfig decodeScancode = do
   handleConfigErrors configFile <$> parseFile decodeScancode configFile
 
 -- | Load configuration files specific to a particular ROM.
-loadROMConfig
-  :: Ord k => ScancodeDecoder k -> GBC.ROMPaths -> IO ([FileParseErrors], Config k Maybe)
-loadROMConfig decodeScancode GBC.ROMPaths {..} = do
+loadROMConfig :: Ord k => ScancodeDecoder k -> ROM.Paths -> IO ([FileParseErrors], Config k Maybe)
+loadROMConfig decodeScancode ROM.Paths {..} = do
   let configFile = takeDirectory romSaveFile </> "config.toml"
   exists <- doesFileExist configFile
   if exists
@@ -85,7 +85,7 @@ finalize defaultKeymap Config {..} = Config
   , noVsync           = fromMaybe False noVsync
   , debugPort         = fromMaybe 8080 debugPort
   , bootROM           = bootROM
-  , colorCorrection   = fromMaybe GBC.DefaultColorCorrection colorCorrection
+  , colorCorrection   = fromMaybe Color.DefaultCorrection colorCorrection
   , mode              = mode
   , keypad            = fromMaybe defaultKeymap keypad
   , backgroundPalette = fromMaybe defaultPalette backgroundPalette

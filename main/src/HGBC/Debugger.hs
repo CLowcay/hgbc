@@ -18,7 +18,6 @@ import           HGBC.Debugger.Logging
 import           HGBC.Debugger.State
 import           HGBC.Debugger.Status
 import           HGBC.Errors
-import           Machine.GBC                    ( EmulatorState(..) )
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( bootROMLength
@@ -41,12 +40,13 @@ import qualified HGBC.Debugger.Memory          as Memory
 import qualified HGBC.Debugger.Resources       as Resource
 import qualified HGBC.Emulator                 as Emulator
 import qualified HGBC.Events                   as Event
+import qualified Machine.GBC.Emulator          as Emulator
 import qualified Network.HTTP.Types            as HTTP
 import qualified Network.Wai                   as Wai
 import qualified Network.Wai.Handler.Warp      as Warp
 
 -- | Start the debugger
-start :: Int -> Emulator.RuntimeConfig -> EmulatorState -> IO [FileParseErrors]
+start :: Int -> Emulator.RuntimeConfig -> Emulator.State -> IO [FileParseErrors]
 start debugPort runtimeState@Emulator.RuntimeConfig {..} emulatorState = do
   r <- restoreState
   void $ forkIO $ Warp.run debugPort (debugger runtimeState emulatorState)
@@ -57,19 +57,19 @@ start debugPort runtimeState@Emulator.RuntimeConfig {..} emulatorState = do
     w0                    <- restoreBreakpoints debugState
     w1                    <- restoreLabels debugState
     restoredLabels        <- map fst <$> Labels.getAsList debugState
-    (disassembly, labels) <- disassembleROM (memory emulatorState) restoredLabels
+    (disassembly, labels) <- disassembleROM (Emulator.memory emulatorState) restoredLabels
     Disassembly.set debugState disassembly
     Labels.addFromList debugState eventChannel labels
     pure (w0 ++ w1)
 
-debugger :: Emulator.RuntimeConfig -> EmulatorState -> Wai.Application
+debugger :: Emulator.RuntimeConfig -> Emulator.State -> Wai.Application
 debugger Emulator.RuntimeConfig {..} emulatorState req respond =
   respond =<< case Wai.pathInfo req of
     [] -> case Wai.requestMethod req of
       "GET" -> pure
         (Wai.responseLBS HTTP.status200
                          [(HTTP.hContentType, "text/html")]
-                         (debugHTML romFileName (bootROMLength (memory emulatorState)))
+                         (debugHTML romFileName (bootROMLength (Emulator.memory emulatorState)))
         )
       "POST" -> do
         body <- Wai.lazyRequestBody req
@@ -227,7 +227,7 @@ keepAliveTime = 60 * 1000000
 updateDelay :: Int
 updateDelay = 250000
 
-eventStream :: Event.Channel -> EmulatorState -> (BB.Builder -> IO ()) -> IO () -> IO ()
+eventStream :: Event.Channel -> Emulator.State -> (BB.Builder -> IO ()) -> IO () -> IO ()
 eventStream channel emulatorState write flush = do
   waitEvent <- Event.waitAction channel
   let

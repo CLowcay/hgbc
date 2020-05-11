@@ -3,14 +3,14 @@
 
 module Machine.GBC.ROM
   ( ROM(..)
-  , ROMPaths(..)
+  , Paths(..)
   , CGBSupport(..)
   , SGBSupport(..)
   , MBCType(..)
   , Destination(..)
   , CartridgeType(..)
   , Header(..)
-  , parseROM
+  , parse
   , requiresSaveFiles
   , MBC(..)
   , getMBC
@@ -27,7 +27,7 @@ import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as LB
 
 data ROM = ROM
-  { romPaths    :: ROMPaths
+  { romPaths    :: Paths
   , romHeader   :: Header
   , romContent  :: B.ByteString
   } deriving (Eq, Ord, Show)
@@ -64,7 +64,7 @@ data Header = Header {
 } deriving (Eq, Ord, Show)
 
 -- | Paths to the ROM files.
-data ROMPaths = ROMPaths
+data Paths = Paths
   { romFile     :: FilePath  -- ^ The main ROM file.
   , romSaveFile :: FilePath  -- ^ Save file for the battery backed memory.
   , romRTCFile  :: FilePath  -- ^ Save file for the battery backed RTC.
@@ -76,13 +76,13 @@ requiresSaveFiles rom =
   in  hasBackupBattery || mbcType == Just MBC3RTC
 
 -- | Parse a ROM file.
-{-# INLINABLE parseROM #-}
-parseROM
+{-# INLINABLE parse #-}
+parse
   :: Monad m
-  => ROMPaths            -- ^ Paths to the ROM files.
+  => Paths            -- ^ Paths to the ROM files.
   -> B.ByteString        -- ^ The ROM file content.
   -> ExceptT String (WriterT [String] m) ROM
-parseROM romPaths romContent = do
+parse romPaths romContent = do
   when (romContent `B.index` 0x100 /= 0x00) $ tell ["Header check 0x100 failed"]
   when (romContent `B.index` 0x101 /= 0xC3) $ tell ["Header check 0x101 failed"]
   when (complementCheck romContent /= 0) $ tell ["Complement check failed"]
@@ -175,11 +175,11 @@ extractHeader rom =
 -- | Get the Memory Bank Controller for this cartridge.
 getMBC :: ROM -> IO MBC
 getMBC ROM {..} =
-  let ROMPaths {..} = romPaths
-      cType         = cartridgeType romHeader
-      allocator     = if hasBackupBattery cType then savedRAM romSaveFile else volatileRAM
-      bankMask      = (romSize romHeader `div` 0x4000) - 1
-      ramMask       = (externalRAM romHeader `div` 0x2000) - 1
+  let Paths {..} = romPaths
+      cType      = cartridgeType romHeader
+      allocator  = if hasBackupBattery cType then savedRAM romSaveFile else volatileRAM
+      bankMask   = (romSize romHeader `div` 0x4000) - 1
+      ramMask    = (externalRAM romHeader `div` 0x2000) - 1
   in  case mbcType cType of
         Nothing      -> nullMBC
         Just MBC1    -> mbc1 bankMask ramMask allocator

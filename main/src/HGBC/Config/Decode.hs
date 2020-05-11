@@ -10,20 +10,21 @@ where
 import           Control.Monad
 import           Data.Bits
 import           Data.Word
+import           Machine.GBC.Mode
 import           Machine.GBC.Util
 import qualified Data.Text                     as T
 import qualified Data.Text.Read                as T
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Color             as Color
 
-decodeMode :: T.Text -> Either String (Maybe GBC.EmulatorMode)
+decodeMode :: T.Text -> Either String (Maybe EmulatorMode)
 decodeMode "auto" = Right Nothing
-decodeMode "dmg"  = Right (Just GBC.DMG)
-decodeMode "cgb"  = Right (Just GBC.CGB)
+decodeMode "dmg"  = Right (Just DMG)
+decodeMode "cgb"  = Right (Just CGB)
 decodeMode x      = Left ("Unknown graphics mode " <> show x)
 
-decodeColorCorrection :: T.Text -> Either String GBC.ColorCorrection
-decodeColorCorrection "none"    = Right GBC.NoColorCorrection
-decodeColorCorrection "default" = Right GBC.DefaultColorCorrection
+decodeColorCorrection :: T.Text -> Either String Color.CorrectionMode
+decodeColorCorrection "none"    = Right Color.NoCorrection
+decodeColorCorrection "default" = Right Color.DefaultCorrection
 decodeColorCorrection x         = Left ("Unknown color correction mode " <> show x)
 
 decodeColor :: T.Text -> Either String Word32

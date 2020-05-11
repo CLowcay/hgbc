@@ -18,19 +18,20 @@ import qualified Data.Aeson.Encoding           as JSON
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Lazy.Char8    as LBC
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Emulator          as Emulator
 
 memoryChunkWidth :: Int
 memoryChunkWidth = 8
 
-backtrace :: GBC.EmulatorState -> IO LBC.ByteString
+backtrace :: Emulator.State -> IO LBC.ByteString
 backtrace emulatorState =
   BB.toLazyByteString
     .   JSON.fromEncoding
     .   JSON.list (JSON.longAddress . uncurry LongAddress)
-    <$> runReaderT GBC.getBacktrace emulatorState
+    <$> runReaderT CPU.getBacktrace emulatorState
 
-stackAt :: GBC.EmulatorState -> Word16 -> Int -> IO LBC.ByteString
+stackAt :: Emulator.State -> Word16 -> Int -> IO LBC.ByteString
 stackAt emulatorState offset n = do
   bytes <- fmap formatHex . B.unpack <$> runReaderT (readChunk offset (n + 1)) emulatorState
   pure
@@ -39,7 +40,7 @@ stackAt emulatorState offset n = do
                                                              (tail bytes)
     )
 
-memoryAt :: GBC.EmulatorState -> Word16 -> Int -> IO LBC.ByteString
+memoryAt :: Emulator.State -> Word16 -> Int -> IO LBC.ByteString
 memoryAt emulatorState address memLines = do
   chunks <- runReaderT
     ( for [0 .. (memLines - 1)]

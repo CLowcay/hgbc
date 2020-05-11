@@ -19,7 +19,8 @@ import qualified HGBC.Debugger                 as Debugger
 import qualified HGBC.Debugger.ROM             as ROM
 import qualified HGBC.Emulator                 as Emulator
 import qualified HGBC.Events                   as Event
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Emulator          as Emulator
+import qualified Machine.GBC.Graphics          as Graphics
 import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
@@ -31,7 +32,7 @@ main = do
   (configErrors, options, config) <- Config.load decodeScancode defaultKeymap
   runtimeConfig                   <- Emulator.configure options config
   let romFileName = Emulator.romFileName runtimeConfig
-  graphicsSync                  <- GBC.newSync
+  graphicsSync                  <- Graphics.newSync
   (window        , frameBuffer) <- LCD.start romFileName config graphicsSync
   (eEmulatorState, warnings   ) <- runWriterT
     (runExceptT (Emulator.makeEmulatorState romFileName config graphicsSync frameBuffer))
@@ -49,7 +50,7 @@ main = do
         errors <- Debugger.start (Config.debugPort config) runtimeConfig emulatorState
         for_ errors printErrors
 
-      ROM.dumpHeader (getROMHeader (GBC.memory emulatorState))
+      ROM.dumpHeader (getROMHeader (Emulator.memory emulatorState))
 
       EventLoop.start window
                       (Config.keypad config)

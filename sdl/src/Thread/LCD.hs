@@ -20,11 +20,11 @@ import           Data.Word
 import           Foreign.Ptr
 import           GLUtils
 import           Graphics.GL.Core44
-import           Machine.GBC                    ( Sync(..) )
 import           SDL.Extras
-import qualified HGBC.Config
 import qualified Data.ByteString               as B
 import qualified Data.Text                     as T
+import qualified HGBC.Config
+import qualified Machine.GBC.Graphics          as Graphics
 import qualified SDL
 import qualified SDL.Raw
 import qualified Window
@@ -33,7 +33,7 @@ import qualified Window
 data WindowContext = WindowContext {
     sdlWindow       :: !SDL.Window
   , romFileName     :: !FilePath
-  , sync            :: !Sync
+  , sync            :: !Graphics.Sync
   , displayIndex    :: !DisplayIndex  -- ^ The SDL display that the current window is centred on.
   , framesPerVsync  :: !Double
   , speed           :: !Double        -- ^ Speed relative to full speed (60fps)
@@ -63,7 +63,7 @@ getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
     in  fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
-start :: FilePath -> HGBC.Config.Config k Identity -> Sync -> IO (Window.Window, Ptr Word8)
+start :: FilePath -> HGBC.Config.Config k Identity -> Graphics.Sync -> IO (Window.Window, Ptr Word8)
 start romFileName HGBC.Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
@@ -100,11 +100,11 @@ start romFileName HGBC.Config.Config {..} sync = do
 -- accumulated and passed on to the next iteration of the 'eventLoop'.
 eventLoop :: Double -> WindowContext -> IO ()
 eventLoop extraFrames context@WindowContext {..} = do
-  signal <- try (takeMVar (signalWindow sync))
+  signal <- try (takeMVar (Graphics.signalWindow sync))
   case signal of
     Left Window.Close ->
       -- Drain the signal MVar to prevent the emulator thread from blocking.
-      void $ tryTakeMVar (signalWindow sync)
+      void $ tryTakeMVar (Graphics.signalWindow sync)
 
     Left (Window.SizeChanged (SDL.V2 w h)) -> do
       glViewport 0 0 w h
@@ -128,7 +128,7 @@ eventLoop extraFrames context@WindowContext {..} = do
 
       if frames < 1
         then do
-          void $ tryPutMVar (bufferAvailable sync) ()
+          void $ tryPutMVar (Graphics.bufferAvailable sync) ()
           eventLoop frames context
         else do
           bindBuffer PixelUpload (frameTextureBuffer glState)
@@ -147,7 +147,7 @@ eventLoop extraFrames context@WindowContext {..} = do
       -- This is the last frame, so notify that we're done with the buffer.
       glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
       glFinish
-      void $ tryPutMVar (bufferAvailable sync) ()
+      void $ tryPutMVar (Graphics.bufferAvailable sync) ()
       SDL.glSwapWindow sdlWindow
       pure (frames - 1)
     | otherwise = do

@@ -11,20 +11,20 @@ import           Control.Applicative
 import           HGBC.Keymap
 import qualified Data.Map                      as M
 import qualified Data.Text                     as T
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Keypad            as Keypad
 import qualified SDL
 
 -- | The default keymap.
 defaultKeymap :: Keymap SDL.Scancode
 defaultKeymap = Keymap $ M.fromList
-  [ ((SDL.ScancodeZ, [])        , GBCKey GBC.KeyA)
-  , ((SDL.ScancodeX, [])        , GBCKey GBC.KeyB)
-  , ((SDL.ScancodeReturn, [])   , GBCKey GBC.KeyStart)
-  , ((SDL.ScancodeBackspace, []), GBCKey GBC.KeySelect)
-  , ((SDL.ScancodeUp, [])       , GBCKey GBC.KeyUp)
-  , ((SDL.ScancodeDown, [])     , GBCKey GBC.KeyDown)
-  , ((SDL.ScancodeLeft, [])     , GBCKey GBC.KeyLeft)
-  , ((SDL.ScancodeRight, [])    , GBCKey GBC.KeyRight)
+  [ ((SDL.ScancodeZ, [])        , GBCKey Keypad.KeyA)
+  , ((SDL.ScancodeX, [])        , GBCKey Keypad.KeyB)
+  , ((SDL.ScancodeReturn, [])   , GBCKey Keypad.KeyStart)
+  , ((SDL.ScancodeBackspace, []), GBCKey Keypad.KeySelect)
+  , ((SDL.ScancodeUp, [])       , GBCKey Keypad.KeyUp)
+  , ((SDL.ScancodeDown, [])     , GBCKey Keypad.KeyDown)
+  , ((SDL.ScancodeLeft, [])     , GBCKey Keypad.KeyLeft)
+  , ((SDL.ScancodeRight, [])    , GBCKey Keypad.KeyRight)
   , ((SDL.ScancodePause, [])    , Pause)
   , ((SDL.ScancodeK, [])        , Pause)
   , ((SDL.ScancodeQ, [Control]) , Quit)

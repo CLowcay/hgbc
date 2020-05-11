@@ -18,7 +18,6 @@ import           Data.IORef
 import           Data.List
 import           Data.Word
 import           Foreign.Marshal.Alloc
-import           Machine.GBC
 import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.Environment
@@ -29,8 +28,11 @@ import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
 import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Color             as Color
+import qualified Machine.GBC.Emulator          as Emulator
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Memory            as Memory
+import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
 
 main :: IO ()
@@ -147,37 +149,37 @@ instance Exception Timeout
 romTest
   :: FilePath
   -> SerialHandler
-  -> ReaderT EmulatorState IO Bool
-  -> (IORef BB.Builder -> ReaderT EmulatorState IO a)
+  -> ReaderT Emulator.State IO Bool
+  -> (IORef BB.Builder -> ReaderT Emulator.State IO a)
   -> IO a
 romTest filename serialHandler terminate getResult =
   withSystemTempDirectory "rom-testing" $ \tempDir -> do
     let baseName = takeBaseName filename
     createDirectoryIfMissing True (tempDir </> baseName)
-    let paths = ROMPaths { romFile     = filename
-                         , romSaveFile = tempDir </> baseName </> "battery"
-                         , romRTCFile  = tempDir </> baseName </> "rtc"
-                         }
+    let paths = ROM.Paths { romFile     = filename
+                          , romSaveFile = tempDir </> baseName </> "battery"
+                          , romRTCFile  = tempDir </> baseName </> "rtc"
+                          }
 
     romData          <- B.readFile filename
-    (eROM, warnings) <- runWriterT (runExceptT (parseROM paths romData))
+    (eROM, warnings) <- runWriterT (runExceptT (ROM.parse paths romData))
     unless (null warnings) $ fail (show warnings)
     case eROM of
       Left  err -> fail (show err)
       Right rom -> allocaBytes (160 * 144 * 4) $ \frameBuffer -> do
         serialSync <- Serial.newSync
-        gs         <- newSync
+        gs         <- Graphics.newSync
         buffer     <- newIORef ""
         bracket (serialHandler serialSync buffer) (`throwTo` TestComplete) $ \_ ->
           bracket (nullGraphics gs) (`throwTo` TestComplete) $ \_ -> do
-            emulatorState <- initEmulatorState Nothing
-                                               rom
-                                               Nothing
-                                               DefaultColorCorrection
-                                               serialSync
-                                               gs
-                                               frameBuffer
-            runReaderT (reset >> runLoop timeout >> getResult buffer) emulatorState
+            emulatorState <- Emulator.init Nothing
+                                           rom
+                                           Nothing
+                                           (Color.correction Color.NoCorrection)
+                                           serialSync
+                                           gs
+                                           frameBuffer
+            runReaderT (CPU.reset >> runLoop timeout >> getResult buffer) emulatorState
 
  where
   nullGraphics gs = forkIO $ foreverUntil TestComplete $ do
@@ -186,14 +188,14 @@ romTest filename serialHandler terminate getResult =
 
   runLoop 0               = liftIO (throwIO Timeout)
   runLoop !remainingSteps = do
-    step
+    Emulator.step
     terminateNow <- terminate
     if terminateNow then pure () else runLoop (remainingSteps - 1)
 
 timeout :: Int
 timeout = 1024 * 1024 * 60 * 3
 
-readString :: Word16 -> ReaderT EmulatorState IO BB.Builder
+readString :: Word16 -> ReaderT Emulator.State IO BB.Builder
 readString = readString0 ""
  where
   readString0 !acc addr = do
@@ -216,5 +218,5 @@ ignoreSerialOutput sync _ = forkIO $ foreverUntil TestComplete $ do
 foreverUntil :: (Exception e, Eq e) => e -> IO a -> IO ()
 foreverUntil e action = forever action `catch` (\ex -> if e == ex then pure () else throwIO ex)
 
-terminateAtAddress :: Word16 -> ReaderT EmulatorState IO Bool
+terminateAtAddress :: Word16 -> ReaderT Emulator.State IO Bool
 terminateAtAddress address = CPU.readPC <&> (== address)

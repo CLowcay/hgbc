@@ -29,6 +29,7 @@ import           HGBC.Errors
 import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
+import           Machine.GBC.Mode
 import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.FilePath
@@ -41,8 +42,12 @@ import qualified HGBC.Debugger.Disassembly     as Disassembly
 import qualified HGBC.Debugger.Labels          as Labels
 import qualified HGBC.Debugger.State           as DebugState
 import qualified HGBC.Events                   as Event
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.CPU               as CPU
+import qualified Machine.GBC.Color             as Color
+import qualified Machine.GBC.Emulator          as Emulator
+import qualified Machine.GBC.Errors            as GBC
 import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
 
 -- | A notification for the emulator thread.
@@ -99,29 +104,29 @@ makeEmulatorState
   -> Config k Identity
   -> Graphics.Sync
   -> Ptr Word8
-  -> ExceptT FileParseErrors (WriterT [FileParseErrors] IO) GBC.EmulatorState
+  -> ExceptT FileParseErrors (WriterT [FileParseErrors] IO) Emulator.State
 makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
   romPaths    <- liftIO (Path.romPaths filename)
   bootROMData <- traverse tryReadFile bootROM
   fileContent <- tryReadFile filename
-  rom         <- attachFilename filename (GBC.parseROM romPaths fileContent)
+  rom         <- attachFilename filename (ROM.parse romPaths fileContent)
   liftIO $ do
-    when (GBC.requiresSaveFiles rom)
-      $ createDirectoryIfMissing True (takeDirectory (GBC.romSaveFile (GBC.romPaths rom)))
+    when (ROM.requiresSaveFiles rom)
+      $ createDirectoryIfMissing True (takeDirectory (ROM.romSaveFile (ROM.romPaths rom)))
 
     serialSync <- nullSerial
-    s          <- GBC.initEmulatorState bootROMData
-                                        rom
-                                        mode
-                                        colorCorrection
-                                        serialSync
-                                        graphicsSync
-                                        frameBuffer
+    s          <- Emulator.init bootROMData
+                                rom
+                                mode
+                                (Color.correction colorCorrection)
+                                serialSync
+                                graphicsSync
+                                frameBuffer
 
-    when (GBC.mode s == GBC.DMG) $ liftIO $ do
-      GBC.writeBgRGBPalette s 0 backgroundPalette
-      GBC.writeFgRGBPalette s 0 sprite1Palette
-      GBC.writeFgRGBPalette s 1 sprite2Palette
+    when (Emulator.mode s == DMG) $ liftIO $ do
+      Emulator.writeBgPalette s 0 backgroundPalette
+      Emulator.writeSpritePalette s 0 sprite1Palette
+      Emulator.writeSpritePalette s 1 sprite2Palette
 
     pure s
 
@@ -141,9 +146,9 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
     pure sync
 
 -- | Run the emulator.  Does not return until the Quit command is sent.
-run :: RuntimeConfig -> ReaderT GBC.EmulatorState IO ()
+run :: RuntimeConfig -> ReaderT Emulator.State IO ()
 run RuntimeConfig {..} = do
-  GBC.reset
+  CPU.reset
   (if debugMode then pauseLoop else runEmulatorLoop Nothing Nothing)
     `catch` (\fault -> do
               pc   <- readPC
@@ -159,16 +164,16 @@ run RuntimeConfig {..} = do
     emulatorLoop runToAddress level
 
   emulatorLoop runToAddress level = do
-    emulatorClock <- GBC.getEmulatorClock
+    emulatorClock <- Emulator.getClock
     now           <- liftIO getSystemTime
     let innerEmulatorLoop !steps = do
-          GBC.step
+          Emulator.step
           breakRequired <- if debugMode
             then do
               address <- getCurrentAddress
               updateDisassembly address
               breakpoint <- liftIO $ Breakpoints.check debugState address
-              callDepth  <- GBC.getCallDepth
+              callDepth  <- CPU.getCallDepth
               pure (Just address == runToAddress || breakpoint || Just callDepth == level)
             else pure False
 
@@ -182,7 +187,7 @@ run RuntimeConfig {..} = do
               case command of
                 Just Pause   -> pauseLoop
                 Just Quit    -> pure ()
-                Just Restart -> GBC.reset >> innerEmulatorLoop (steps + 1)
+                Just Restart -> CPU.reset >> innerEmulatorLoop (steps + 1)
                 _            -> innerEmulatorLoop (steps + 1)
     innerEmulatorLoop (1 :: Int)
 
@@ -196,16 +201,16 @@ run RuntimeConfig {..} = do
       RunTo address -> runEmulatorLoop (Just address) Nothing
       Step          -> singleStep >> pauseLoop
       StepOver      -> do
-        callDepth0 <- GBC.getCallDepth
+        callDepth0 <- CPU.getCallDepth
         Event.send eventChannel Event.Resumed >> singleStep
-        callDepth1 <- GBC.getCallDepth
+        callDepth1 <- CPU.getCallDepth
         if callDepth1 > callDepth0 then emulatorLoop Nothing (Just callDepth0) else pauseLoop
       StepOut -> do
-        callDepth <- GBC.getCallDepth
+        callDepth <- CPU.getCallDepth
         runEmulatorLoop Nothing (Just (callDepth - 1))
-      Restart -> GBC.reset >> pauseLoop
+      Restart -> CPU.reset >> pauseLoop
 
-  singleStep = GBC.step >> getCurrentAddress >>= updateDisassembly
+  singleStep = Emulator.step >> getCurrentAddress >>= updateDisassembly
 
   updateDisassembly address@(LongAddress _ pc) = do
     disassembly <- liftIO (Disassembly.get debugState)
@@ -221,9 +226,9 @@ run RuntimeConfig {..} = do
     bank <- getBank pc
     pure (LongAddress bank pc)
 
-  statisticsUpdate :: Int -> SystemTime -> ReaderT GBC.EmulatorState IO ()
+  statisticsUpdate :: Int -> SystemTime -> ReaderT Emulator.State IO ()
   statisticsUpdate emulatorClock now = do
-    emulatorClock' <- GBC.getEmulatorClock
+    emulatorClock' <- Emulator.getClock
     liftIO $ do
       now' <- getSystemTime
       Event.send

@@ -5,9 +5,10 @@ module HGBC.Config.CommandLine
 where
 
 import           HGBC.Config.Decode
+import           Machine.GBC.Mode
 import           Options.Applicative
 import qualified Data.Text                     as T
-import qualified Machine.GBC                   as GBC
+import qualified Machine.GBC.Color             as Color
 
 data Options = Options
   { debugMode       :: Bool
@@ -17,9 +18,9 @@ data Options = Options
   , stats           :: Bool
   , scale           :: Maybe Int
   , speed           :: Maybe Double
-  , colorCorrection :: Maybe GBC.ColorCorrection
+  , colorCorrection :: Maybe Color.CorrectionMode
   , bootROM         :: Maybe FilePath
-  , mode            :: Maybe GBC.EmulatorMode
+  , mode            :: Maybe EmulatorMode
   , filename        :: FilePath
   }
 
