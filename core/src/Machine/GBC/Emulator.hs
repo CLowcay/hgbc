@@ -25,6 +25,7 @@ import           Machine.GBC.Registers
 import qualified Data.ByteString               as B
 import qualified Data.Vector.Storable          as VS
 import qualified Machine.GBC.Audio             as Audio
+import qualified Machine.GBC.Bus               as Bus
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.DMA               as DMA
 import qualified Machine.GBC.Graphics          as Graphics
@@ -120,52 +121,54 @@ initEmulatorState bootROM rom requestedMode colorCorrection serialSync graphicsS
     let emulatorState = EmulatorState { .. }
     pure emulatorState
 
-instance CPU.Bus EmulatorState where
-  busRead address = do
+instance Bus.Has EmulatorState where
+  read address = do
     clocks <- CPU.getCycleClocks
+    updateTime clocks
     Memory.readByte address <* updateHardware clocks
-  busWrite address value = do
+  write address value = do
     clocks <- CPU.getCycleClocks
+    updateTime clocks
     Memory.writeByte address value
     updateHardware clocks
-  busDelay = do
+  delay = do
     clocks <- CPU.getCycleClocks
+    updateTime clocks
     updateHardware clocks
+  delayClocks n = do
+    clocks <- CPU.getCycleClocks
+    updateTime n
+    replicateM_ (n `div` clocks) (updateHardware clocks)
+
+{-# INLINE updateTime #-}
+updateTime :: Int -> ReaderT EmulatorState IO ()
+updateTime clocks = do
+  time <- asks currentTime
+  now  <- readUnboxedRef time
+  writeUnboxedRef time (now + clocks)
 
 -- | Get the number of clocks since the emulator started.
+{-# INLINABLE getEmulatorClock #-}
 getEmulatorClock :: ReaderT EmulatorState IO Int
-getEmulatorClock = do
-  EmulatorState {..} <- ask
-  readUnboxedRef currentTime
+getEmulatorClock = readUnboxedRef =<< asks currentTime
 
 -- | Execute one CPU instruction and update all of the emulated hardware
 -- accordingly. This may cause the audio queue to fill up, or it may trigger a
 -- request to flip the frame buffer.
 step :: ReaderT EmulatorState IO ()
 step = do
-  EmulatorState {..} <- ask
   CPU.step
 
-  dmaClockAdvance <- DMA.doPendingHDMA dmaState
-  if dmaClockAdvance > 0
-    then do
-      cycleClocks <- CPU.getCycleClocks
-      replicateM_ (dmaClockAdvance `div` cycleClocks) (updateHardware cycleClocks)
-    else do
-      pending <- liftIO $ readIORef hblankPending
-      when pending $ do
-        liftIO $ writeIORef hblankPending False
-        hdmaClockAdvance <- DMA.doHBlankHDMA dmaState
-        when (hdmaClockAdvance > 0) $ do
-          cycleClocks <- CPU.getCycleClocks
-          replicateM_ (hdmaClockAdvance `div` cycleClocks) (updateHardware cycleClocks)
+  state <- ask
+  DMA.doPendingHDMA (dmaState state)
+  isHBlankPending <- liftIO $ readIORef (hblankPending state)
+  when isHBlankPending $ do
+    liftIO $ writeIORef (hblankPending state) False
+    DMA.doHBlankHDMA (dmaState state)
 
 updateHardware :: Int -> ReaderT EmulatorState IO ()
 updateHardware clocksPerCycle = do
   EmulatorState {..} <- ask
-  now                <- readUnboxedRef currentTime
-  writeUnboxedRef currentTime (now + clocksPerCycle)
-
   DMA.update dmaState
   liftIO $ do
     Serial.update serialState

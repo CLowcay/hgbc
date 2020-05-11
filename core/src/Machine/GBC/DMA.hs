@@ -23,6 +23,7 @@ import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( init )
+import qualified Machine.GBC.Bus               as Bus
 import qualified Machine.GBC.Graphics.VRAM     as VRAM
 import qualified Machine.GBC.Memory            as Memory
 
@@ -118,43 +119,42 @@ update State {..} = do
 
 -- | Perform any pending HDMA actions for this emulation cycle, and return the
 -- number of clocks to stall the CPU.
-doPendingHDMA :: Memory.Has env => State -> ReaderT env IO Int
+doPendingHDMA :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
 doPendingHDMA State {..} = do
   maybeHDMA <- liftIO $ readIORef pendingHDMA
   case maybeHDMA of
-    None         -> pure 0
+    None         -> pure ()
     Pending hdma -> do
       liftIO $ writeIORef pendingHDMA None
       source0      <- readUnboxedRef hdmaSource
       destination0 <- readUnboxedRef hdmaDestination
       go source0 destination0 (hdma + 1)
+      Bus.delayClocks ((fromIntegral hdma + 1) * 8)
      where
-      go _       _            0      = pure ((fromIntegral hdma + 1) * 8)
+      go _       _            0      = pure ()
       go !source !destination !count = do
         Memory.copy16 source destination
         go (source + 16) (destination + 16) (count - 1)
 
 -- | Notify the DMA controller that the LCD has entered the HBlank state. Return
 -- the number of clock cycles to stall the CPU.
-doHBlankHDMA :: Memory.Has env => State -> ReaderT env IO Int
+doHBlankHDMA :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
 doHBlankHDMA State {..} = do
   isActive <- liftIO $ readIORef hdmaActive
-  if not isActive
-    then pure 0
-    else do
-      source      <- readUnboxedRef hdmaSource
-      destination <- readUnboxedRef hdmaDestination
+  when isActive $ do
+    source      <- readUnboxedRef hdmaSource
+    destination <- readUnboxedRef hdmaDestination
 
-      Memory.copy16 source destination
+    Memory.copy16 source destination
 
-      liftIO $ do
-        writeUnboxedRef hdmaSource      (source + 16)
-        writeUnboxedRef hdmaDestination (destination + 16)
-        hdma5 <- directReadPort portHDMA5
-        directWritePort portHDMA5 (hdma5 - 1)
-        when (hdma5 == 0) $ writeIORef hdmaActive False
+    liftIO $ do
+      writeUnboxedRef hdmaSource      (source + 16)
+      writeUnboxedRef hdmaDestination (destination + 16)
+      hdma5 <- directReadPort portHDMA5
+      directWritePort portHDMA5 (hdma5 - 1)
+      when (hdma5 == 0) $ writeIORef hdmaActive False
 
-      pure 8
+    Bus.delayClocks 8
 
 makeHDMASource :: Word8 -> Word8 -> Word16
 makeHDMASource high low = (fromIntegral high .<<. 8) .|. (fromIntegral low .&. 0xF0)

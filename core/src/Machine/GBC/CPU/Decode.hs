@@ -6,7 +6,7 @@
 
 module Machine.GBC.CPU.Decode
   ( MonadFetch(..)
-  , fetchAndExecute
+  , decodeAndExecute
   , table0
   , table1
   )
@@ -28,9 +28,9 @@ nextWord = do
   h <- nextByte
   pure (fromIntegral l .|. (fromIntegral h .<<. 8))
 
-{-# INLINE fetchAndExecute #-}
-fetchAndExecute :: (MonadGMBZ80 m, MonadFetch m) => Word8 -> m (ExecuteResult m)
-fetchAndExecute b0 = V.unsafeIndex table0 (fromIntegral b0)
+{-# INLINE decodeAndExecute #-}
+decodeAndExecute :: (MonadGMBZ80 m, MonadFetch m) => Word8 -> m (ExecuteResult m)
+decodeAndExecute b0 = V.unsafeIndex table0 (fromIntegral b0)
 
 {-# INLINABLE table0 #-}
 table0 :: (MonadGMBZ80 m, MonadFetch m) => V.Vector (m (ExecuteResult m))

@@ -8,7 +8,6 @@ module Machine.GBC.CPU
   , Mode(..)
   , State(..)
   , Has(..)
-  , Bus(..)
   , M(..)
   , init
   , ports
@@ -67,6 +66,7 @@ import           Machine.GBC.Registers
 import           Machine.GBC.Util
 import           Prelude                 hiding ( init )
 import qualified Data.Vector.Storable.Mutable  as VSM
+import qualified Machine.GBC.Bus               as Bus
 import qualified Machine.GBC.CPU.Backtrace     as Backtrace
 import qualified Machine.GBC.Memory            as Memory
 
@@ -137,11 +137,6 @@ instance Storable RegisterFile where
 
 -- | The current CPU mode.
 data Mode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, Enum)
-
-class Bus env where
-  busRead :: Word16 -> ReaderT env IO Word8
-  busWrite :: Word16 -> Word8 -> ReaderT env IO ()
-  busDelay :: ReaderT env IO ()
 
 -- | The internal CPU state.
 data State = State {
@@ -557,7 +552,7 @@ interruptVector InterruptCancelled         = 0
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINABLE step #-}
-step :: (Has env, Bus env) => ReaderT env IO ()
+step :: (Has env, Bus.Has env) => ReaderT env IO ()
 step = do
   State {..} <- asks forState
 
@@ -569,38 +564,38 @@ step = do
   case mode of
     ModeNormal -> do
       pc         <- readPC
-      byte       <- busRead pc
+      byte       <- Bus.read pc
       interrupts <- pendingEnabledInterrupts portIF portIE
       if interrupts /= 0 && ime
         then handleInterrupt interrupts
         else do
           writePC (pc + 1)
-          run (fetchAndExecute byte)
+          run (decodeAndExecute byte)
     ModeHalt -> do
       interrupts <- pendingEnabledInterrupts portIF portIE
       if interrupts == 0
-        then busDelay
+        then Bus.delay
         else do
           liftIO (writeIORef cpuMode ModeNormal)
           if ime
             then handleInterrupt interrupts
-            else run . fetchAndExecute =<< readUnboxedRef instruction
+            else run . decodeAndExecute =<< readUnboxedRef instruction
     ModeStop -> do
       interrupts <- pendingEnabledInterrupts portIF portIE
       when (interrupts /= 0) $ do
         liftIO (writeIORef cpuMode ModeNormal)
-        if ime then handleInterrupt interrupts else run (fetchAndExecute =<< nextByte)
+        if ime then handleInterrupt interrupts else run (decodeAndExecute =<< nextByte)
 
  where
   handleInterrupt interrupts = do
     State {..} <- asks forState
-    busDelay
-    busDelay
+    Bus.delay
+    Bus.delay
     sp <- readR16 RegSP
     writeR16 RegSP (sp - 2)
-    busWrite (sp - 1) =<< readRHalf RegPCH
+    Bus.write (sp - 1) =<< readRHalf RegPCH
     ie <- directReadPort portIE
-    busWrite (sp - 2) =<< readRHalf RegPCL
+    Bus.write (sp - 2) =<< readRHalf RegPCL
 
     let nextInterrupt = getNextInterrupt (interrupts .&. ie)
     let vector        = interruptVector nextInterrupt
@@ -652,65 +647,90 @@ callStackPopped = do
 newtype M env a = M {run :: ReaderT env IO a}
   deriving (Functor, Applicative, Monad, MonadIO)
 
-instance (Bus env, Has env) => MonadFetch (M env) where
+instance (Bus.Has env, Has env) => MonadFetch (M env) where
+  {-# INLINE nextByte #-}
   nextByte = M $ do
     pc <- readPC
     writePC (pc + 1)
-    busRead pc
+    Bus.read pc
 
-instance (Bus env, Has env) => MonadGMBZ80 (M env) where
+instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   type ExecuteResult (M env) = ()
+  {-# INLINE ldrr #-}
   ldrr r r' = M (writeR8 r =<< readR8 r')
+  {-# INLINE ldrn #-}
   ldrn r n = M (writeR8 r n)
-  ldrHL r = M (writeR8 r =<< busRead =<< readR16 RegHL)
+  {-# INLINE ldrHL #-}
+  ldrHL r = M (writeR8 r =<< Bus.read =<< readR16 RegHL)
+  {-# INLINE ldHLr #-}
   ldHLr r = M $ do
     hl <- readR16 RegHL
-    busWrite hl =<< readR8 r
+    Bus.write hl =<< readR8 r
+  {-# INLINE ldHLn #-}
   ldHLn n = M $ do
     hl <- readR16 RegHL
-    busWrite hl n
-  ldaBC = M (writeR8 RegA =<< busRead =<< readR16 RegBC)
-  ldaDE = M (writeR8 RegA =<< busRead =<< readR16 RegDE)
+    Bus.write hl n
+  {-# INLINE ldaBC #-}
+  ldaBC = M (writeR8 RegA =<< Bus.read =<< readR16 RegBC)
+  {-# INLINE ldaDE #-}
+  ldaDE = M (writeR8 RegA =<< Bus.read =<< readR16 RegDE)
+  {-# INLINE ldaC #-}
   ldaC  = M $ do
     c <- readR8 RegC
-    writeR8 RegA =<< busRead (0xFF00 + fromIntegral c)
+    writeR8 RegA =<< Bus.read (0xFF00 + fromIntegral c)
+  {-# INLINE ldCa #-}
   ldCa = M $ do
     c <- readR8 RegC
-    busWrite (0xFF00 + fromIntegral c) =<< readR8 RegA
-  ldan n = M (writeR8 RegA =<< busRead (0xFF00 + fromIntegral n))
-  ldna n = M (busWrite (0xFF00 + fromIntegral n) =<< readR8 RegA)
-  ldann nn = M (writeR8 RegA =<< busRead nn)
-  ldnna nn = M (busWrite nn =<< readR8 RegA)
+    Bus.write (0xFF00 + fromIntegral c) =<< readR8 RegA
+  {-# INLINE ldan #-}
+  ldan n = M (writeR8 RegA =<< Bus.read (0xFF00 + fromIntegral n))
+  {-# INLINE ldna #-}
+  ldna n = M (Bus.write (0xFF00 + fromIntegral n) =<< readR8 RegA)
+  {-# INLINE ldann #-}
+  ldann nn = M (writeR8 RegA =<< Bus.read nn)
+  {-# INLINE ldnna #-}
+  ldnna nn = M (Bus.write nn =<< readR8 RegA)
+  {-# INLINE ldaHLI #-}
   ldaHLI = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    writeR8 RegA =<< busRead hl
+    writeR8 RegA =<< Bus.read hl
+  {-# INLINE ldaHLD #-}
   ldaHLD = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    writeR8 RegA =<< busRead hl
+    writeR8 RegA =<< Bus.read hl
+  {-# INLINE ldBCa #-}
   ldBCa = M $ do
     bc <- readR16 RegBC
-    busWrite bc =<< readR8 RegA
+    Bus.write bc =<< readR8 RegA
+  {-# INLINE ldDEa #-}
   ldDEa = M $ do
     de <- readR16 RegDE
-    busWrite de =<< readR8 RegA
+    Bus.write de =<< readR8 RegA
+  {-# INLINE ldHLIa #-}
   ldHLIa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl + 1)
-    busWrite hl =<< readR8 RegA
+    Bus.write hl =<< readR8 RegA
+  {-# INLINE ldHLDa #-}
   ldHLDa = M $ do
     hl <- readR16 RegHL
     writeR16 RegHL (hl - 1)
-    busWrite hl =<< readR8 RegA
+    Bus.write hl =<< readR8 RegA
+  {-# INLINE ldddnn #-}
   ldddnn dd nn = M (writeR16 dd nn)
+  {-# INLINE ldSPHL #-}
   ldSPHL = M $ do
     writeR16 RegSP =<< readR16 RegHL
-    busDelay
+    Bus.delay
+  {-# INLINE push #-}
   push qq = M $ do
-    busDelay
+    Bus.delay
     push16 =<< readR16pp qq
+  {-# INLINE pop #-}
   pop qq = M (writeR16pp qq =<< pop16)
+  {-# INLINE ldhl #-}
   ldhl i = M $ do
     sp <- fromIntegral <$> readR16 RegSP
     let wi      = fromIntegral i :: Int32
@@ -719,87 +739,117 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
     let carryCY = (sp .&. 0x00000100) `xor` (wi .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
     setFlags ((if carryCY then flagCY else 0) .|. (if carryH then flagH else 0))
-    busDelay
+    Bus.delay
+  {-# INLINE ldnnSP #-}
   ldnnSP nn = M $ do
-    busWrite nn =<< readRHalf RegSPL
-    busWrite (nn + 1) =<< readRHalf RegSPH
+    Bus.write nn =<< readRHalf RegSPL
+    Bus.write (nn + 1) =<< readRHalf RegSPH
+  {-# INLINE addr #-}
   addr r = M $ do
     v <- readR8 r
     add8 v 0
+  {-# INLINE addn #-}
   addn n = M (add8 n 0)
+  {-# INLINE addhl #-}
   addhl = M $ do
-    v <- busRead =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     add8 v 0
+  {-# INLINE adcr #-}
   adcr r = M $ do
     v <- readR8 r
     add8 v =<< getCarry
+  {-# INLINE adcn #-}
   adcn n = M (add8 n =<< getCarry)
+  {-# INLINE adchl #-}
   adchl = M $ do
-    v <- busRead =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     add8 v =<< getCarry
+  {-# INLINE subr #-}
   subr r = M $ do
     v <- readR8 r
     sub8 v 0
+  {-# INLINE subn #-}
   subn n = M (sub8 n 0)
+  {-# INLINE subhl #-}
   subhl = M $ do
-    v <- busRead =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     sub8 v 0
+  {-# INLINE sbcr #-}
   sbcr r = M $ do
     v     <- readR8 r
     carry <- getCarry
     sub8 v (negate carry)
+  {-# INLINE sbcn #-}
   sbcn n = M $ do
     carry <- getCarry
     sub8 n (negate carry)
+  {-# INLINE sbchl #-}
   sbchl = M $ do
-    v     <- busRead =<< readR16 RegHL
+    v     <- Bus.read =<< readR16 RegHL
     carry <- getCarry
     sub8 v (negate carry)
+  {-# INLINE andr #-}
   andr r = M (andOp8 =<< readR8 r)
+  {-# INLINE andn #-}
   andn n = M (andOp8 n)
-  andhl = M (andOp8 =<< busRead =<< readR16 RegHL)
+  {-# INLINE andhl #-}
+  andhl = M (andOp8 =<< Bus.read =<< readR16 RegHL)
+  {-# INLINE orr #-}
   orr r = M (orOp8 =<< readR8 r)
+  {-# INLINE orn #-}
   orn n = M (orOp8 n)
-  orhl = M (orOp8 =<< busRead =<< readR16 RegHL)
+  {-# INLINE orhl #-}
+  orhl = M (orOp8 =<< Bus.read =<< readR16 RegHL)
+  {-# INLINE xorr #-}
   xorr r = M (xorOp8 =<< readR8 r)
+  {-# INLINE xorn #-}
   xorn n = M (xorOp8 n)
-  xorhl = M (xorOp8 =<< busRead =<< readR16 RegHL)
+  {-# INLINE xorhl #-}
+  xorhl = M (xorOp8 =<< Bus.read =<< readR16 RegHL)
+  {-# INLINE cpr #-}
   cpr r = M $ do
     a <- readR8 RegA
     v <- readR8 r
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
+  {-# INLINE cpn #-}
   cpn n = M $ do
     a <- readR8 RegA
     let (_, flags) = adder8 a n (negate (fromIntegral n)) 0
     setFlags (flagN .|. flags)
+  {-# INLINE cphl #-}
   cphl = M $ do
     a <- readR8 RegA
-    v <- busRead =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
     setFlags (flagN .|. flags)
+  {-# INLINE incr #-}
   incr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v 1
     writeR8 r v'
     setFlagsMask allExceptCY flags
+  {-# INLINE inchl #-}
   inchl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
+    v  <- Bus.read hl
     let (v', flags) = inc8 v 1
     setFlagsMask allExceptCY flags
-    busWrite hl v'
+    Bus.write hl v'
+  {-# INLINE decr #-}
   decr r = M $ do
     v <- readR8 r
     let (v', flags) = inc8 v negative1
     writeR8 r v'
     setFlagsMask allExceptCY (flags .|. flagN)
+  {-# INLINE dechl #-}
   dechl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
+    v  <- Bus.read hl
     let (v', flags) = inc8 v negative1
     setFlagsMask allExceptCY (flags .|. flagN)
-    busWrite hl v'
+    Bus.write hl v'
+  {-# INLINE addhlss #-}
   addhlss ss = M $ do
     hl <- readR16 RegHL
     v  <- readR16 ss
@@ -810,7 +860,8 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
     setFlagsMask allExceptZ ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    busDelay
+    Bus.delay
+  {-# INLINE addSP #-}
   addSP e = M $ do
     sp <- readR16 RegSP
     let sp'     = fromIntegral sp
@@ -820,116 +871,156 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
     setFlags ((if carryH then flagH else 0) .|. (if carryCY then flagCY else 0))
-    busDelay
-    busDelay
+    Bus.delay
+    Bus.delay
+  {-# INLINE incss #-}
   incss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v + 1)
-    busDelay
+    Bus.delay
+  {-# INLINE decss #-}
   decss ss = M $ do
     v <- readR16 ss
     writeR16 ss (v - 1)
-    busDelay
+    Bus.delay
+  {-# INLINE rlca #-}
   rlca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (rotateL v 1)
+  {-# INLINE rla #-}
   rla = M $ do
     v <- readR8 RegA
     let ir = rotateL v 1
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x80 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x01 else ir .&. 0xFE)
+  {-# INLINE rrca #-}
   rrca = M $ do
     v <- readR8 RegA
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (rotateR v 1)
+  {-# INLINE rra #-}
   rra = M $ do
     v <- readR8 RegA
     let ir = rotateR v 1
     hasCY <- testFlag flagCY
     setFlags (if v .&. 0x01 /= 0 then flagCY else 0)
     writeR8 RegA (if hasCY then ir .|. 0x80 else ir .&. 0x7F)
+  {-# INLINE rlcr #-}
   rlcr r = M (writeR8 r =<< rlc =<< readR8 r)
+  {-# INLINE rlchl #-}
   rlchl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< rlc v
+    v  <- Bus.read hl
+    Bus.write hl =<< rlc v
+  {-# INLINE rlr #-}
   rlr r = M (writeR8 r =<< rl =<< readR8 r)
+  {-# INLINE rlhl #-}
   rlhl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< rl v
+    v  <- Bus.read hl
+    Bus.write hl =<< rl v
+  {-# INLINE rrcr #-}
   rrcr r = M (writeR8 r =<< rrc =<< readR8 r)
+  {-# INLINE rrchl #-}
   rrchl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< rrc v
+    v  <- Bus.read hl
+    Bus.write hl =<< rrc v
+  {-# INLINE rrr #-}
   rrr r = M (writeR8 r =<< rr =<< readR8 r)
+  {-# INLINE rrhl #-}
   rrhl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< rr v
+    v  <- Bus.read hl
+    Bus.write hl =<< rr v
+  {-# INLINE slar #-}
   slar r = M (writeR8 r =<< sla =<< readR8 r)
+  {-# INLINE slahl #-}
   slahl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< sla v
+    v  <- Bus.read hl
+    Bus.write hl =<< sla v
+  {-# INLINE srar #-}
   srar r = M (writeR8 r =<< sra =<< readR8 r)
+  {-# INLINE srahl #-}
   srahl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< sra v
+    v  <- Bus.read hl
+    Bus.write hl =<< sra v
+  {-# INLINE srlr #-}
   srlr r = M (writeR8 r =<< srl =<< readR8 r)
+  {-# INLINE srlhl #-}
   srlhl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< srl v
+    v  <- Bus.read hl
+    Bus.write hl =<< srl v
+  {-# INLINE swapr #-}
   swapr r = M (writeR8 r =<< swap =<< readR8 r)
+  {-# INLINE swaphl #-}
   swaphl = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl =<< swap v
+    v  <- Bus.read hl
+    Bus.write hl =<< swap v
+  {-# INLINE bitr #-}
   bitr r b = M $ do
     v <- readR8 r
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+  {-# INLINE bithl #-}
   bithl b = M $ do
-    v <- busRead =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     setFlagsMask allExceptCY (flagH .|. (if v `testBit` fromIntegral b then 0 else flagZ))
+  {-# INLINE setr #-}
   setr r b = M $ do
     v <- readR8 r
     writeR8 r (v `setBit` fromIntegral b)
+  {-# INLINE sethl #-}
   sethl b = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl (v `setBit` fromIntegral b)
+    v  <- Bus.read hl
+    Bus.write hl (v `setBit` fromIntegral b)
+  {-# INLINE resr #-}
   resr r b = M $ do
     v <- readR8 r
     writeR8 r (v `clearBit` fromIntegral b)
+  {-# INLINE reshl #-}
   reshl b = M $ do
     hl <- readR16 RegHL
-    v  <- busRead hl
-    busWrite hl (v `clearBit` fromIntegral b)
-  jpnn nn = M (busDelay >> writePC nn)
+    v  <- Bus.read hl
+    Bus.write hl (v `clearBit` fromIntegral b)
+  {-# INLINE jpnn #-}
+  jpnn nn = M (Bus.delay >> writePC nn)
+  {-# INLINE jphl #-}
   jphl = M (writePC =<< readR16 RegHL)
+  {-# INLINE jpccnn #-}
   jpccnn cc nn = M $ do
     shouldJump <- testCondition cc
-    when shouldJump $ busDelay >> writePC nn
+    when shouldJump $ Bus.delay >> writePC nn
+  {-# INLINE jr #-}
   jr e = M (doJR e)
+  {-# INLINE jrcc #-}
   jrcc cc e = M $ do
     shouldJump <- testCondition cc
     when shouldJump $ doJR e
+  {-# INLINE call #-}
   call nn = M (doCall nn)
+  {-# INLINE callcc #-}
   callcc cc nn = M $ do
     shouldJump <- testCondition cc
     when shouldJump $ doCall nn
+  {-# INLINE ret #-}
   ret  = M doRet
+  {-# INLINE reti #-}
   reti = M (setIME >> doRet)
+  {-# INLINE retcc #-}
   retcc cc = M $ do
-    busDelay
+    Bus.delay
     shouldJump <- testCondition cc
     when shouldJump doRet
+  {-# INLINE rst #-}
   rst t = M (doCall (8 * fromIntegral t))
+  {-# INLINE daa #-}
   daa = M $ do
     flags <- readF
     a     <- readR8 RegA
@@ -951,17 +1042,24 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
     setFlagsMask
       allExceptN
       ((if isCy || rWide .&. 0x100 == 0x100 then flagCY else 0) .|. (if r == 0 then flagZ else 0))
+  {-# INLINE cpl #-}
   cpl = M $ do
     a <- readR8 RegA
     writeR8 RegA (complement a)
     let flagHN = flagH .|. flagN in setFlagsMask flagHN flagHN
+  {-# INLINE nop #-}
   nop = M (pure ())
+  {-# INLINE ccf #-}
   ccf = M $ do
     cf <- testFlag flagCY
     setFlagsMask allExceptZ (if cf then 0 else flagCY)
+  {-# INLINE scf #-}
   scf  = M (setFlagsMask allExceptZ flagCY)
+  {-# INLINE di #-}
   di   = M clearIME
+  {-# INLINE ei #-}
   ei   = M setIMENext
+  {-# INLINE halt #-}
   halt = M $ do
     State {..} <- asks forState
     interrupts <- pendingEnabledInterrupts portIF portIE
@@ -973,6 +1071,7 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
     writeUnboxedRef instruction =<< Memory.readByte =<< readPC
     when (not ime && interrupts == 0) incPC
     setMode ModeHalt
+  {-# INLINE stop #-}
   stop = M $ do
     State {..} <- asks forState
     key1       <- directReadPort portKEY1
@@ -985,45 +1084,46 @@ instance (Bus env, Has env) => MonadGMBZ80 (M env) where
           directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
           writeUnboxedRef cycleClocks 2
       else setMode ModeStop
+  {-# INLINE invalid #-}
   invalid b = liftIO (throwIO (InvalidInstruction b))
 
 {-# INLINE doCall #-}
-doCall :: (Has env, Bus env) => Word16 -> ReaderT env IO ()
+doCall :: (Has env, Bus.Has env) => Word16 -> ReaderT env IO ()
 doCall nn = do
   callStackPushed nn
-  busDelay
+  Bus.delay
   push16 =<< readPC
   writePC nn
 
 {-# INLINE doRet #-}
-doRet :: (Has env, Bus env) => ReaderT env IO ()
+doRet :: (Has env, Bus.Has env) => ReaderT env IO ()
 doRet = do
   callStackPopped
   r <- pop16
-  busDelay
+  Bus.delay
   writePC r
 
 {-# INLINE doJR #-}
-doJR :: (Has env, Bus env) => Int8 -> ReaderT env IO ()
+doJR :: (Has env, Bus.Has env) => Int8 -> ReaderT env IO ()
 doJR e = do
-  busDelay
+  Bus.delay
   pc <- readPC
   writePC (pc + fromIntegral e)
 
 {-# INLINE push16 #-}
-push16 :: (Has env, Bus env) => Word16 -> ReaderT env IO ()
+push16 :: (Has env, Bus.Has env) => Word16 -> ReaderT env IO ()
 push16 value = do
   sp <- readR16 RegSP
   writeR16 RegSP (sp - 2)
-  busWrite (sp - 1) (fromIntegral (value .>>. 8))
-  busWrite (sp - 2) (fromIntegral (value .&. 0xFF))
+  Bus.write (sp - 1) (fromIntegral (value .>>. 8))
+  Bus.write (sp - 2) (fromIntegral (value .&. 0xFF))
 
 {-# INLINE pop16 #-}
-pop16 :: (Has env, Bus env) => ReaderT env IO Word16
+pop16 :: (Has env, Bus.Has env) => ReaderT env IO Word16
 pop16 = do
   sp     <- readR16 RegSP
-  valueL <- busRead sp
-  valueH <- busRead (sp + 1)
+  valueL <- Bus.read sp
+  valueH <- Bus.read (sp + 1)
   writeR16 RegSP (sp + 2)
   pure ((fromIntegral valueH .<<. 8) .|. fromIntegral valueL)
 

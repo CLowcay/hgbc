@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: eaeb62ec49dab7d471e1a3c2ec1e49062a8ce39abdacce53ac7c598605237bdc
+-- hash: 5158bbfdd8dd37d0a4ab85edc80f6c9b9d4bf612d300fd8887ef6d71e62afd42
 
 name:           hgbc-core
 version:        0.1.0.0
@@ -34,6 +34,7 @@ library
       Machine.GBC.Audio.PulseChannel
       Machine.GBC.Audio.Sweep
       Machine.GBC.Audio.WaveChannel
+      Machine.GBC.Bus
       Machine.GBC.CPU
       Machine.GBC.CPU.Backtrace
       Machine.GBC.CPU.Decode
