@@ -26,10 +26,6 @@ instance MonadFetch DecodeM where
     b0 : bs <- get
     put bs
     pure b0
-  nextWord = DecodeM $ do
-    b0 : b1 : bs <- get
-    put bs
-    pure ((fromIntegral b1 .<<. 8) .|. fromIntegral b0)
 
 instance MonadGMBZ80 DecodeM where
   type ExecuteResult DecodeM = String
@@ -140,7 +136,7 @@ instance MonadGMBZ80 DecodeM where
 
 decodesTo :: [Word8] -> String -> IO ()
 decodesTo encoding expectedDecoding = do
-  let result = runStateT (runDecodeM fetchAndExecute) encoding
+  let result = runStateT (runDecodeM (decodeAndExecute =<< nextByte)) encoding
   case result of
     Nothing                    -> expectationFailure "Failed to decode instruction"
     Just (decoding, remainder) -> do
