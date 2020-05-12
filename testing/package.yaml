@@ -19,6 +19,7 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/CLowcay/hgbc#readme>
 
 dependencies:
+- ansi-terminal
 - base >= 4.7 && < 5
 - bytestring
 - directory
@@ -27,6 +28,7 @@ dependencies:
 - hspec
 - mtl
 - temporary
+- unliftio
 
 executables:
   hgbc-tester:
