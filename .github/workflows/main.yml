@@ -73,7 +73,10 @@ jobs:
   # Deploy ROM test results to netlify
   upload_test_results:
     needs: rom_tests
+    if: github.ref == 'refs/heads/master'
+
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/download-artifact@v2
         with:
@@ -91,4 +94,4 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.RESULTS_NETLIFY_SITE_ID }}
         with:
           args: deploy --dir=results --prod
-          secrets: '["NETLIFY_AUTH_TOKEN", "RESULTS_NETLIFY_SITE_ID"]'          
+          secrets: '["NETLIFY_AUTH_TOKEN", "RESULTS_NETLIFY_SITE_ID"]'
