@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 818091ab2dfaec13c9df342f94ef52bb0a92d8a9f4a3355549509fa7d011c83a
+-- hash: 6fdb61edf37f118d6bdf976d2de6cc9ea54389e6cd5e7ef2ebd216540204bc47
 
 name:           hgbc-testing
 version:        0.1.0.0
@@ -38,8 +38,8 @@ executable hgbc-tester
     , directory
     , filepath
     , hgbc-core
-    , hspec
     , mtl
     , temporary
+    , time
     , unliftio
   default-language: Haskell2010

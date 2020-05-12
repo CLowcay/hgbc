@@ -9,7 +9,7 @@ module Framework
   , ResultTree
   , TestTree(..)
   , TestResult(..)
-  , runTestTree
+  , runTestSuite
   , generateReport
   , checkResultsAndExit
   )
@@ -17,8 +17,10 @@ where
 
 import           Data.Bifunctor
 import           Data.Maybe
+import           Data.Time
 import           System.Console.ANSI
 import           System.Exit
+import           System.FilePath
 import           UnliftIO
 import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Lazy.Builder  as BB
@@ -35,22 +37,26 @@ data TestTree summary result = TestCase Name Required result
 type TestSuite = TestTree () (IO TestResult)
 type ResultTree = TestTree (Passed, Failed) TestResult
 
-runTestTree :: TestSuite -> IO ResultTree
-runTestTree (TestCase name required action) = do
+runTestSuite :: TestSuite -> IO ResultTree
+runTestSuite = runTestTree Nothing
+
+runTestTree :: Maybe String -> TestSuite -> IO ResultTree
+runTestTree parent (TestCase name required action) = do
+  let displayName = maybe name (</> name) parent
   result <- action `catchAny` (pure . TestFailed . displayException)
   case result of
     TestPassed -> do
       setSGR [SetColor Foreground Dull Green]
-      putStrLn ("  ✔ " <> name)
+      putStrLn ("  ✔ " <> displayName)
     TestFailed message -> do
       setSGR [SetColor Foreground Dull Red]
-      putStrLn ("  ✗ " <> name)
+      putStrLn ("  ✗ " <> displayName)
       putStrLn (unlines . fmap ("    " <>) . lines $ message)
   setSGR []
   pure (TestCase name required result)
-runTestTree (TestTree name () subtests) = do
+runTestTree parent (TestTree name () subtests) = do
   putStrLn name
-  results <- traverse runTestTree subtests
+  results <- traverse (runTestTree (Just (maybe name (</> name) parent))) subtests
   pure (TestTree name (accumulateTotals results) results)
 
 accumulateTotals :: [ResultTree] -> (Passed, Failed)
@@ -68,46 +74,95 @@ failingTests (TestTree name _ tree) = case catMaybes (failingTests <$> tree) of
   []    -> Nothing
   tree' -> Just (TestTree name (accumulateTotals tree') tree')
 
-generateReport :: String -> ResultTree -> LB.ByteString
-generateReport title results = BB.toLazyByteString
-  (  "<html><head><meta charset='UTF-8'><title>"
+generateReport :: String -> UTCTime -> UTCTime -> ResultTree -> LB.ByteString
+generateReport title testTime reportTime results = BB.toLazyByteString
+  (  "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+  <> style
+  <> "<title>"
   <> BB.stringUtf8 title
   <> "</title></head><body>"
-  <> "</body>"
-  <> reportResultTree 1 results
-  <> "</html>"
+  <> reportResultTree Nothing 1 results
+  <> "</body></html>"
   )
  where
-  reportResultTree _ TestCase{} = ""
-  reportResultTree level (TestTree name (passed, failed) subtrees) =
-    (  ("<h" <> BB.intDec level <> " id='" <> makeAnchor name <> "'>")
+  time =
+    (\x -> "<time>" <> x <> "</time>") . BB.stringUtf8 . formatTime defaultTimeLocale "%F %T%z"
+  reportResultTree _ _ TestCase{} = ""
+  reportResultTree parent level (TestTree name (passed, failed) subtrees) =
+    let
+      nextParent = Just (maybe name (</> name) parent)
+      summaryClass | passed == 0 = "failed"
+                   | failed == 0 = "passed"
+                   | otherwise   = "mixed"
+    in
+      (  ("<h" <> BB.intDec level <> " id='" <> makeAnchor parent name <> "'>")
       <> BB.stringUtf8 name
       <> ("</h" <> BB.intDec level <> ">")
       )
-      <> "<table><thead><tr><th>Test</th><th>Passed</th><th>Failed</th></tr></thead>"
-      <> (  "<tbody>"
-         <> mconcat (reportResult <$> subtrees)
-         <> (  "<tr><th>Summary</th>"
-            <> ("<td>" <> BB.intDec passed <> "</td>")
-            <> ("<td>" <> BB.intDec failed <> "</td>")
-            <> "</tr>"
-            )
-         <> "</tbody>"
+      <> (if isNothing parent
+           then
+             "<div id=reportTime><div>Test run at</div>"
+             <> time testTime
+             <> "<div>Report generated at</div>"
+             <> time reportTime
+             <> "</div>"
+           else "<p><a class=smallLink href='#" <> makeAnchor parent "" <> "'>Up one level</a>"
+         )
+      <> "<p><table><thead><tr><th>Test</th><th>Passed</th><th>Failed</th><th>Required For CI pass</th></tr></thead>"
+      <> ("<tbody>" <> mconcat (reportResult nextParent <$> subtrees) <> "</tbody>")
+      <> (  "<tfoot><tr class="
+         <> summaryClass
+         <> "><th>Summary</th>"
+         <> makeSummary passed failed
+         <> "<td></td></tr></tfoot>"
          )
       <> "</table>"
-      <> mconcat (reportResultTree (level + 1) <$> subtrees)
-  reportResult (TestTree name (passed, failed) _) =
-    "<tr>"
-      <> ("<td><a href='#" <> makeAnchor name <> "'>" <> BB.stringUtf8 name <> "</a></td>")
-      <> ("<td>" <> BB.intDec passed <> "</td>")
-      <> ("<td>" <> BB.intDec failed <> "</td>")
-      <> "</tr>"
-  reportResult (TestCase name _ TestPassed) =
-    "<tr><td>" <> BB.stringUtf8 name <> "</td><td>✔</td><td></td></tr>"
-  reportResult (TestCase name _ (TestFailed _)) =
-    "<tr><td>" <> BB.stringUtf8 name <> "</td><td></td><td></td>✗</tr>"
-  makeAnchor = BB.stringUtf8 . filter (`elem` alphabetic)
+      <> mconcat (reportResultTree nextParent (level + 1) <$> subtrees)
+  makeSummary passed failed =
+    let total = passed + failed
+        passedTag | failed == 0 = "<td class=passed>"
+                  | passed == 0 = "<td class=failed>"
+                  | otherwise   = "<td class=mixed>"
+        failedTag = if failed > 0 then "<td class=failed>" else "<td class=passed>"
+    in  (passedTag <> BB.intDec passed <> " / " <> BB.intDec total <> "</td>")
+          <> (failedTag <> BB.intDec failed <> "</td>")
+  reportResult parent (TestTree name (passed, failed) _) =
+    ("<tr><td><a href='#" <> makeAnchor parent name <> "'>" <> BB.stringUtf8 name <> "</a></td>")
+      <> makeSummary passed failed
+      <> "<td></td></tr>"
+  reportResult _ (TestCase name required TestPassed) =
+    "<tr class=passed><td>"
+      <> BB.stringUtf8 name
+      <> "</td><td>✔</td><td></td><td>"
+      <> testStatus required
+      <> "</td></tr>"
+  reportResult _ (TestCase name required (TestFailed _)) =
+    "<tr class=failed><td>"
+      <> BB.stringUtf8 name
+      <> "</td><td></td><td>✗</td><td>"
+      <> testStatus required
+      <> "</td></tr>"
+  makeAnchor parent = BB.stringUtf8 . filter (`elem` alphabetic) . maybe id (</>) parent
   alphabetic = ['A' .. 'Z'] <> ['a' .. 'z'] <> ['0' .. '9']
+  testStatus Required = "YES"
+  testStatus Optional = "NO"
+  style =
+    "\n<style>\n"
+      <> BB.stringUtf8
+           (unlines
+             [ "th { text-align: left; }"
+             , "table { border-collapse: collapse; }"
+             , "td, th { border: 1px solid black; padding: 0.25ch 1ch; }"
+             , ".failed { color: red; }"
+             , ".passed { color: green; }"
+             , ".mixed {color: darkorange; }"
+             , "a.smallLink { font-size: small; }"
+             , "#reportTime { white-space: nowrap; display: grid; grid-template-columns: min-content min-content; column-gap: 1ch; align-items: end; }"
+             , "#reportTime time {grid-column: 2; }"
+             , "time { font-weight: bold; }"
+             ]
+           )
+      <> "\n</style>\n"
 
 checkResultsAndExit :: ResultTree -> IO ()
 checkResultsAndExit results = do

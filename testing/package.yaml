@@ -25,9 +25,9 @@ dependencies:
 - directory
 - filepath
 - hgbc-core
-- hspec
 - mtl
 - temporary
+- time
 - unliftio
 
 executables:

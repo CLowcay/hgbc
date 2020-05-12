@@ -12,10 +12,8 @@ import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
-import           Data.Foldable
 import           Data.Functor
 import           Data.IORef
-import           Data.List
 import           Data.Word
 import           Foreign.Marshal.Alloc
 import           Framework
@@ -24,10 +22,11 @@ import           System.Directory
 import           System.Environment
 import           System.FilePath
 import           System.IO.Temp
-import           Test.Hspec
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
+import           Data.List
+import           Data.Traversable
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Emulator          as Emulator
@@ -35,19 +34,26 @@ import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Memory            as Memory
 import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
+import           Data.Time
 
 main :: IO ()
 main = do
   blarggDir <- lookupEnv "BLARGG_DIR"
-  case blarggDir of
-    Nothing   -> pure ()
-    Just path -> do
-      results <- runTestTree (blarggSuite path)
-      LB.writeFile "hgbc-test-report.html" (generateReport "H-GBC ROM test results" results)
-      checkResultsAndExit results
+  let blarggTestTree = case blarggDir of
+        Nothing   -> []
+        Just path -> [blarggSuite path]
 
-  --mooneyeDir <- lookupEnv "MOONEYE_DIR"
-  --hspec $ maybe (pure ()) mooneye mooneyeDir
+  mooneyeDir      <- lookupEnv "MOONEYE_DIR"
+  mooneyeTestTree <- case mooneyeDir of
+    Nothing   -> pure []
+    Just path -> pure <$> mooneyeSuite "mooneye" path
+
+  testTime   <- getCurrentTime
+  results    <- runTestSuite (TestTree "H-GBC ROM tests" () (blarggTestTree ++ mooneyeTestTree))
+  reportTime <- getCurrentTime
+  LB.writeFile "hgbc-test-report.html"
+               (generateReport "H-GBC ROM test results" testTime reportTime results)
+  checkResultsAndExit results
 
 blarggSuite :: FilePath -> TestSuite
 blarggSuite blarggPath = TestTree
@@ -80,39 +86,37 @@ blarggSuite blarggPath = TestTree
   halt_bug_output
     = "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
 
---mooneye :: FilePath -> Spec
---mooneye mooneyePath = do
---  let bitsPath       = mooneyePath </> "bits"
---  let instrPath      = mooneyePath </> "instr"
---  let interruptsPath = mooneyePath </> "interrupts"
---  let oamDMAPath     = mooneyePath </> "oam_dma"
---  let ppuPath        = mooneyePath </> "ppu"
---  let serialPath     = mooneyePath </> "serial"
---  let timerPath      = mooneyePath </> "timer"
---  tests           <- runIO (getRomsInOrder <$> listDirectory mooneyePath)
---  bitsTests       <- runIO (getRomsInOrder <$> listDirectory bitsPath)
---  instrTests      <- runIO (getRomsInOrder <$> listDirectory instrPath)
---  interruptsTests <- runIO (getRomsInOrder <$> listDirectory interruptsPath)
---  oamDMATests     <- runIO (getRomsInOrder <$> listDirectory oamDMAPath)
---  ppuTests        <- runIO (getRomsInOrder <$> listDirectory ppuPath)
---  serialTests     <- runIO (getRomsInOrder <$> listDirectory serialPath)
---  timerTests      <- runIO (getRomsInOrder <$> listDirectory timerPath)
---  describe "mooneye suite" $ do
---    for_ tests (testROM mooneyePath)
---    describe "bits" $ for_ bitsTests (testROM bitsPath)
---    describe "instr" $ for_ instrTests (testROM instrPath)
---    describe "interrupts" $ for_ interruptsTests (testROM interruptsPath)
---    describe "oam_dma" $ for_ oamDMATests (testROM oamDMAPath)
---    describe "ppu" $ for_ ppuTests (testROM ppuPath)
---    describe "serial" $ for_ serialTests (testROM serialPath)
---    describe "timer" $ for_ timerTests (testROM timerPath)
---
--- where
---  getRomsInOrder = sort . filter ((".gb" ==) . takeExtension)
---  testROM path rom = specify rom $ do
---    (result, output) <- mooneyeTest (path </> rom)
---    when (result /= Passed) $ B.putStrLn output
---    result `shouldBe` Passed
+mooneyeSuite :: String -> FilePath -> IO TestSuite
+mooneyeSuite name path = do
+  listing <- listDirectory path
+  dirs    <- filterM (doesDirectoryExist . (path </>)) listing
+  let tests = getRomsInOrder listing <&> \rom -> TestCase
+        rom
+        (if isOptionalMooneyeTest (path </> rom) then Optional else Required)
+        (testROM path rom)
+  subtests <- for (filter (`notElem` skipMooneyeTests) dirs)
+    $ \dir -> mooneyeSuite dir (path </> dir)
+  pure (TestTree name () (tests ++ subtests))
+ where
+  getRomsInOrder = sort . filter ((".gb" ==) . takeExtension)
+  testROM fullPath rom = do
+    result <- mooneyeTest (fullPath </> rom)
+    pure $ case result of
+      Passed  -> TestPassed
+      failure -> TestFailed (show failure)
+
+isOptionalMooneyeTest :: FilePath -> Bool
+isOptionalMooneyeTest rom =
+  let romName = takeBaseName rom
+  in  ("-GS" `isSuffixOf` romName)
+        || ("ppu" `isInfixOf` rom)
+        || ("mbc2" `isInfixOf` rom)
+        || ("hwio" `isInfixOf` rom)
+        || ("boot_" `isPrefixOf` romName)
+        || ("multicart_rom" `isInfixOf` romName)
+
+skipMooneyeTests :: [String]
+skipMooneyeTests = ["utils", "manual-only", "madness"]
 
 blarggTestSerial :: FilePath -> Word16 -> IO B.ByteString
 blarggTestSerial filename terminalAddress = romTest filename
@@ -143,21 +147,24 @@ instance Show MooneyeResult where
   show HardwareTestFailed      = "HardwareTestFailed"
   show (HardwareFailures n pc) = "HardwareFailures " <> show n <> " " <> formatHex pc
 
---mooneyeTest :: FilePath -> IO (MooneyeResult, B.ByteString)
---mooneyeTest filename = romTest filename accumulateSerialOutput terminateOnMagic getResult
--- where
---  terminateOnMagic = do
---    pc              <- CPU.readPC
---    nextInstruction <- Memory.readByte pc
---    pure (nextInstruction == 0x40)
---  getResult buffer = do
---    stringResult          <- LB.toStrict . BB.toLazyByteString <$> liftIO (readIORef buffer)
---    CPU.RegisterFile {..} <- CPU.getRegisterFile
---    let testResult
---          | regA /= 0 = HardwareFailures (fromIntegral regA) regPC
---          | regB /= 3 || regC /= 5 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34 = HardwareTestFailed
---          | otherwise = Passed
---    pure (testResult, stringResult)
+mooneyeTest :: FilePath -> IO MooneyeResult
+mooneyeTest filename = romTest filename
+                               accumulateSerialOutput
+                               terminateOnMagic
+                               getResult
+                               (const (pure "Failed"))
+ where
+  terminateOnMagic = do
+    pc              <- CPU.readPC
+    nextInstruction <- Memory.readByte pc
+    pure (nextInstruction == 0x40)
+  getResult _ = do
+    CPU.RegisterFile {..} <- CPU.getRegisterFile
+    let testResult
+          | regA /= 0 = HardwareFailures (fromIntegral regA) regPC
+          | regB /= 3 || regC /= 5 || regD /= 8 || regE /= 13 || regH /= 21 || regL /= 34 = HardwareTestFailed
+          | otherwise = Passed
+    pure testResult
 
 data TestComplete = TestComplete deriving (Eq, Show)
 newtype Timeout = Timeout String deriving Eq
@@ -177,9 +184,9 @@ romTest filename serialHandler terminate getResult timeoutHandler =
   withSystemTempDirectory "rom-testing" $ \tempDir -> do
     let baseName = takeBaseName filename
     createDirectoryIfMissing True (tempDir </> baseName)
-    let paths = ROM.Paths { romFile     = filename
-                          , romSaveFile = tempDir </> baseName </> "battery"
-                          , romRTCFile  = tempDir </> baseName </> "rtc"
+    let paths = ROM.Paths { ROM.romFile     = filename
+                          , ROM.romSaveFile = tempDir </> baseName </> "battery"
+                          , ROM.romRTCFile  = tempDir </> baseName </> "rtc"
                           }
 
     romData          <- B.readFile filename
