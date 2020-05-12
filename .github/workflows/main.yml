@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ master, ci/** ]
+    branches: [master, ci/**]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   # Build and run unit tests
@@ -12,33 +12,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-      
-    - name: Cache
-      uses: actions/cache@v1.1.2
-      env:
-        cache-name: stack-dependencies
-      with:
-        path: ~/.stack
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/stack.yaml.lock', '**/stack.yaml', '**/package.yaml') }}
-        restore-keys: ${{ runner.os }}-build-${{ env.cache-name }}-
-      
-    - name: Setup Stack
-      uses: mstksg/setup-stack@v2
-      
-    - name: Install packages
-      run: sudo apt-get update && sudo apt-get install libsdl2-dev
-      
-    - name: Build and test
-      env:
-        HSPEC_OPTIONS: --format=failed-examples
-      run: |
-        stack test --copy-bins --local-bin-path bin
+      - uses: actions/checkout@v2
 
-    - uses: actions/upload-artifact@v2
-      with:
-        name: binaries-linux
-        path: bin/
+      - name: Cache
+        uses: actions/cache@v1.1.2
+        env:
+          cache-name: stack-dependencies
+        with:
+          path: ~/.stack
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/stack.yaml.lock', '**/stack.yaml', '**/package.yaml') }}
+          restore-keys: ${{ runner.os }}-build-${{ env.cache-name }}-
+
+      - name: Setup Stack
+        uses: mstksg/setup-stack@v2
+
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install libsdl2-dev
+
+      - name: Build and test
+        env:
+          HSPEC_OPTIONS: --format=failed-examples
+        run: |
+          stack test --copy-bins --local-bin-path bin
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: binaries-linux
+          path: bin/
 
   # Run test ROMS
   rom_tests:
@@ -47,20 +47,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/download-artifact@v2
-      with:
-        name: binaries-linux
-        path: bin
+      - uses: actions/download-artifact@v2
+        with:
+          name: binaries-linux
+          path: bin
 
-    - uses: actions/checkout@v2
-      with:
-        repository: CLowcay/blargg_roms
-        token: ${{ secrets.ROMS_TOKEN }}
-        path: blargg
+      - uses: actions/checkout@v2
+        with:
+          repository: CLowcay/blargg_roms
+          token: ${{ secrets.ROMS_TOKEN }}
+          path: blargg
 
-    - name: ROM tests
-      env:
-        BLARGG_DIR: blargg
-      run: |
-        chmod +x bin/hgbc-tester
-        bin/hgbc-tester
+      - name: ROM tests
+        env:
+          BLARGG_DIR: blargg
+        run: |
+          chmod +x bin/hgbc-tester
+          bin/hgbc-tester
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: rom-test-results
+          path: hgbc-test-report.html
+
+  # Deploy ROM test results to netlify
+  upload_test_results:
+    needs: rom_tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: rom-test-results
+          path: results
+
+      - name: ROM tests
+        run: |
+          mv results/hgbc-test-report.html results/index.html
+
+      - name: Deploy to netlify
+        uses: netlify/actions/cli@master
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.RESULTS_NETLIFY_SITE_ID }}
+        with:
+          args: deploy --dir=results --prod
+          secrets: '["NETLIFY_AUTH_TOKEN", "RESULTS_NETLIFY_SITE_ID"]'          

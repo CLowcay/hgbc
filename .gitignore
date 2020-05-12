@@ -6,3 +6,4 @@ hgbc.cabal
 *.hie
 *~
 hgbc-test-report.html
+.netlify
