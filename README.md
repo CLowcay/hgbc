@@ -4,6 +4,8 @@ An emulator for the Nintendo Gameboy Color in Haskell because -- why not?
 
 Work in progress!
 
+The latest test report is at https://hgbc-test-results.netlify.app/ .
+
 # Build
 
 1. Install Haskell Stack from
