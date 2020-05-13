@@ -196,7 +196,7 @@ getMBC ROM {..} =
   in  case mbcType cType of
         Nothing      -> nullMBC
         Just MBC1    -> mbc1 bankMask ramMask (looksLikeMulticart romContent) allocator
+        Just MBC2    -> mbc2 bankMask allocator
         Just MBC3    -> mbc3 bankMask ramMask allocator nullRTC
         Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< savedRTC romRTCFile
         Just MBC5    -> mbc5 bankMask ramMask allocator
-        Just _       -> nullMBC

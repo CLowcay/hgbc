@@ -57,13 +57,6 @@ mbc3 bankMask ramMask ramAllocator rtc = do
           case decodeRTCRegister r2 of
             Nothing          -> VSM.unsafeWrite ram (getRAMOffset r2 + fromIntegral address) value
             Just rtcRegister -> writeRTC rtc rtcRegister value
-  let sliceRAM address size = do
-        enabled <- readIORef enableRAM
-        if not enabled
-          then VSM.replicate size 0xFF
-          else do
-            offset <- getRAMOffset <$> readIORef register2
-            pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   pure MBC { .. }
 
 decodeRTCRegister :: Int -> Maybe RTCRegister

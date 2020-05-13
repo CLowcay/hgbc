@@ -78,11 +78,4 @@ mbc1 bankMask ramMask multicart ramAllocator = do
         when enabled $ do
           offset <- readIORef cachedRAMOffset
           VSM.unsafeWrite ram (offset + fromIntegral address) value
-  let sliceRAM address size = do
-        enabled <- readIORef enableRAM
-        if not enabled
-          then VSM.replicate size 0xFF
-          else do
-            offset <- readIORef cachedRAMOffset
-            pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   pure MBC { .. }

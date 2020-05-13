@@ -59,11 +59,4 @@ mbc5 bankMask ramMask ramAllocator = do
         when enabled $ do
           offset <- ramBankOffset
           VSM.unsafeWrite ram (offset + fromIntegral address) value
-  let sliceRAM address size = do
-        enabled <- readIORef ramG
-        if not enabled
-          then VSM.replicate size 0xFF
-          else do
-            offset <- ramBankOffset
-            pure (VSM.unsafeSlice (offset + fromIntegral address) size ram)
   pure MBC { .. }

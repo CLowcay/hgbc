@@ -6,6 +6,7 @@ module Machine.GBC.MBC
   , savedRAM
   , RTC.savedRTC
   , mbc1
+  , mbc2
   , mbc3
   , mbc5
   )
@@ -13,6 +14,7 @@ where
 
 import           Machine.GBC.MBC.Interface
 import           Machine.GBC.MBC.MBC1
+import           Machine.GBC.MBC.MBC2
 import           Machine.GBC.MBC.MBC3
 import           Machine.GBC.MBC.MBC5
 import           System.IO.MMap
@@ -31,7 +33,6 @@ nullMBC = do
            , readRAM           = VSM.unsafeRead ram . fromIntegral
            , readRAMBankOffset = \_ -> VSM.unsafeRead ram . fromIntegral
            , writeRAM          = \address value -> VSM.unsafeWrite ram (fromIntegral address) value
-           , sliceRAM          = \address size -> pure (VSM.slice (fromIntegral address) size ram)
            }
 
 nullRTC :: RTC

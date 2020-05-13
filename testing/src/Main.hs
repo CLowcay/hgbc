@@ -110,7 +110,6 @@ isOptionalMooneyeTest rom =
   let romName = takeBaseName rom
   in  ("-GS" `isSuffixOf` romName)
         || ("ppu" `isInfixOf` rom)
-        || ("mbc2" `isInfixOf` rom)
         || ("hwio" `isInfixOf` rom)
         || ("boot_" `isPrefixOf` romName)
 

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 2b0de90ac51cb7a2c8f32f062b8c90c8dc8dc67b67b4948103dbbdf5eb18b930
+-- hash: 542d95d229aa28502599fce9a8b1853cbec147321ef3401667fe43d365e2e794
 
 name:           hgbc-core
 version:        0.1.0.0
@@ -51,6 +51,7 @@ library
       Machine.GBC.MBC
       Machine.GBC.MBC.Interface
       Machine.GBC.MBC.MBC1
+      Machine.GBC.MBC.MBC2
       Machine.GBC.MBC.MBC3
       Machine.GBC.MBC.MBC5
       Machine.GBC.MBC.RTC
