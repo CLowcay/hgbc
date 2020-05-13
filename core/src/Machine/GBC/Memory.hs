@@ -88,11 +88,13 @@ resetAndBoot pseudoBootROM = do
     writeIORef modeRef        mode0
     writeIORef bootROMLockout False
     writePort portSVBK 0
-    directWritePort portBLCK 0
+    directWritePort portBLCK 0xFE
     directWritePort portR4C  0
     writePort portR6C 0
   case bootROM of
-    Nothing      -> pseudoBootROM
+    Nothing      -> do
+      pseudoBootROM
+      writePort portBLCK 1
     Just content -> liftIO $ writeIORef rom0 content
 
 -- | The initial memory state.
@@ -282,7 +284,7 @@ readByte addr = do
       bank    <- lowBankOffset mbc
       pure (content `VS.unsafeIndex` (bank + fromIntegral addr))
     1 -> do
-      bank    <- lowBankOffset mbc
+      bank <- lowBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + fromIntegral addr))
     2 -> do
       bank <- highBankOffset mbc

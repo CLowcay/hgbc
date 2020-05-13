@@ -109,9 +109,13 @@ isOptionalMooneyeTest :: FilePath -> Bool
 isOptionalMooneyeTest rom =
   let romName = takeBaseName rom
   in  ("-GS" `isSuffixOf` romName)
+        || ("-S" `isSuffixOf` romName)
+        || ("-A" `isSuffixOf` romName)
+        || ("-cgb0" `isSuffixOf` romName)
+        || ("dmg" `isInfixOf` romName)
+        || ("sgb" `isInfixOf` romName)
+        || ("mgb" `isInfixOf` romName)
         || ("ppu" `isInfixOf` rom)
-        || ("hwio" `isInfixOf` rom)
-        || ("boot_" `isPrefixOf` romName)
 
 skipMooneyeTests :: [String]
 skipMooneyeTests = ["utils", "manual-only", "madness"]

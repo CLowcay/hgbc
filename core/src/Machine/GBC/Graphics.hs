@@ -131,19 +131,19 @@ init vram modeRef frameBufferBytes portIF = mdo
   portOBP1 <- newPort 0xFF 0xFF alwaysUpdate
   portWY   <- newPort 0x00 0xFF alwaysUpdate
   portWX   <- newPort 0x00 0xFF alwaysUpdate
-  portBCPS <- cgbOnlyPort modeRef 0x00 0xBF
+  portBCPS <- newPort 0x40 0xBF
     $ \_ bcps' -> bcps' <$ (directWritePort portBCPD =<< readPalette vram False bcps')
   portBCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ bcpd' -> bcpd' <$ do
     bcps <- readPort portBCPS
     writePalette vram False bcps bcpd'
     when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
-  portOCPS <- cgbOnlyPort modeRef 0x00 0xBF
+  portOCPS <- newPort 0x40 0xBF
     $ \_ ocps' -> ocps' <$ (directWritePort portOCPD =<< readPalette vram True ocps')
-  portOCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ ocpd' -> ocpd' <$ do
+  portOCPD <- cgbOnlyPort modeRef  0x00 0xFF $ \_ ocpd' -> ocpd' <$ do
     ocps <- readPort portOCPS
     writePalette vram True ocps ocpd'
     when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
-  portVBK <- cgbOnlyPort modeRef 0xFE 0x01
+  portVBK <- newPort 0xFE 0x01
     $ \_ vbk' -> vbk' <$ setVRAMBank vram (if vbk' .&. 1 == 0 then 0 else 0x2000)
 
   assemblySpace  <- VUM.replicate 168 (0, (0, 0, False))

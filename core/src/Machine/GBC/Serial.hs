@@ -18,6 +18,7 @@ import           Data.Functor
 import           Data.IORef
 import           Data.Word
 import           Machine.GBC.CPU.Interrupts
+import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Registers
@@ -53,23 +54,32 @@ newSync = do
   out <- newEmptyMVar
   pure Sync { .. }
 
-init :: Sync -> Port Word8 -> IO State
-init sync portIF = do
+init :: Sync -> Port Word8 -> IORef EmulatorMode -> IO State
+init sync portIF modeRef = do
   shiftClock        <- newCounter 0
   bitCounter        <- newUnboxedRef 0
   incoming          <- newUnboxedRef 0xFF
   clockPeriod       <- newUnboxedRef 0
   transferActiveRef <- newIORef False
 
-  portSB            <- newPort 0xFF 0xFF alwaysUpdate
-  portSC            <- newPort 0x7C 0x83 $ \_ sc' -> sc' <$ do
-    when (sc' `testBit` flagInternalClock) $ do
-      if sc' `testBit` flagTransferStart
-        then do
-          putMVar (out sync) =<< directReadPort portSB
-          writeIORef transferActiveRef True
-        else writeIORef transferActiveRef False
-      writeUnboxedRef clockPeriod (if sc' `testBit` flagShiftSpeed then 4 else 128)
+  portSB            <- newPort 0x00 0xFF alwaysUpdate
+  portSC            <- newPortWithReadAction
+    0x7C
+    0x83
+    (\sc -> do
+      mode <- readIORef modeRef
+      pure (if mode == DMG then sc .|. 0x7E else sc)
+    )
+    (\_ sc' -> sc' <$ do
+      when (sc' `testBit` flagInternalClock) $ do
+        if sc' `testBit` flagTransferStart
+          then do
+            putMVar (out sync) =<< directReadPort portSB
+            writeIORef transferActiveRef True
+          else writeIORef transferActiveRef False
+        mode <- readIORef modeRef
+        writeUnboxedRef clockPeriod (if sc' `testBit` flagShiftSpeed && mode /= DMG then 4 else 128)
+    )
   pure State { .. }
 
 ports :: State -> [(Word16, Port Word8)]

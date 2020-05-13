@@ -94,13 +94,13 @@ init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBuff
   portIF        <- newPort 0xE0 0x1F alwaysUpdate
   portIE        <- newPort 0x00 0xFF alwaysUpdate
 
-  cpu           <- CPU.init portIF portIE mode
-  dmaState      <- DMA.init vram
+  cpu           <- CPU.init portIF portIE modeRef
+  dmaState      <- DMA.init vram modeRef
   graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
   keypadState   <- Keypad.init portIF
   audioState    <- Audio.init
   timerState    <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
-  serialState   <- Serial.init serialSync portIF
+  serialState   <- Serial.init serialSync portIF modeRef
 
   let allPorts =
         (IF, portIF)

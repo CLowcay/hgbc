@@ -18,6 +18,7 @@ import           Control.Monad.Reader
 import           Data.Bits
 import           Data.IORef
 import           Data.Word
+import           Machine.GBC.Mode
 import           Machine.GBC.Primitive
 import           Machine.GBC.Primitive.UnboxedRef
 import           Machine.GBC.Registers
@@ -58,8 +59,8 @@ ports State {..} =
 oamBytes :: Word16
 oamBytes = 160
 
-init :: VRAM.VRAM -> IO State
-init vram = mdo
+init :: VRAM.VRAM -> IORef EmulatorMode -> IO State
+init vram modeRef = mdo
   hdmaActive      <- newIORef False
   hdmaSource      <- newUnboxedRef 0
   hdmaDestination <- newUnboxedRef 0
@@ -80,11 +81,11 @@ init vram = mdo
     writeUnboxedRef dmaBase   (fromIntegral dma .<<. 8)
     pure dma
 
-  portHDMA1 <- newPort 0x00 0xFF alwaysUpdate
-  portHDMA2 <- newPort 0x00 0xF0 alwaysUpdate
-  portHDMA3 <- newPort 0x00 0x1F alwaysUpdate
-  portHDMA4 <- newPort 0x00 0xF0 alwaysUpdate
-  portHDMA5 <- newPort 0x00 0xFF $ \_ hdma5' -> if hdma5' .&. 0x80 /= 0
+  portHDMA1 <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
+  portHDMA2 <- cgbOnlyPort modeRef 0x00 0xF0 alwaysUpdate
+  portHDMA3 <- cgbOnlyPort modeRef 0x00 0x1F alwaysUpdate
+  portHDMA4 <- cgbOnlyPort modeRef 0x00 0xF0 alwaysUpdate
+  portHDMA5 <- cgbOnlyPort modeRef 0x00 0xFF $ \_ hdma5' -> if hdma5' .&. 0x80 /= 0
     then do
       loadHDMATargets
       writeIORef hdmaActive True
