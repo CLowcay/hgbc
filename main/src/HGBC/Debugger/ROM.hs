@@ -11,7 +11,8 @@ import qualified Data.ByteString.Char8         as BC
 dumpHeader :: Header -> IO ()
 dumpHeader Header {..} = do
   putStrLn
-    $  take 11 (BC.unpack gameTitle ++ repeat ' ')
+    $  take 16 (BC.unpack gameTitle ++ repeat ' ')
+    ++ " "
     ++ BC.unpack gameCode
     ++ " "
     ++ case destination of
@@ -19,7 +20,10 @@ dumpHeader Header {..} = do
          Overseas -> " (INTERNATIONAL)"
 
   putStrLn ("Version: " ++ show maskROMVersion)
-  putStrLn ("Maker: " ++ formatHex oldLicenseCode ++ " " ++ BC.unpack makerCode)
+  putStrLn
+    (  "Licensee code: "
+    ++ if oldLicenseCode == 0x33 then BC.unpack makerCode else formatHex oldLicenseCode <> "h"
+    )
 
   putStr $ "Console support: " ++ case cgbSupport of
     CGBIncompatible -> "GB"

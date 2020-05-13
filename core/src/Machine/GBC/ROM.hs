@@ -1,5 +1,6 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Machine.GBC.ROM
   ( ROM(..)
@@ -118,17 +119,24 @@ extractHeader rom =
     skip 2
     startAddress          <- getWord16le
     nintendoCharacterData <- getByteString 48
-    gameTitle             <- fst . B.spanEnd (== 0) <$> getByteString 11
-    gameCode              <- getByteString 4
-    cgbSupport            <- decodeCGBSupport =<< getWord8
-    makerCode             <- getByteString 2
-    sgbSupport            <- decodeSGBSupport =<< getWord8
-    cartridgeType         <- decodeCartridgeType =<< getWord8
-    romSize               <- decodeROMSize =<< getWord8
-    externalRAM           <- decodeExternalRAM =<< getWord8
-    destination           <- decodeDestination =<< getWord8
-    oldLicenseCode        <- getWord8
-    maskROMVersion        <- fromIntegral <$> getWord8
+    gameTitle1            <- getByteString 11
+    gameTitle2            <- getByteString 4
+    gameTitle3            <- getWord8
+    let gameTitle = B.takeWhile (/= 0) $ if gameTitle3 < 128
+          then gameTitle1 <> gameTitle2 <> B.singleton gameTitle3
+          else gameTitle1
+    let gameCode = if gameTitle3 < 128 && B.count 0 gameTitle1 == 0 && B.head gameTitle2 /= 0
+          then ""
+          else B.takeWhile (/= 0) gameTitle2
+    cgbSupport     <- if gameTitle3 < 128 then pure CGBIncompatible else decodeCGBSupport gameTitle3
+    makerCode      <- getByteString 2
+    sgbSupport     <- decodeSGBSupport =<< getWord8
+    cartridgeType  <- decodeCartridgeType =<< getWord8
+    romSize        <- decodeROMSize =<< getWord8
+    externalRAM    <- decodeExternalRAM =<< getWord8
+    destination    <- decodeDestination =<< getWord8
+    oldLicenseCode <- getWord8
+    maskROMVersion <- fromIntegral <$> getWord8
     pure Header { .. }
   decodeCGBSupport b = case b of
     0x80 -> pure CGBCompatible
