@@ -68,6 +68,14 @@ jobs:
           token: ${{ secrets.ROMS_TOKEN }}
           path: blargg
 
+      - name: Cache
+        uses: actions/cache@v1.1.2
+        env:
+          cache-name: wla-dx
+        with:
+          path: /usr/local/bin
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('wla-dx/**') }}
+
       - name: Build WLA-DX
         run: |
           cd wla-dx
