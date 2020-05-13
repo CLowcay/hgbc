@@ -68,23 +68,17 @@ jobs:
           token: ${{ secrets.ROMS_TOKEN }}
           path: blargg
 
-      - name: Cache
-        uses: actions/cache@v1.1.2
-        env:
-          cache-name: wla-dx
-        with:
-          path: /usr/local/bin
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('wla-dx/**') }}
-
       - name: Build WLA-DX
         run: |
           cd wla-dx
-          mkdir build && cd build
+          mkdir -p build && cd build
           cmake ..
           cmake --build . --config Release
-          sudo cmake -P cmake_install.cmake
 
       - name: Build Mooneye GB Suite
+        env:
+          WLA: ../../wla-dx/build/binaries/wla-gb
+          WLALINK: ../../wla-dx/build/binaries/wlalink
         run: |
           cd mooneye-gb/tests
           make
