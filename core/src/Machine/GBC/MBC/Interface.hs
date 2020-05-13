@@ -16,7 +16,8 @@ type RAMAllocator = Int -> IO (VSM.IOVector Word8)
 
 -- | A memory bank controller.
 data MBC = MBC {
-    bankOffset     :: !(IO Int)
+    lowBankOffset     :: !(IO Int)
+  , highBankOffset     :: !(IO Int)
   , ramBankOffset  :: !(IO Int)
   , ramGate        :: !(IO Bool)
   , writeROM       :: !(Word16 -> Word8 -> IO ())

@@ -23,7 +23,8 @@ import qualified Machine.GBC.MBC.RTC           as RTC
 nullMBC :: IO MBC
 nullMBC = do
   ram <- VSM.new 0x2000
-  pure MBC { bankOffset        = pure 0x4000
+  pure MBC { lowBankOffset     = pure 0
+           , highBankOffset    = pure 0x4000
            , ramBankOffset     = pure 0
            , ramGate           = pure False
            , writeROM          = \_ _ -> pure ()

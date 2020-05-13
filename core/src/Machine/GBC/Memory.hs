@@ -220,10 +220,10 @@ getBank address = do
       then do
         lockout <- readIORef bootROMLockout
         pure (if lockout then 0 else 0xFFFF)
-      else pure 0
-    1 -> pure 0
-    2 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
-    3 -> bankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+      else lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    1 -> lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    2 -> highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    3 -> highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
     4 -> getVRAMBank vram <&> \o -> fromIntegral (o .>>. 13)
     5 -> ramBankOffset mbc <&> \o -> fromIntegral (o .>>. 13)
     6 -> if address < 0xD000
@@ -247,9 +247,9 @@ readByteLong bank addr = do
     0 -> pure
       (if bank == 0xFFFF
         then maybe 0xFF (VS.! fromIntegral addr) bootROM
-        else rom VS.! fromIntegral addr
+        else rom VS.! offsetWithBank 14 0
       )
-    1 -> pure (rom VS.! fromIntegral addr)
+    1 -> pure (rom VS.! offsetWithBank 14 0)
     2 -> pure (rom VS.! offsetWithBank 14 0x4000)
     3 -> pure (rom VS.! offsetWithBank 14 0x4000)
     4 -> readVRAMBankOffset vram (fromIntegral bank .<<. 13) addr
@@ -279,13 +279,16 @@ readByte addr = do
   liftIO $ case addr .>>. 13 of
     0 -> do
       content <- readIORef rom0
-      pure (content `VS.unsafeIndex` fromIntegral addr)
-    1 -> pure (rom `VS.unsafeIndex` fromIntegral addr)
+      bank    <- lowBankOffset mbc
+      pure (content `VS.unsafeIndex` (bank + fromIntegral addr))
+    1 -> do
+      bank    <- lowBankOffset mbc
+      pure (rom `VS.unsafeIndex` (bank + fromIntegral addr))
     2 -> do
-      bank <- bankOffset mbc
+      bank <- highBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + offset 0x4000))
     3 -> do
-      bank <- bankOffset mbc
+      bank <- highBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + offset 0x4000))
     4 -> readVRAM vram addr
     5 -> readRAM mbc (addr - 0xA000)

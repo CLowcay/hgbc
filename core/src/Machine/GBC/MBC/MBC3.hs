@@ -19,7 +19,8 @@ mbc3 bankMask ramMask ramAllocator rtc = do
   enableRAM <- newIORef False
   ram       <- ramAllocator 0x8000
 
-  let bankOffset = do
+  let lowBankOffset = pure 0
+  let highBankOffset = do
         offset <- readIORef romOffset
         pure ((offset .&. bankMask) .<<. 14)
   let getRAMOffset r2 = (r2 .&. ramMask) .<<. 13

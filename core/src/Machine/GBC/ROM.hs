@@ -136,9 +136,11 @@ extractHeader rom =
     x    -> fail $ "unknown destination code " ++ show x
   decodeExternalRAM b = case b of
     0x00 -> pure 0
-    0x01 -> pure $ 64 * 128
-    0x02 -> pure $ 256 * 128
-    0x03 -> pure $ 1024 * 128
+    0x01 -> pure $ 2 * 1024
+    0x02 -> pure $ 8 * 1024
+    0x03 -> pure $ 32 * 1024
+    0x04 -> pure $ 128 * 1024
+    0x05 -> pure $ 64 * 1024
     x    -> fail $ "unknown external RAM code " ++ show x
   decodeROMSize b = case b of
     0x00 -> pure $ 256 * 128
@@ -150,6 +152,9 @@ extractHeader rom =
     0x06 -> pure $ 16 * 1024 * 128
     0x07 -> pure $ 32 * 1024 * 128
     0x08 -> pure $ 64 * 1024 * 128
+    0x52 -> pure $ 72 * 16 * 1024
+    0x53 -> pure $ 80 * 16 * 1024
+    0x54 -> pure $ 96 * 16 * 1024
     x    -> fail $ "unknown ROM size code " ++ show x
   decodeCartridgeType b = case b of
     0x00 -> pure $ CartridgeType Nothing False False

@@ -27,7 +27,8 @@ mbc5 bankMask ramMask ramAllocator = do
         high <- readIORef romB1
         writeIORef cachedROMOffset ((((high .<<. 8) .|. low) .&. bankMask) .<<. 14)
 
-  let bankOffset = readIORef cachedROMOffset
+  let lowBankOffset  = pure 0
+  let highBankOffset = readIORef cachedROMOffset
 
   let ramBankOffset = do
         bank <- readIORef ramB
