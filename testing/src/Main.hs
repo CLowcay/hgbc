@@ -7,26 +7,29 @@ module Main
   )
 where
 
-import           Control.Concurrent
-import           Control.Exception
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
 import           Data.Functor
 import           Data.IORef
+import           Data.List
+import           Data.Time
+import           Data.Traversable
 import           Data.Word
 import           Foreign.Marshal.Alloc
 import           Framework
+import           Machine.GBC.Errors
 import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.Environment
 import           System.FilePath
 import           System.IO.Temp
+import           UnliftIO.Async
+import           UnliftIO.Concurrent
+import           UnliftIO.Exception
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
-import           Data.List
-import           Data.Traversable
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Emulator          as Emulator
@@ -34,7 +37,6 @@ import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.Memory            as Memory
 import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
-import           Data.Time
 
 main :: IO ()
 main = do
@@ -46,10 +48,16 @@ main = do
   mooneyeDir      <- lookupEnv "MOONEYE_DIR"
   mooneyeTestTree <- case mooneyeDir of
     Nothing   -> pure []
-    Just path -> pure <$> mooneyeSuite "mooneye" path
+    Just path -> pure <$> mooneyeSuite "Mooneye GB Suite" path
 
-  testTime   <- getCurrentTime
-  results    <- runTestSuite (TestTree "H-GBC ROM tests" () (blarggTestTree ++ mooneyeTestTree))
+  wilbertPolDir      <- lookupEnv "WILBERTPOL_DIR"
+  wilbertPolTestTree <- case wilbertPolDir of
+    Nothing   -> pure []
+    Just path -> pure <$> mooneyeSuite "Mooneye GB Suite (Wilbert Pol's fork)" path
+
+  testTime <- getCurrentTime
+  results  <- runTestSuite
+    (TestTree "H-GBC ROM tests" () (blarggTestTree ++ mooneyeTestTree ++ wilbertPolTestTree))
   reportTime <- getCurrentTime
   LB.writeFile "hgbc-test-report.html"
                (generateReport "H-GBC ROM test results" testTime reportTime results)
@@ -109,6 +117,7 @@ isOptionalMooneyeTest :: FilePath -> Bool
 isOptionalMooneyeTest rom =
   let romName = takeBaseName rom
   in  ("-GS" `isSuffixOf` romName)
+        || ("-G" `isSuffixOf` romName)
         || ("-S" `isSuffixOf` romName)
         || ("-A" `isSuffixOf` romName)
         || ("-cgb0" `isSuffixOf` romName)
@@ -116,6 +125,7 @@ isOptionalMooneyeTest rom =
         || ("sgb" `isInfixOf` romName)
         || ("mgb" `isInfixOf` romName)
         || ("ppu" `isInfixOf` rom)
+        || ("gpu" `isInfixOf` rom)
 
 skipMooneyeTests :: [String]
 skipMooneyeTests = ["utils", "manual-only", "madness"]
@@ -168,11 +178,9 @@ mooneyeTest filename = romTest filename
           | otherwise = Passed
     pure testResult
 
-data TestComplete = TestComplete deriving (Eq, Show)
 newtype Timeout = Timeout String deriving Eq
 instance Show Timeout where
   show (Timeout result) = "Timeout\n" ++ result
-instance Exception TestComplete
 instance Exception Timeout
 
 romTest
@@ -200,8 +208,8 @@ romTest filename serialHandler terminate getResult timeoutHandler =
         serialSync <- Serial.newSync
         gs         <- Graphics.newSync
         buffer     <- newIORef ""
-        bracket (serialHandler serialSync buffer) (`throwTo` TestComplete) $ \_ ->
-          bracket (nullGraphics gs) (`throwTo` TestComplete) $ \_ -> do
+        bracket (serialHandler serialSync buffer) cancel $ \_ ->
+          bracket (nullGraphics gs) cancel $ \_ -> do
             emulatorState <- Emulator.init Nothing
                                            rom
                                            Nothing
@@ -212,15 +220,17 @@ romTest filename serialHandler terminate getResult timeoutHandler =
             runReaderT (CPU.reset >> runLoop buffer timeout >> getResult buffer) emulatorState
 
  where
-  nullGraphics gs = forkIO $ foreverUntil TestComplete $ do
+  nullGraphics gs = async . forever $ do
     takeMVar (Graphics.signalWindow gs)
     putMVar (Graphics.bufferAvailable gs) ()
 
-  runLoop buffer 0               = liftIO . throwIO =<< Timeout <$> timeoutHandler buffer
-  runLoop buffer !remainingSteps = do
-    Emulator.step
-    terminateNow <- terminate
-    if terminateNow then pure () else runLoop buffer (remainingSteps - 1)
+  runLoop buffer 0 = liftIO . throwIO =<< Timeout <$> timeoutHandler buffer
+  runLoop buffer !remainingSteps =
+    do
+        Emulator.step
+        terminateNow <- terminate
+        if terminateNow then pure () else runLoop buffer (remainingSteps - 1)
+      `catch` (\e -> if e == InvalidInstruction 0xED then pure () else throwIO e)
 
 timeout :: Int
 timeout = 1024 * 1024 * 30
@@ -233,21 +243,18 @@ readString limit0 = readString0 limit0 ""
     b <- Memory.readByte addr
     if b == 0 then pure acc else readString0 (limit - 1) (acc <> BB.word8 b) (addr + 1)
 
-type SerialHandler = Serial.Sync -> IORef BB.Builder -> IO ThreadId
+type SerialHandler = Serial.Sync -> IORef BB.Builder -> IO (Async ())
 
 accumulateSerialOutput :: SerialHandler
-accumulateSerialOutput sync buffer = forkIO $ foreverUntil TestComplete $ do
+accumulateSerialOutput sync buffer = async . forever $ do
   byte <- takeMVar (Serial.out sync)
   putMVar (Serial.inp sync) 0xFF
   modifyIORef' buffer (<> BB.word8 byte)
 
 ignoreSerialOutput :: SerialHandler
-ignoreSerialOutput sync _ = forkIO $ foreverUntil TestComplete $ do
+ignoreSerialOutput sync _ = async . forever $ do
   void (takeMVar (Serial.out sync))
   putMVar (Serial.inp sync) 0xFF
-
-foreverUntil :: (Exception e, Eq e) => e -> IO a -> IO ()
-foreverUntil e action = forever action `catch` (\ex -> if e == ex then pure () else throwIO ex)
 
 terminateAtAddress :: Word16 -> ReaderT Emulator.State IO Bool
 terminateAtAddress address = CPU.readPC <&> (== address)

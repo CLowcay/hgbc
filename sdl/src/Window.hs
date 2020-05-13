@@ -20,6 +20,7 @@ import qualified SDL
 data Notification
   = Close                      -- ^ The window was closed.
   | Paused                     -- ^ The emulator has been paused.
+  | Fault                      -- ^ The emulator has stopped after a fault.
   | Resumed                    -- ^ The emulator has been resumed.
   | SizeChanged (SDL.V2 Int32) -- ^ The window size was changed.
   | Moved (SDL.Point SDL.V2 Int32) -- ^ The window was moved.

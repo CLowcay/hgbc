@@ -30,7 +30,6 @@ import           Machine.GBC.CPU                ( readPC )
 import           Machine.GBC.Disassembler
 import           Machine.GBC.Memory             ( getBank )
 import           Machine.GBC.Mode
-import           Machine.GBC.Util               ( formatHex )
 import           System.Directory
 import           System.FilePath
 import           UnliftIO.Exception
@@ -45,7 +44,6 @@ import qualified HGBC.Events                   as Event
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Emulator          as Emulator
-import qualified Machine.GBC.Errors            as GBC
 import qualified Machine.GBC.Graphics          as Graphics
 import qualified Machine.GBC.ROM               as ROM
 import qualified Machine.GBC.Serial            as Serial
@@ -149,16 +147,19 @@ makeEmulatorState filename Config {..} graphicsSync frameBuffer = do
 run :: RuntimeConfig -> ReaderT Emulator.State IO ()
 run RuntimeConfig {..} = do
   CPU.reset
-  (if debugMode then pauseLoop else runEmulatorLoop Nothing Nothing)
-    `catch` (\fault -> do
-              pc   <- readPC
-              bank <- getBank pc
-              liftIO $ do
-                putStrLn ("At " <> formatHex bank <> ":" <> formatHex pc)
-                putStrLn (displayException (fault :: GBC.Fault))
-            )
+  isFault <-
+    (if debugMode then pauseLoop else runEmulatorLoop Nothing Nothing)
+      `catch` (\fault -> do
+                Event.send eventChannel (Event.Fault fault)
+                pure True
+              )
+  when isFault faultLoop
 
  where
+  faultLoop = do
+    isFault <- pauseLoop2
+    if isFault then faultLoop else pure ()
+
   runEmulatorLoop runToAddress level = do
     Event.send eventChannel Event.Resumed
     emulatorLoop runToAddress level
@@ -186,16 +187,19 @@ run RuntimeConfig {..} = do
               command <- getCommand commandChannel
               case command of
                 Just Pause   -> pauseLoop
-                Just Quit    -> pure ()
+                Just Quit    -> pure False
                 Just Restart -> CPU.reset >> innerEmulatorLoop (steps + 1)
                 _            -> innerEmulatorLoop (steps + 1)
     innerEmulatorLoop (1 :: Int)
 
   pauseLoop = do
     Event.send eventChannel Event.Paused
+    pauseLoop2
+
+  pauseLoop2 = do
     command <- waitCommand commandChannel
     case command of
-      Quit          -> pure ()
+      Quit          -> pure False
       Pause         -> runEmulatorLoop Nothing Nothing
       Run           -> runEmulatorLoop Nothing Nothing
       RunTo address -> runEmulatorLoop (Just address) Nothing

@@ -13,10 +13,12 @@ import           Control.Concurrent.STM
 import           Control.Exception              ( IOException )
 import           Control.Monad.IO.Class
 import           Machine.GBC.Disassembler
+import qualified Machine.GBC.Errors            as GBC
 
 data Event
   = Resumed
   | Paused
+  | Fault GBC.Fault
   | Statistics Double Int          -- ^ Time in seconds * emulator clock.
   | IOWarning String IOException   -- ^ A non-fatal IO error occured.
   | BreakPointSet LongAddress

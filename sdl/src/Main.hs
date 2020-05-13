@@ -11,6 +11,7 @@ import           Control.Monad.Writer
 import           Data.Foldable
 import           Keymap
 import           Machine.GBC.Memory             ( getROMHeader )
+import           Machine.GBC.Util               ( formatHex )
 import           Numeric
 import qualified Audio
 import qualified HGBC.Config                   as Config
@@ -19,8 +20,10 @@ import qualified HGBC.Debugger                 as Debugger
 import qualified HGBC.Debugger.ROM             as ROM
 import qualified HGBC.Emulator                 as Emulator
 import qualified HGBC.Events                   as Event
+import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Emulator          as Emulator
 import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Memory            as Memory
 import qualified SDL
 import qualified Thread.EventLoop              as EventLoop
 import qualified Thread.LCD                    as LCD
@@ -61,7 +64,7 @@ main = do
         then pure Nothing
         else Just <$> Audio.start emulatorState
 
-      forwardEvents window audio (Emulator.eventChannel runtimeConfig)
+      forwardEvents window audio emulatorState (Emulator.eventChannel runtimeConfig)
       runReaderT (Emulator.run runtimeConfig) emulatorState
       maybe (pure ()) Audio.pause audio
 
@@ -70,7 +73,7 @@ main = do
     putStrLn (show (length errors) ++ " errors in " <> path)
     for_ errors (putStrLn . ("  " <>))
 
-  forwardEvents window audio eventChannel = do
+  forwardEvents window audio emulatorState eventChannel = do
     waitEvent <- Event.waitAction eventChannel
     void $ forkIO $ forever $ do
       event <- waitEvent
@@ -81,6 +84,21 @@ main = do
         Event.Paused -> do
           maybe (pure ()) Audio.pause audio
           Window.send window Window.Paused
+        Event.Fault fault -> do
+          Window.send window Window.Fault
+          flip runReaderT emulatorState $ do
+            pc   <- CPU.readPC
+            bank <- Memory.getBank pc
+            liftIO
+              (putStrLn
+                (  "Fault at "
+                <> formatHex bank
+                <> ":"
+                <> formatHex pc
+                <> " "
+                <> displayException fault
+                )
+              )
         Event.Statistics time clock -> do
           let percentage =
                 showFFloat (Just 2) (fromIntegral clock / (time * 1024 * 1024 * 4) * 100) "%"

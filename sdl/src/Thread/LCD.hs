@@ -50,9 +50,15 @@ data GLState = GLState {
   , frameTextureBufferBytes :: !(Ptr Word8)
 }
 
-windowTitle :: FilePath -> Bool -> T.Text
-windowTitle romFileName isPaused =
-  if isPaused then "GBC *paused* - " <> T.pack romFileName else "GBC - " <> T.pack romFileName
+data WindowStatus = Running | Paused | Fault deriving (Eq, Ord, Show)
+
+windowTitle :: FilePath -> WindowStatus -> T.Text
+windowTitle romFileName status =
+  let prefix = case status of
+        Running -> "GBC - "
+        Paused  -> "GBC *paused* - "
+        Fault   -> "GBC *fault* - "
+  in  prefix <> T.pack romFileName
 
 getFramesPerVsync :: DisplayIndex -> Double -> IO Double
 getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
@@ -67,7 +73,7 @@ start :: FilePath -> HGBC.Config.Config k Identity -> Graphics.Sync -> IO (Windo
 start romFileName HGBC.Config.Config {..} sync = do
   let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
   sdlWindow <- SDL.createWindow
-    (windowTitle romFileName False)
+    (windowTitle romFileName Running)
     SDL.defaultWindow { SDL.windowInitialSize = fromIntegral <$> SDL.V2 (160 * scale) (144 * scale)
                       , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
                       , SDL.windowResizable = True
@@ -116,11 +122,15 @@ eventLoop extraFrames context@WindowContext {..} = do
     Left (Window.Moved _) -> eventLoop extraFrames =<< updateFramesPerSync context
 
     Left Window.Paused    -> do
-      SDL.windowTitle sdlWindow $= windowTitle romFileName True
+      SDL.windowTitle sdlWindow $= windowTitle romFileName Paused
+      eventLoop extraFrames context
+
+    Left Window.Fault    -> do
+      SDL.windowTitle sdlWindow $= windowTitle romFileName Fault
       eventLoop extraFrames context
 
     Left Window.Resumed -> do
-      SDL.windowTitle sdlWindow $= windowTitle romFileName False
+      SDL.windowTitle sdlWindow $= windowTitle romFileName Running
       eventLoop extraFrames context
 
     Right () -> do
