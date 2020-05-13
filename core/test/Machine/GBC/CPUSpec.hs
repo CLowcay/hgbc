@@ -101,7 +101,7 @@ withNewCPU computation = mdo
   portIF  <- newPort 0x00 0x1F alwaysUpdate
   portIE  <- newPort 0x00 0xFF alwaysUpdate
   mbc     <- nullMBC
-  modeRef <- newIORef DMG
+  modeRef <- newIORef CGB
   mem     <- Memory.init Nothing
                          blankROM
                          blankHeader
@@ -111,7 +111,7 @@ withNewCPU computation = mdo
                          portIE
                          modeRef
   extraCycles <- newIORef 0
-  cpu         <- CPU.init portIF portIE DMG
+  cpu         <- CPU.init portIF portIE modeRef
   void $ runReaderT checkingFlags $ CPUTestState cpu mem extraCycles
  where
   checkingFlags = for_ [0 .. 15] $ \flags -> do
