@@ -54,13 +54,39 @@ jobs:
 
       - uses: actions/checkout@v2
         with:
+          repository: vhelin/wla-dx
+          path: wla-dx
+
+      - uses: actions/checkout@v2
+        with:
+          repository: Gekkio/mooneye-gb
+          path: mooneye-gb
+
+      - uses: actions/checkout@v2
+        with:
           repository: CLowcay/blargg_roms
           token: ${{ secrets.ROMS_TOKEN }}
           path: blargg
 
+      - name: Build WLA-DX
+        run: |
+          cd wla-dx
+          mkdir -p build && cd build
+          cmake ..
+          cmake --build . --config Release
+
+      - name: Build Mooneye GB Suite
+        env:
+          WLA: ../../wla-dx/build/binaries/wla-gb
+          WLALINK: ../../wla-dx/build/binaries/wlalink
+        run: |
+          cd mooneye-gb/tests
+          make
+
       - name: ROM tests
         env:
           BLARGG_DIR: blargg
+          MOONEYE_DIR: mooneye-gb/tests/build
         run: |
           chmod +x bin/hgbc-tester
           bin/hgbc-tester
