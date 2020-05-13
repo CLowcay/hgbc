@@ -13,8 +13,8 @@ import           Machine.GBC.MBC.Interface
 import           Machine.GBC.Util
 import qualified Data.Vector.Storable.Mutable  as VSM
 
-mbc1 :: Int -> Int -> RAMAllocator -> IO MBC
-mbc1 bankMask ramMask ramAllocator = do
+mbc1 :: Int -> Int -> Bool -> RAMAllocator -> IO MBC
+mbc1 bankMask ramMask multicart ramAllocator = do
   bank1               <- newIORef 1
   bank2               <- newIORef 0
   enableRAM           <- newIORef False
@@ -25,6 +25,9 @@ mbc1 bankMask ramMask ramAllocator = do
   cachedROMOffsetLow  <- newIORef 0
   cachedRAMOffset     <- newIORef 0
 
+  let highShift      = if multicart then 4 else 5
+  let lowMask        = if multicart then 0xF else 0x1F
+
   let lowBankOffset  = readIORef cachedROMOffsetLow
   let highBankOffset = readIORef cachedROMOffsetHigh
   let ramBankOffset  = readIORef cachedRAMOffset
@@ -34,9 +37,9 @@ mbc1 bankMask ramMask ramAllocator = do
         mode1 <- readIORef bankMode
         low   <- readIORef bank1
         high  <- readIORef bank2
-        writeIORef cachedROMOffsetHigh ((((high .<<. 5) .|. low) .&. bankMask) .<<. 14)
+        writeIORef cachedROMOffsetHigh ((((high .<<. highShift) .|. low) .&. bankMask) .<<. 14)
         if mode1
-          then writeIORef cachedROMOffsetLow (((high .<<. 5) .&. bankMask) .<<. 14)
+          then writeIORef cachedROMOffsetLow (((high .<<. highShift) .&. bankMask) .<<. 14)
           else writeIORef cachedROMOffsetLow 0
 
   let updateRAMOffset = do
@@ -50,7 +53,7 @@ mbc1 bankMask ramMask ramAllocator = do
         | address < 0x4000
         = let low = (fromIntegral value .&. 0x1F)
           in  do
-                writeIORef bank1 (if low == 0 then 1 else low)
+                writeIORef bank1 (if low == 0 then 1 else low .&. lowMask)
                 updateROMOffset
         | address < 0x6000
         = do

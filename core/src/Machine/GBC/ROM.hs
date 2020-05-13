@@ -80,7 +80,7 @@ requiresSaveFiles rom =
 parse
   :: Monad m
   => Paths            -- ^ Paths to the ROM files.
-  -> B.ByteString        -- ^ The ROM file content.
+  -> B.ByteString     -- ^ The ROM file content.
   -> ExceptT String (WriterT [String] m) ROM
 parse romPaths romContent = do
   when (romContent `B.index` 0x100 /= 0x00) $ tell ["Header check 0x100 failed"]
@@ -97,6 +97,14 @@ parse romPaths romContent = do
     ]
   pure ROM { .. }
   where complementCheck = B.foldl' (+) 0x19 . B.drop 0x134 . B.take 0x14E
+
+looksLikeMulticart :: B.ByteString -> Bool
+looksLikeMulticart wholeROM = case chunks (256 * 1024) wholeROM of
+  []            -> False
+  (menu : roms) -> let check = logoData menu in length (filter ((== check) . logoData) roms) > 2
+ where
+  logoData = B.take 48 . B.drop 0x0104
+  chunks s bytes = if B.length bytes < s then [] else B.take s bytes : chunks s (B.drop s bytes)
 
 extractHeader :: B.ByteString -> Either String Header
 extractHeader rom =
@@ -187,7 +195,7 @@ getMBC ROM {..} =
       ramMask    = (externalRAM romHeader `div` 0x2000) - 1
   in  case mbcType cType of
         Nothing      -> nullMBC
-        Just MBC1    -> mbc1 bankMask ramMask allocator
+        Just MBC1    -> mbc1 bankMask ramMask (looksLikeMulticart romContent) allocator
         Just MBC3    -> mbc3 bankMask ramMask allocator nullRTC
         Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< savedRTC romRTCFile
         Just MBC5    -> mbc5 bankMask ramMask allocator

@@ -113,7 +113,6 @@ isOptionalMooneyeTest rom =
         || ("mbc2" `isInfixOf` rom)
         || ("hwio" `isInfixOf` rom)
         || ("boot_" `isPrefixOf` romName)
-        || ("multicart_rom" `isInfixOf` romName)
 
 skipMooneyeTests :: [String]
 skipMooneyeTests = ["utils", "manual-only", "madness"]
