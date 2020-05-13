@@ -89,7 +89,7 @@ blarggSuite blarggPath = TestTree
 mooneyeSuite :: String -> FilePath -> IO TestSuite
 mooneyeSuite name path = do
   listing <- listDirectory path
-  dirs    <- filterM (doesDirectoryExist . (path </>)) listing
+  dirs    <- sort <$> filterM (doesDirectoryExist . (path </>)) listing
   let tests = getRomsInOrder listing <&> \rom -> TestCase
         rom
         (if isOptionalMooneyeTest (path </> rom) then Optional else Required)
