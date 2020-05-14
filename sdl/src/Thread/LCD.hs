@@ -92,6 +92,7 @@ start romFileName HGBC.Config.Config {..} sync = do
 
   frameBufferPointer <- takeMVar frameBufferPointerRef
 
+  SDL.cursorVisible $= False
   pure (Window.new sdlWindow threadId, frameBufferPointer)
 
 -- | The main event loop for the renderer.
