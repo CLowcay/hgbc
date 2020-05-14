@@ -2,6 +2,7 @@
 
 module Framework
   ( Name
+  , SourceLink
   , Passed
   , Failed
   , Required(..)
@@ -26,13 +27,14 @@ import qualified Data.ByteString.Lazy          as LB
 import qualified Data.ByteString.Lazy.Builder  as BB
 
 type Name = String
+type SourceLink = Maybe String
 type Passed = Int
 type Failed = Int
 
 data Required = Required | Optional deriving (Eq, Ord, Show)
 data TestResult = TestPassed | TestFailed String deriving (Eq, Ord, Show)
 data TestTree summary result = TestCase Name Required result
-                             | TestTree Name summary [TestTree summary result]
+                             | TestTree Name SourceLink summary [TestTree summary result]
                              deriving (Eq, Ord, Show)
 type TestSuite = TestTree () (IO TestResult)
 type ResultTree = TestTree (Passed, Failed) TestResult
@@ -54,25 +56,25 @@ runTestTree parent (TestCase name required action) = do
       putStrLn (unlines . fmap ("    " <>) . lines $ message)
   setSGR []
   pure (TestCase name required result)
-runTestTree parent (TestTree name () subtests) = do
+runTestTree parent (TestTree name source () subtests) = do
   putStrLn name
   results <- traverse (runTestTree (Just (maybe name (</> name) parent))) subtests
-  pure (TestTree name (accumulateTotals results) results)
+  pure (TestTree name source (accumulateTotals results) results)
 
 accumulateTotals :: [ResultTree] -> (Passed, Failed)
 accumulateTotals = bimap sum sum . unzip . map totals
  where
   totals (TestCase _ _ TestPassed    ) = (1, 0)
   totals (TestCase _ _ (TestFailed _)) = (0, 1)
-  totals (TestTree _ t _             ) = t
+  totals (TestTree _ _ t _           ) = t
 
 failingTests :: ResultTree -> Maybe ResultTree
-failingTests result@(TestCase _    Required (TestFailed _)) = Just result
-failingTests (       TestCase _    Required TestPassed    ) = Nothing
-failingTests (       TestCase _    Optional _             ) = Nothing
-failingTests (TestTree name _ tree) = case catMaybes (failingTests <$> tree) of
+failingTests result@(TestCase _ Required (TestFailed _)) = Just result
+failingTests (       TestCase _ Required TestPassed    ) = Nothing
+failingTests (       TestCase _ Optional _             ) = Nothing
+failingTests (       TestTree name source _ tree       ) = case catMaybes (failingTests <$> tree) of
   []    -> Nothing
-  tree' -> Just (TestTree name (accumulateTotals tree') tree')
+  tree' -> Just (TestTree name source (accumulateTotals tree') tree')
 
 generateReport :: String -> UTCTime -> UTCTime -> ResultTree -> LB.ByteString
 generateReport title testTime reportTime results = BB.toLazyByteString
@@ -88,7 +90,7 @@ generateReport title testTime reportTime results = BB.toLazyByteString
   time =
     (\x -> "<time>" <> x <> "</time>") . BB.stringUtf8 . formatTime defaultTimeLocale "%F %T%z"
   reportResultTree _ _ TestCase{} = ""
-  reportResultTree parent level (TestTree name (passed, failed) subtrees) =
+  reportResultTree parent level (TestTree name sourceLink (passed, failed) subtrees) =
     let
       nextParent = Just (maybe name (</> name) parent)
       summaryClass | passed == 0 = "failed"
@@ -108,6 +110,10 @@ generateReport title testTime reportTime results = BB.toLazyByteString
              <> "</div>"
            else "<p><a class=smallLink href='#" <> makeAnchor parent "" <> "'>Up one level</a>"
          )
+      <> (case BB.stringUtf8 <$> sourceLink of
+           Nothing     -> ""
+           Just source -> "<p>Source: <a href='" <> source <> "'>" <> source <> "</a>"
+         )
       <> "<p><table><thead><tr><th>Test</th><th>Passed</th><th>Failed</th><th>Required For CI pass</th></tr></thead>"
       <> ("<tbody>" <> mconcat (reportResult nextParent <$> subtrees) <> "</tbody>")
       <> (  "<tfoot><tr class="
@@ -126,7 +132,7 @@ generateReport title testTime reportTime results = BB.toLazyByteString
         failedTag = if failed > 0 then "<td class=failed>" else "<td class=passed>"
     in  (passedTag <> BB.intDec passed <> " / " <> BB.intDec total <> "</td>")
           <> (failedTag <> BB.intDec failed <> "</td>")
-  reportResult parent (TestTree name (passed, failed) _) =
+  reportResult parent (TestTree name _ (passed, failed) _) =
     ("<tr><td><a href='#" <> makeAnchor parent name <> "'>" <> BB.stringUtf8 name <> "</a></td>")
       <> makeSummary passed failed
       <> "<td></td></tr>"
@@ -175,6 +181,6 @@ checkResultsAndExit results = do
     Just _  -> exitFailure
 
  where
-  totals (TestTree _ accumulatedTotals _             ) = accumulatedTotals
-  totals (TestCase _ _                 TestPassed    ) = (1, 0)
-  totals (TestCase _ _                 (TestFailed _)) = (0, 1)
+  totals (TestTree _ _ accumulatedTotals _) = accumulatedTotals
+  totals (TestCase _ _ TestPassed         ) = (1, 0)
+  totals (TestCase _ _ (TestFailed _)     ) = (0, 1)

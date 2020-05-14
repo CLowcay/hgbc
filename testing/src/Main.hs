@@ -30,6 +30,7 @@ import           UnliftIO.Exception
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
+import           Data.Char
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Emulator          as Emulator
@@ -48,16 +49,27 @@ main = do
   mooneyeDir      <- lookupEnv "MOONEYE_DIR"
   mooneyeTestTree <- case mooneyeDir of
     Nothing   -> pure []
-    Just path -> pure <$> mooneyeSuite "Mooneye GB Suite" path
+    Just path -> do
+      commit <- getGitCommit path
+      pure <$> mooneyeSuite "Mooneye GB Suite"
+                            (path </> "tests" </> "build")
+                            ""
+                            (Just . makeGithubLink "Gekkio/mooneye-gb" commit "tests")
 
   wilbertPolDir      <- lookupEnv "WILBERTPOL_DIR"
   wilbertPolTestTree <- case wilbertPolDir of
     Nothing   -> pure []
-    Just path -> pure <$> mooneyeSuite "Mooneye GB Suite (Wilbert Pol's fork)" path
+    Just path -> do
+      commit <- getGitCommit path
+      pure <$> mooneyeSuite "Mooneye GB Suite (Wilbert Pol's fork)"
+                            (path </> "tests" </> "build")
+                            ""
+                            (Just . makeGithubLink "wilbertpol/mooneye-gb" commit "tests")
 
   testTime <- getCurrentTime
   results  <- runTestSuite
-    (TestTree "H-GBC ROM tests" () (blarggTestTree ++ mooneyeTestTree ++ wilbertPolTestTree))
+    (TestTree "H-GBC ROM tests" Nothing () (blarggTestTree ++ mooneyeTestTree ++ wilbertPolTestTree)
+    )
   reportTime <- getCurrentTime
   LB.writeFile "hgbc-test-report.html"
                (generateReport "H-GBC ROM test results" testTime reportTime results)
@@ -66,6 +78,7 @@ main = do
 blarggSuite :: FilePath -> TestSuite
 blarggSuite blarggPath = TestTree
   "Blargg Suite"
+  (Just "https://gbdev.gg8.se/files/roms/blargg-gb-tests/")
   ()
   [ TestCase "cpu_instrs" Required $ do
     output <- blarggTestSerial (blarggPath </> "cpu_instrs.gb") 0x06f1
@@ -94,8 +107,23 @@ blarggSuite blarggPath = TestTree
   halt_bug_output
     = "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
 
-mooneyeSuite :: String -> FilePath -> IO TestSuite
-mooneyeSuite name path = do
+getGitCommit :: FilePath -> IO String
+getGitCommit path = do
+  let refFile = path </> ".git" </> "HEAD"
+  mRefPath <- stripPrefix "ref: " <$> readFile refFile
+  case mRefPath of
+    Nothing      -> error ("Not a git ref file " <> refFile)
+    Just refPath -> trim <$> readFile (path </> ".git" </> trim refPath)
+  where trim = takeWhile (not . isSpace) . dropWhile isSpace
+
+makeGithubLink :: String -> String -> FilePath -> FilePath -> String
+makeGithubLink repo commit rootPath testPath =
+  "https://github.com/" <> repo <> "/tree/" <> commit <> "/" <> rootPath </> testPath
+
+mooneyeSuite :: String -> FilePath -> FilePath -> (String -> SourceLink) -> IO TestSuite
+mooneyeSuite name rootPath testPath makeLink = do
+
+  let path = rootPath </> testPath
   listing <- listDirectory path
   dirs    <- sort <$> filterM (doesDirectoryExist . (path </>)) listing
   let tests = getRomsInOrder listing <&> \rom -> TestCase
@@ -103,8 +131,8 @@ mooneyeSuite name path = do
         (if isOptionalMooneyeTest (path </> rom) then Optional else Required)
         (testROM path rom)
   subtests <- for (filter (`notElem` skipMooneyeTests) dirs)
-    $ \dir -> mooneyeSuite dir (path </> dir)
-  pure (TestTree name () (tests ++ subtests))
+    $ \dir -> mooneyeSuite dir rootPath (testPath </> dir) makeLink
+  pure (TestTree name (makeLink testPath) () (tests ++ subtests))
  where
   getRomsInOrder = sort . filter ((".gb" ==) . takeExtension)
   testROM fullPath rom = do
