@@ -86,7 +86,7 @@ jobs:
       - name: ROM tests
         env:
           BLARGG_DIR: blargg
-          MOONEYE_DIR: mooneye-gb/tests/build
+          MOONEYE_DIR: mooneye-gb
         run: |
           chmod +x bin/hgbc-tester
           bin/hgbc-tester
