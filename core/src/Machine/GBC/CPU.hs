@@ -158,9 +158,16 @@ class Memory.Has env => Has env where
 -- | Initialize a new CPU.
 init :: Port Word8 -> Port Word8 -> IORef EmulatorMode -> IO State
 init portIF portIE modeRef = do
-  cpuType     <- readIORef modeRef
-  registers   <- VSM.new 1
-  portKEY1    <- cgbOnlyPort modeRef 0x7E 0x01 alwaysUpdate
+  cpuType   <- readIORef modeRef
+  registers <- VSM.new 1
+  portKEY1  <- newPortWithReadAction
+    0x7E
+    0x01
+    (\key1 -> do
+      mode <- readIORef modeRef
+      if mode == DMG then pure 0xFF else pure key1
+    )
+    alwaysUpdate
   cpuMode     <- newIORef ModeNormal
   cycleClocks <- newUnboxedRef 4
   callDepth   <- newUnboxedRef 0

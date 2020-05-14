@@ -10,6 +10,7 @@ where
 import           Control.Monad.Except
 import           Control.Monad.Reader
 import           Control.Monad.Writer
+import           Data.Char
 import           Data.Functor
 import           Data.IORef
 import           Data.List
@@ -30,7 +31,6 @@ import           UnliftIO.Exception
 import qualified Data.ByteString.Builder       as BB
 import qualified Data.ByteString.Char8         as B
 import qualified Data.ByteString.Lazy          as LB
-import           Data.Char
 import qualified Machine.GBC.CPU               as CPU
 import qualified Machine.GBC.Color             as Color
 import qualified Machine.GBC.Emulator          as Emulator
@@ -86,26 +86,43 @@ blarggSuite blarggPath = TestTree
   , TestCase "instr_timing" Required $ do
     output <- blarggTestSerial (blarggPath </> "instr_timing.gb") 0xC8B0
     pure (if output == instr_timing_output then TestPassed else TestFailed (B.unpack output))
+  , TestCase "interrupt_time" Required $ do
+    output <- blarggTestInMemory (blarggPath </> "interrupt_time.gb") 0xC9C9
+    pure (if output == interrupt_time_output then TestPassed else TestFailed (B.unpack output))
   , TestCase "mem_timing" Required $ do
-    output <- blarggTestInMemory (blarggPath </> "mem_timing.gb") 0x2BDD
+    output <- blarggTestSerial (blarggPath </> "mem_timing.gb") 0x06F1
     pure (if output == mem_timing_output then TestPassed else TestFailed (B.unpack output))
+  , TestCase "mem_timing-2" Required $ do
+    output <- blarggTestInMemory (blarggPath </> "mem_timing-2.gb") 0x2BDD
+    pure (if output == mem_timing_2_output then TestPassed else TestFailed (B.unpack output))
   , TestCase "cgb_sound" Required $ do
     output <- blarggTestInMemory (blarggPath </> "cgb_sound.gb") 0x2BD4
     pure (if output == cgb_sound_output then TestPassed else TestFailed (B.unpack output))
   , TestCase "halt_bug" Required $ do
     output <- blarggTestInMemory (blarggPath </> "halt_bug.gb") 0xC818
     pure (if output == halt_bug_output then TestPassed else TestFailed (B.unpack output))
+  , TestCase "dmg_sound" Optional $ do
+    output <- blarggTestInMemory (blarggPath </> "dmg_sound.gb") 0x2BD4
+    pure (if output == dmg_sound_output then TestPassed else TestFailed (B.unpack output))
+  , TestCase "oam_bug" Optional $ do
+    output <- blarggTestInMemory (blarggPath </> "oam_bug.gb") 0x2BD2
+    pure (if output == oam_bug_output then TestPassed else TestFailed (B.unpack output))
   ]
 
  where
   cpu_instrs_output
     = "cpu_instrs\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  \n\nPassed all tests\n"
   instr_timing_output = "instr_timing\n\n\nPassed\n"
-  mem_timing_output   = "mem_timing\n\n01:ok  02:ok  03:ok  \n\nPassed\n"
+  interrupt_time_output = "interrupt time\n\n00 00 00 \n00 08 0D \n01 00 00 \n01 08 0D \n\nPassed\n"
+  mem_timing_output   = "mem_timing\n\n01:ok  02:ok  03:ok  \n\nPassed all tests\n"
+  mem_timing_2_output = "mem_timing\n\n01:ok  02:ok  03:ok  \n\nPassed\n"
   cgb_sound_output
     = "cgb_sound\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  12:ok  \n\nPassed\n"
+  dmg_sound_output
+    = "dmg_sound\n\n01:ok  02:ok  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok  09:ok  10:ok  11:ok  12:ok  \n\nPassed\n"
   halt_bug_output
     = "halt bug\n\nIE IF IF DE\n01 10 F1 0C04 \n01 00 E1 0C04 \n01 01 E1 0411 \n11 00 E1 0C04 \n11 10 F1 0411 \n11 11 F1 0411 \nE1 00 E1 0C04 \nE1 E0 E1 0C04 \nE1 E1 E1 0411 \n\nPassed\n"
+  oam_bug_output ="oam_bug\n\n01:ok  02:0k  03:ok  04:ok  05:ok  06:ok  07:ok  08:ok\n\nPassed\n"
 
 getGitCommit :: FilePath -> IO String
 getGitCommit path = do
