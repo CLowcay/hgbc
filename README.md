@@ -1,5 +1,7 @@
 # H-GBC
 
+![CI](https://github.com/CLowcay/hgbc/workflows/CI/badge.svg?branch=master)
+
 An emulator for the Nintendo Gameboy Color in Haskell because -- why not?
 
 Work in progress!
