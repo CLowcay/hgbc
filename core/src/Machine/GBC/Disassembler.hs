@@ -252,10 +252,11 @@ generateOutput (Disassembly disassembly) lookupLabel =
 
 data Banks = Banks {
     bankBootLimit :: !Word16  -- First address that is not in BOOT ROM (excluding hole at 0x100~0x200)
-  , bankROM  :: !Word16
-  , bankRAM  :: !Word16
-  , bankWRAM :: !Word16
-  , bankVRAM :: !Word16
+  , bank0ROM      :: !Word16
+  , bank1ROM      :: !Word16
+  , bankRAM       :: !Word16
+  , bankWRAM      :: !Word16
+  , bankVRAM      :: !Word16
 } deriving (Eq, Show)
 
 data DisassemblyState = DisassemblyState {
@@ -269,7 +270,8 @@ data DisassemblyState = DisassemblyState {
 getBanks :: Memory.Has env => ReaderT env IO Banks
 getBanks = do
   bankBootLimit <- bootLimit
-  bankROM       <- Memory.getBank 0x4000
+  bank0ROM      <- Memory.getBank 0x3000
+  bank1ROM      <- Memory.getBank 0x4000
   bankRAM       <- Memory.getBank 0xA000
   bankWRAM      <- Memory.getBank 0xD000
   bankVRAM      <- Memory.getBank 0x8000
@@ -284,8 +286,8 @@ getBanks = do
 lookupBank :: Word16 -> Banks -> Word16
 lookupBank offset Banks {..}
   | offset < bankBootLimit && (offset < 0x100 || offset >= 0x200) = 0xFFFF
-  | offset < 0x4000 = 0
-  | offset < 0x8000 = bankROM
+  | offset < 0x4000 = bank0ROM
+  | offset < 0x8000 = bank1ROM
   | offset < 0xA000 = bankVRAM
   | offset < 0xC000 = bankRAM
   | offset < 0xD000 = 0
@@ -450,7 +452,8 @@ disassembleFromRoots disassembly0 roots = do
       pc
       Banks
         { bankBootLimit = if bank == 0xFFFF then fromIntegral (Memory.bootROMLength memory) else 0
-        , bankROM       = if pc >= 0x4000 && pc < 0x8000 then bank else 1
+        , bank0ROM      = if pc < 0x4000 then bank else 0
+        , bank1ROM      = if pc >= 0x4000 && pc < 0x8000 then bank else 1
         , bankRAM       = 1
         , bankWRAM      = 1
         , bankVRAM      = 1

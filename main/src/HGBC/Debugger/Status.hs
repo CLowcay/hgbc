@@ -61,7 +61,7 @@ getStatus emulatorState =
         , sc
         , allBitsOf "sb" <$> readByte SB
         , rp
-        , field "romBank" formatHex <$> getBank 0x4000
+        , romBanks
         , field "ramGate" (\g -> if g then 'O' else 'C') <$> getRamGate
         , field "ramBank" formatHex <$> getBank 0xA000
         , allBitsOf "lcdc" <$> readByte LCDC
@@ -200,6 +200,14 @@ getStatus emulatorState =
   rp = do
     r <- readByte RP
     pure ["rp7_6" .= formatHex (r .>>. 6) !! 1, "rp1" .= getBit 1 r, "rp0" .= getBit 0 r]
+  romBanks = do
+    bank0 <- getBank 0x3000
+    bank1 <- getBank 0x4000
+    pure
+      [ "rom0Bank" .= formatHex bank0
+      , "rom1Bank" .= formatHex bank1
+      , "romBank" .= formatHex (if bank0 == 0 then bank1 else bank0)
+      ]
   hdma5 = do
     r <- readByte HDMA5
     pure ["hdma57" .= getBit 7 r, "hdma56_0" .= formatHex (r .&. 0x7F)]

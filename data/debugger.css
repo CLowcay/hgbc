@@ -352,13 +352,14 @@ div.memory div.ascii {
 
 div.disassembly {
   --n-lines: 20;
+  --instruction-width:20ch;
 }
 div.disassembly div.window {
   height: calc(var(--line-height) * var(--n-lines));
 }
 div.disassembly span.instruction {
   display: inline-block;
-  width: 26ch;
+  width: var(--instruction-width);
 }
 div.disassembly span.bytes {
   display: inline-block;

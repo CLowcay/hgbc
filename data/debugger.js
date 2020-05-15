@@ -7,7 +7,7 @@ window.onload = () => {
   const banks = new BankStatus(window.bootROMLimit);
   const memory = new Memory(banks);
   const outline = new Outline();
-  const disassembly = new Disassembly(banks, outline, memory);
+  const disassembly = new Disassembly(outline, memory);
   const stack = new Stack(banks);
   const backtrace = new Backtrace(outline, disassembly);
   initStatus(eventSource, banks, stack, backtrace, memory, disassembly);
@@ -57,11 +57,12 @@ window.onload = () => {
  * BANK STATUS
  *****************************************************************************/
 function BankStatus(bootROMLimit) {
-  const banks = { pcBank: 0, rom: 0, ram: 0, vram: 0, wram: 0 };
+  const banks = { pcBank: 0, rom0: 0, rom1: 0, ram: 0, vram: 0, wram: 0 };
 
   this.update = function (status) {
     banks.pcBank = parseInt(status.pcBank, 16);
-    banks.rom = parseInt(status.romBank, 16);
+    banks.rom0 = parseInt(status.rom0Bank, 16);
+    banks.rom1 = parseInt(status.rom1Bank, 16);
     banks.ram = parseInt(status.ramBank, 16);
     banks.vram = parseInt(status.vbk0, 16);
     banks.wram = parseInt(status.svbk2_0, 16);
@@ -71,9 +72,9 @@ function BankStatus(bootROMLimit) {
     if (offset < bootROMLimit && (offset < 0x100 || offset >= 0x200)) {
       return { bank: banks.pcBank, offset: offset };
     } else if (offset < 0x4000) {
-      return { bank: 0, offset: offset };
+      return { bank: banks.rom0, offset: offset };
     } else if (offset < 0x8000) {
-      return { bank: banks.rom, offset: offset };
+      return { bank: banks.rom1, offset: offset };
     } else if (offset < 0xA000) {
       return { bank: banks.vram, offset: offset };
     } else if (offset < 0xC000) {
@@ -152,7 +153,7 @@ function initStatus(eventSource, banks, stack, backtrace, memory, disassembly) {
     banks.update(data);
     stack.update(data);
     for (let key of Object.keys(data)) {
-      if (key === 'pcBank' || key === 'sp') continue;
+      if (key === 'pcBank' || key === 'sp' || key === 'rom0Bank' || key === 'rom1Bank') continue;
       const value = data[key];
       const element = document.getElementById(key);
       if (!element) console.log(`bad key ${key}`);
@@ -495,7 +496,7 @@ function Backtrace(outline, disassembly) {
 /*****************************************************************************
  * Disassembly
  *****************************************************************************/
-function Disassembly(banks, outline, memory) {
+function Disassembly(outline, memory) {
   const LINES = 20;
   const LINE_HEIGHT = 1.5;
 
@@ -578,6 +579,7 @@ function Disassembly(banks, outline, memory) {
   document.getElementById('downloadDisassembly').onclick = () =>
     window.location = "disassembly";
 
+  const disassemblyContainer = document.querySelector('div.disassembly');
   const disassemblyKeymap = new KeyMap();
   const disassemblyWindow = document.querySelector('div.disassembly div.window');
   disassemblyWindow.addEventListener('wheel', onWheel);
@@ -870,6 +872,9 @@ function Disassembly(banks, outline, memory) {
     return li;
   }
 
+  let instructionWidth = parseInt(getComputedStyle(disassemblyContainer)
+    .getPropertyValue('--instruction-width'));
+
   function createField(field) {
     const li = document.createElement('li');
 
@@ -909,6 +914,12 @@ function Disassembly(banks, outline, memory) {
 
       li.appendChild(instruction);
       li.appendChild(bytes);
+
+      const width = instruction.innerText.length + 1;
+      if (width > instructionWidth) {
+        instructionWidth = width;
+        disassemblyContainer.style.setProperty('--instruction-width', width + "ch");
+      }
     }
 
     if (field.overlap) {
