@@ -22,7 +22,6 @@ module Machine.GBC.Audio.Common
 where
 
 import           Data.Bits
-import           Data.Primitive
 import           Data.Word
 import           Machine.GBC.Primitive
 import           Machine.GBC.Util
@@ -60,7 +59,7 @@ class Channel channel where
   getStatus           :: channel -> IO Bool
   frameSequencerClock :: channel -> FrameSequencerOutput -> IO ()
   masterClock         :: channel -> Int -> IO ()
-  getPorts            :: channel -> [(Int, Port Word8)]
+  getPorts            :: channel -> [(Int, Port )]
   directReadPorts     :: channel -> IO (Word8, Word8, Word8, Word8, Word8)
 
 {-# INLINE getFrequency #-}
@@ -70,7 +69,7 @@ getFrequency register3 register4 =
       msb = register4
   in  ((fromIntegral msb .&. 0x07) .<<. 8) .|. fromIntegral lsb
 
-updateFrequency :: Port Word8 -> Port Word8 -> Int -> IO ()
+updateFrequency :: Port -> Port -> Int -> IO ()
 updateFrequency port3 port4 frequency = do
   let lsb = fromIntegral (frequency .&. 0xFF)
   let msb = fromIntegral ((frequency `unsafeShiftR` 8) .&. 0x07)
@@ -86,32 +85,30 @@ flagChannel3Enable = 0x04
 flagChannel4Enable = 0x08
 flagMasterPower = 0x80
 
-updateStatus :: Port Word8 -> Word8 -> Bool -> IO ()
+updateStatus :: Port -> Word8 -> Bool -> IO ()
 updateStatus port52 flag enabled = do
   register52 <- directReadPort port52
   directWritePort port52 (if enabled then register52 .|. flag else register52 .&. complement flag)
 
 -- | Create a new port.
 newAudioPort
-  :: Prim a
-  => Port Word8
-  -> a                  -- ^ Initial value.
-  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
-  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
-  -> IO (Port a)
+  :: Port
+  -> Word8                  -- ^ Initial value.
+  -> Word8                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (Word8 -> Word8 -> IO Word8)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO Port
 newAudioPort port52 value0 portWriteMask portNotify = newPort value0 portWriteMask $ \old new -> do
   nr52 <- directReadPort port52
   if isFlagSet flagMasterPower nr52 then portNotify old new else pure old
 
 -- | Create a new port.
 newAudioPortWithReadMask
-  :: (Bits a, Prim a)
-  => Port Word8
-  -> a                  -- ^ Initial value.
-  -> a                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
-  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
-  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
-  -> IO (Port a)
+  :: Port
+  -> Word8                  -- ^ Initial value.
+  -> Word8                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
+  -> Word8                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (Word8 -> Word8 -> IO Word8)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO Port
 newAudioPortWithReadMask port52 value0 portReadMask portWriteMask portNotify =
   newPortWithReadMask value0 portReadMask portWriteMask $ \old new -> do
     nr52 <- directReadPort port52

@@ -58,12 +58,12 @@ data State = State {
   , vram           :: !VRAM
   , memRam         :: !(VSM.IOVector Word8)
   , internalRamBankOffset  :: !(UnboxedRef Int)
-  , ports          :: !(V.Vector (Port Word8))
-  , portIE         :: !(Port Word8)
-  , portSVBK       :: !(Port Word8)
-  , portBLCK       :: !(Port Word8)
-  , portR4C        :: !(Port Word8)
-  , portR6C        :: !(Port Word8)
+  , ports          :: !(V.Vector Port)
+  , portIE         :: !Port
+  , portSVBK       :: !Port
+  , portBLCK       :: !Port
+  , portR4C        :: !Port
+  , portR6C        :: !Port
   , memHigh        :: !(VSM.IOVector Word8)
   , checkRAMAccess :: !(IORef Bool)
 }
@@ -92,7 +92,7 @@ resetAndBoot pseudoBootROM = do
     directWritePort portR4C  0
     writePort portR6C 0
   case bootROM of
-    Nothing      -> do
+    Nothing -> do
       pseudoBootROM
       writePort portBLCK 1
     Just content -> liftIO $ writeIORef rom0 content
@@ -102,8 +102,8 @@ initForROM
   :: Maybe (VS.Vector Word8)
   -> ROM
   -> VRAM
-  -> [(Word16, Port Word8)]
-  -> Port Word8
+  -> [(Word16, Port)]
+  -> Port
   -> IORef EmulatorMode
   -> IO State
 initForROM boot romInfo vram ports portIE modeRef = do
@@ -123,8 +123,8 @@ init
   -> Header
   -> MBC
   -> VRAM
-  -> [(Word16, Port Word8)]
-  -> Port Word8
+  -> [(Word16, Port)]
+  -> Port
   -> IORef EmulatorMode
   -> IO State
 init boot rom header mbc vram rawPorts portIE modeRef = do

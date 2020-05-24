@@ -142,9 +142,9 @@ data Mode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, E
 data State = State {
     cpuType     :: !EmulatorMode
   , registers   :: !(VSM.IOVector RegisterFile)
-  , portIF      :: !(Port Word8)
-  , portIE      :: !(Port Word8)
-  , portKEY1    :: !(Port Word8)
+  , portIF      :: !Port
+  , portIE      :: !Port
+  , portKEY1    :: !Port
   , cpuMode     :: !(IORef Mode)
   , cycleClocks :: !(UnboxedRef Int)
   , callDepth   :: !(UnboxedRef Int)
@@ -156,7 +156,7 @@ class Memory.Has env => Has env where
   forState :: env -> State
 
 -- | Initialize a new CPU.
-init :: Port Word8 -> Port Word8 -> IORef EmulatorMode -> IO State
+init :: Port -> Port -> IORef EmulatorMode -> IO State
 init portIF portIE modeRef = do
   cpuType   <- readIORef modeRef
   registers <- VSM.new 1
@@ -175,7 +175,7 @@ init portIF portIE modeRef = do
   haltBug     <- newIORef False
   pure State { .. }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port )]
 ports State {..} = [(KEY1, portKEY1)]
 
 -- | Get the current cpu mode.

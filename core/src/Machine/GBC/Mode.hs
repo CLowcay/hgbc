@@ -11,7 +11,7 @@ import           Data.Word
 data EmulatorMode = DMG | CGB deriving (Eq, Ord, Show, Bounded, Enum)
 
 cgbOnlyPort
-  :: IORef EmulatorMode -> Word8 -> Word8 -> (Word8 -> Word8 -> IO Word8) -> IO (Port Word8)
+  :: IORef EmulatorMode -> Word8 -> Word8 -> (Word8 -> Word8 -> IO Word8) -> IO Port
 cgbOnlyPort modeRef v0 writeMask writeFunction = newPortWithReadAction
   v0
   writeMask

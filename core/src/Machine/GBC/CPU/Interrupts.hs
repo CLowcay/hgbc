@@ -30,19 +30,23 @@ flagInterrupt InterruptP1Low             = 0x10
 flagInterrupt InterruptCancelled         = 0
 
 {-# INLINE raiseInterrupt #-}
-raiseInterrupt :: MonadIO m => Port Word8 -> Interrupt -> m ()
-raiseInterrupt portIF interrupt = setPortBits portIF (flagInterrupt interrupt)
+raiseInterrupt :: MonadIO m => Port -> Interrupt -> m ()
+raiseInterrupt portIF interrupt = do
+  rif <- directReadPort portIF
+  directWritePort portIF (rif .|. flagInterrupt interrupt)
 
 {-# INLINE clearInterrupt #-}
-clearInterrupt :: MonadIO m => Port Word8 -> Interrupt -> m ()
-clearInterrupt portIF interrupt = clearPortBits portIF (flagInterrupt interrupt)
+clearInterrupt :: MonadIO m => Port -> Interrupt -> m ()
+clearInterrupt portIF interrupt = do
+  rif <- directReadPort portIF
+  directWritePort portIF (rif .&. complement (flagInterrupt interrupt))
 
 -- | Get all of the pending interrupts that are ready to service.
 {-# INLINE pendingEnabledInterrupts #-}
-pendingEnabledInterrupts :: MonadIO m => Port Word8 -> Port Word8 -> m Word8
+pendingEnabledInterrupts :: MonadIO m => Port -> Port -> m Word8
 pendingEnabledInterrupts portIF portIE = do
-  interrupt <- readPort portIF
-  enabled   <- readPort portIE
+  interrupt <- directReadPort portIF
+  enabled   <- directReadPort portIE
   pure (interrupt .&. enabled .&. 0x1F)
 
 -- | Get the next interrupt to service.

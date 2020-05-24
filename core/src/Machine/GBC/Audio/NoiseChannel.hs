@@ -19,18 +19,18 @@ data NoiseChannel = NoiseChannel {
     enable           :: !(IORef Bool)
   , dacEnable        :: !(IORef Bool)
   , output           :: !(UnboxedRef Int)
-  , port1            :: !(Port Word8)
-  , port2            :: !(Port Word8)
-  , port3            :: !(Port Word8)
-  , port4            :: !(Port Word8)
-  , port52           :: !(Port Word8)
+  , port1            :: !Port
+  , port2            :: !Port
+  , port3            :: !Port
+  , port4            :: !Port
+  , port52           :: !Port
   , lengthCounter    :: !Length
   , envelope         :: !Envelope
   , frequencyCounter :: !Counter
   , lfsr             :: !(LinearFeedbackShiftRegister Word16)
 }
 
-newNoiseChannel :: Port Word8 -> StateCycle FrameSequencerOutput -> IO NoiseChannel
+newNoiseChannel :: Port -> StateCycle FrameSequencerOutput -> IO NoiseChannel
 newNoiseChannel port52 frameSequencer = mdo
   enable    <- newIORef False
   dacEnable <- newIORef True
@@ -71,7 +71,7 @@ newNoiseChannel port52 frameSequencer = mdo
   lfsr             <- newLinearFeedbackShiftRegister
   pure NoiseChannel { .. }
 
-disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
+disableIO :: Port -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
   writeUnboxedRef output 0
   writeIORef enable False

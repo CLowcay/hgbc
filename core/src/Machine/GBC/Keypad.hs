@@ -21,7 +21,7 @@ import           Machine.GBC.Util
 import           Prelude                 hiding ( init )
 
 -- | Create the initial keypad state.
-init :: Port Word8 -> IO State
+init :: Port -> IO State
 init portIF = do
   keypadRef <- newIORef 0x00
   portP1    <- newPort 0x00 0x30 $ \old new -> do
@@ -31,8 +31,8 @@ init portIF = do
 
 data State = State {
     keypadRef :: !(IORef Word8)
-  , portP1    :: !(Port Word8)
-  , portIF    :: !(Port Word8)
+  , portP1    :: !Port
+  , portIF    :: !Port
 }
 
 data Key = KeyUp
@@ -57,7 +57,7 @@ keyFlag KeyStart  = 0x08
 
 -- | Update the 'regKeypad' register.
 {-# INLINE refreshKeypad #-}
-refreshKeypad :: Word8 -> Port Word8 -> Word8 -> Word8 -> IO Word8
+refreshKeypad :: Word8 -> Port -> Word8 -> Word8 -> IO Word8
 refreshKeypad keypad portIF _ p1 = do
   let keypad' = complement keypad
       p1'     = case (p1 `testBit` 4, p1 `testBit` 5) of
@@ -86,5 +86,5 @@ updateKeypadState State {..} keypad = do
   p1 <- readPort portP1
   void $ refreshKeypad keypad portIF p1 p1
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} = [(P1, portP1)]

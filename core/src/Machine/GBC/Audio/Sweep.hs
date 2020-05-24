@@ -21,13 +21,13 @@ import           Machine.GBC.Util
 data Sweep = Sweep {
     enable       :: !(IORef Bool)
   , hasNegated   :: !(IORef Bool)
-  , port3        :: !(Port Word8)
-  , port4        :: !(Port Word8)
+  , port3        :: !Port
+  , port4        :: !Port
   , frequencyRef :: !(UnboxedRef Int)
   , counter      :: !Counter
 }
 
-newSweep :: Port Word8 -> Port Word8 -> IO Sweep
+newSweep :: Port -> Port -> IO Sweep
 newSweep port3 port4 = do
   enable       <- newIORef False
   hasNegated   <- newIORef False

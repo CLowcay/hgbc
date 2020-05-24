@@ -23,20 +23,20 @@ import qualified Data.Vector                   as V
 data WaveChannel = WaveChannel {
     output           :: !(UnboxedRef Int)
   , enable           :: !(IORef Bool)
-  , port0            :: !(Port Word8)
-  , port1            :: !(Port Word8)
-  , port2            :: !(Port Word8)
-  , port3            :: !(Port Word8)
-  , port4            :: !(Port Word8)
-  , port52           :: !(Port Word8)
-  , portWaveTable    :: !(V.Vector (Port Word8))
+  , port0            :: !Port
+  , port1            :: !Port
+  , port2            :: !Port
+  , port3            :: !Port
+  , port4            :: !Port
+  , port52           :: !Port
+  , portWaveTable    :: !(V.Vector Port)
   , frequencyCounter :: !Counter
   , sample           :: !(UnboxedRef Int)
   , sampleBuffer     :: !(UnboxedRef Word8)
   , lengthCounter    :: !Length
 }
 
-newWaveChannel :: Port Word8 -> StateCycle FrameSequencerOutput -> IO WaveChannel
+newWaveChannel :: Port -> StateCycle FrameSequencerOutput -> IO WaveChannel
 newWaveChannel port52 frameSequencer = mdo
   output <- newUnboxedRef 0
   enable <- newIORef False
@@ -97,7 +97,7 @@ newWaveChannel port52 frameSequencer = mdo
   let channel = WaveChannel { .. }
   pure channel
 
-disableIO :: Port Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
+disableIO :: Port -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 output enable = do
   writeUnboxedRef output 0
   writeIORef enable False

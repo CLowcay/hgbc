@@ -31,9 +31,9 @@ data Sync = Sync {
 }
 
 data State = State {
-    portSB            :: !(Port Word8)
-  , portSC            :: !(Port Word8)
-  , portIF            :: !(Port Word8)
+    portSB            :: !Port
+  , portSC            :: !Port
+  , portIF            :: !Port
   , sync              :: !Sync
   , transferActiveRef :: !(IORef Bool)
   , bitCounter        :: !(UnboxedRef Word8)
@@ -54,7 +54,7 @@ newSync = do
   out <- newEmptyMVar
   pure Sync { .. }
 
-init :: Sync -> Port Word8 -> IORef EmulatorMode -> IO State
+init :: Sync -> Port -> IORef EmulatorMode -> IO State
 init sync portIF modeRef = do
   shiftClock        <- newCounter 0
   bitCounter        <- newUnboxedRef 0
@@ -82,7 +82,7 @@ init sync portIF modeRef = do
     )
   pure State { .. }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} = [(SB, portSB), (SC, portSC)]
 
 -- | Notify an incoming passive transfer

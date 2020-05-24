@@ -29,11 +29,11 @@ data State = State {
     audioOut       :: !(RingBuffer Word16)
   , sampler        :: !Counter
   , frameSequencer :: !(StateCycle FrameSequencerOutput)
-  , port50         :: !(Port Word8)
-  , port51         :: !(Port Word8)
-  , port52         :: !(Port Word8)
-  , portPCM12      :: !(Port Word8)
-  , portPCM34      :: !(Port Word8)
+  , port50         :: !Port
+  , port51         :: !Port
+  , port52         :: !Port
+  , portPCM12      :: !Port
+  , portPCM34      :: !Port
   , channel1       :: !PulseChannel
   , channel2       :: !PulseChannel
   , channel3       :: !WaveChannel
@@ -77,7 +77,7 @@ init = mdo
 
   pure State { .. }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} =
   [(NR50, port50), (NR51, port51), (NR52, port52), (PCM12, portPCM12), (PCM34, portPCM34)]
     ++ channel1Ports

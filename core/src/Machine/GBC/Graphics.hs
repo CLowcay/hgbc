@@ -43,23 +43,23 @@ data State = State {
     lcdState      :: !(StateCycle Mode)
   , lcdLine       :: !(StateCycle Word8)
   , statSignal    :: !(IORef Bool)
-  , portLCDC      :: !(Port Word8)
-  , portSTAT      :: !(Port Word8)
-  , portSCY       :: !(Port Word8)
-  , portSCX       :: !(Port Word8)
-  , portLY        :: !(Port Word8)
-  , portLYC       :: !(Port Word8)
-  , portBGP       :: !(Port Word8)
-  , portOBP0      :: !(Port Word8)
-  , portOBP1      :: !(Port Word8)
-  , portWY        :: !(Port Word8)
-  , portWX        :: !(Port Word8)
-  , portBCPS      :: !(Port Word8)
-  , portBCPD      :: !(Port Word8)
-  , portOCPS      :: !(Port Word8)
-  , portOCPD      :: !(Port Word8)
-  , portVBK       :: !(Port Word8)
-  , portIF        :: !(Port Word8)
+  , portLCDC      :: !Port
+  , portSTAT      :: !Port
+  , portSCY       :: !Port
+  , portSCX       :: !Port
+  , portLY        :: !Port
+  , portLYC       :: !Port
+  , portBGP       :: !Port
+  , portOBP0      :: !Port
+  , portOBP1      :: !Port
+  , portWY        :: !Port
+  , portWX        :: !Port
+  , portBCPS      :: !Port
+  , portBCPD      :: !Port
+  , portOCPS      :: !Port
+  , portOCPD      :: !Port
+  , portVBK       :: !Port
+  , portIF        :: !Port
   , vram          :: !VRAM
   , modeRef       :: !(IORef EmulatorMode)
   , frameBufferBytes :: !(Ptr Word8)
@@ -95,9 +95,9 @@ lcdLines :: [(Word8, Int)]
 lcdLines = [0 .. 153] <&> (, 456)
 
 -- | The initial graphics state.
-init :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port Word8 -> IO State
+init :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port -> IO State
 init vram modeRef frameBufferBytes portIF = mdo
-  lcdState <- newStateCycle lcdStates
+  lcdState   <- newStateCycle lcdStates
   lcdLine    <- newStateCycle lcdLines
   statSignal <- newIORef True
 
@@ -139,7 +139,7 @@ init vram modeRef frameBufferBytes portIF = mdo
     when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
   portOCPS <- newPort 0x40 0xBF
     $ \_ ocps' -> ocps' <$ (directWritePort portOCPD =<< readPalette vram True ocps')
-  portOCPD <- cgbOnlyPort modeRef  0x00 0xFF $ \_ ocpd' -> ocpd' <$ do
+  portOCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ ocpd' -> ocpd' <$ do
     ocps <- readPort portOCPS
     writePalette vram True ocps ocpd'
     when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
@@ -151,7 +151,7 @@ init vram modeRef frameBufferBytes portIF = mdo
 
   pure State { .. }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} =
   [ (LCDC, portLCDC)
   , (STAT, portSTAT)
@@ -225,7 +225,7 @@ modeBits VBlank   = 1
 modeBits ScanOAM  = 2
 modeBits ReadVRAM = 3
 
-checkLY :: Port Word8 -> Word8 -> Word8 -> IO Word8
+checkLY :: Port -> Word8 -> Word8 -> IO Word8
 checkLY portSTAT ly lyc = do
   stat <- directReadPort portSTAT
   let stat' = (stat .&. complement matchMask) .|. if ly == lyc then matchMask else 0
@@ -242,7 +242,7 @@ updateStatSignal signalRef mode stat = do
   writeIORef signalRef signal'
   pure (signal' && not signal)
 
-checkStatInterrupt :: Port Word8 -> Port Word8 -> IORef Bool -> Word8 -> Word8 -> Mode -> IO ()
+checkStatInterrupt :: Port -> Port -> IORef Bool -> Word8 -> Word8 -> Mode -> IO ()
 checkStatInterrupt portIF portSTAT signalRef ly lyc mode = do
   raise <- updateStatSignal signalRef mode =<< checkLY portSTAT ly lyc
   when raise $ raiseInterrupt portIF InterruptLCDCStat

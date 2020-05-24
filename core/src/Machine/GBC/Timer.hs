@@ -33,16 +33,16 @@ data State = State {
   , lastEdgeRef  :: !(UnboxedRef Word16)
   , timaStateRef :: !(IORef TIMAState)
   , clockAudio   :: !(IO ())
-  , portDIV      :: !(Port Word8)
-  , portTIMA     :: !(Port Word8)
-  , portTMA      :: !(Port Word8)
-  , portTAC      :: !(Port Word8)
-  , portKEY1     :: !(Port Word8)
-  , portIF       :: !(Port Word8)
+  , portDIV      :: !Port
+  , portTIMA     :: !Port
+  , portTMA      :: !Port
+  , portTAC      :: !Port
+  , portKEY1     :: !Port
+  , portIF       :: !Port
 }
 
 -- | Create the initial timer state.
-init :: IO () -> Port Word8 -> Port Word8 -> IO State
+init :: IO () -> Port -> Port -> IO State
 init clockAudio portKEY1 portIF = do
   systemDIV    <- newUnboxedRef 0
   edgeMaskRef  <- newUnboxedRef (decodeTimaMask 0)
@@ -67,7 +67,7 @@ init clockAudio portKEY1 portIF = do
     writeUnboxedRef edgeMaskRef ((edgeMask .&. complement allTimaBits) .|. decodeTimaMask v')
   pure State { .. }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
 
 allTimaBits :: Word16

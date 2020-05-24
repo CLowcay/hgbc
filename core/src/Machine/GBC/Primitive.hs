@@ -36,8 +36,6 @@ module Machine.GBC.Primitive
   , directReadPort
   , writePort
   , directWritePort
-  , setPortBits
-  , clearPortBits
   )
 where
 
@@ -54,8 +52,8 @@ import           Machine.GBC.Primitive.UnboxedRef
 
 -- | A reloading down counter.  Number of states is reload value + 1.
 data Counter = Counter {
-    counterValue :: !(UnboxedRef Int)
-  , counterMask  :: !Int
+    counterMask  :: !Int
+  , counterValue :: !(UnboxedRef Int)
 }
 
 newCounter :: MonadIO m => Int -> m Counter
@@ -131,10 +129,10 @@ resetStateCycle (StateCycle cycles states) states' = case states' of
     writeUnboxedRef cycles count0
 
 data RingBuffer a = RingBuffer {
-    ringBuffer :: !(ForeignPtr a)
-  , ringReadPtr :: !(UnboxedRef Int)
+    ringMask     :: {-# UNPACK #-} !Int
+  , ringBuffer   :: !(ForeignPtr a)
+  , ringReadPtr  :: !(UnboxedRef Int)
   , ringWritePtr :: !(UnboxedRef Int)
-  , ringMask :: !Int
 }
 
 newRingBuffer :: Storable a => Int -> IO (RingBuffer a)
@@ -209,20 +207,19 @@ currentBit :: (Prim a) => LinearFeedbackShiftRegister a -> IO a
 currentBit (LinearFeedbackShiftRegister ref) = readUnboxedRef ref
 
 -- | A port is like an IORef but with a custom handler for writes.
-data Port a = Port {
-    portValue     :: !(UnboxedRef a)
-  , portWriteMask :: !a
-  , portRead      :: !(a -> IO a)
-  , portNotify    :: !(a -> a -> IO a)
+data Port = Port {
+    portWriteMask :: !Word8
+  , portValue     :: !(UnboxedRef Word8)
+  , portRead      :: !(Word8 -> IO Word8)
+  , portNotify    :: !(Word8 -> Word8 -> IO Word8)
 }
 
 -- | Create a new port.
 newPort
-  :: Prim a
-  => a                  -- ^ Initial value.
-  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
-  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
-  -> IO (Port a)
+  :: Word8                  -- ^ Initial value.
+  -> Word8                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (Word8 -> Word8 -> IO Word8)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO Port
 newPort value0 portWriteMask portNotify = do
   portValue <- newUnboxedRef value0
   let portRead = pure
@@ -230,24 +227,22 @@ newPort value0 portWriteMask portNotify = do
 
 -- | Create a new port with a custom action to run when reading.
 newPortWithReadAction
-  :: Prim a
-  => a                 -- ^ Initial value.
-  -> a                 -- ^ Write mask.  1 indicates that the bit is writable.
-  -> (a -> IO a)       -- ^ Action to perform on reads.
-  -> (a -> a -> IO a)  -- ^ Action to perform on writes.
-  -> IO (Port a)
+  :: Word8                 -- ^ Initial value.
+  -> Word8                 -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (Word8 -> IO Word8)       -- ^ Action to perform on reads.
+  -> (Word8 -> Word8 -> IO Word8)  -- ^ Action to perform on writes.
+  -> IO Port
 newPortWithReadAction value0 portWriteMask portRead portNotify = do
   portValue <- newUnboxedRef value0
   pure Port { .. }
 
 -- | Create a new port.
 newPortWithReadMask
-  :: (Prim a, Bits a)
-  => a                  -- ^ Initial value.
-  -> a                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
-  -> a                  -- ^ Write mask.  1 indicates that the bit is writable.
-  -> (a -> a -> IO a)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
-  -> IO (Port a)
+  :: Word8                  -- ^ Initial value.
+  -> Word8                  -- ^ Read mask.  1 indicates that the bit will always read as 1.
+  -> Word8                  -- ^ Write mask.  1 indicates that the bit is writable.
+  -> (Word8 -> Word8 -> IO Word8)   -- ^ Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
+  -> IO Port
 newPortWithReadMask value0 portReadMask portWriteMask portNotify = do
   portValue <- newUnboxedRef value0
   let portRead x = pure (x .|. portReadMask)
@@ -263,17 +258,17 @@ neverUpdate = const . pure
 
 -- | Read from the port
 {-# INLINE readPort #-}
-readPort :: (MonadIO m, Prim a) => Port a -> m a
+readPort :: MonadIO m => Port -> m Word8
 readPort Port {..} = liftIO . portRead =<< readUnboxedRef portValue
 
 -- | Read from the port directly skipping the read mask.
 {-# INLINE directReadPort #-}
-directReadPort :: (MonadIO m, Prim a) => Port a -> m a
+directReadPort :: MonadIO m => Port -> m Word8
 directReadPort Port {..} = readUnboxedRef portValue
 
 -- | Write to the port and notify any listeners.
 {-# INLINE writePort #-}
-writePort :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
+writePort :: MonadIO m => Port -> Word8 -> m ()
 writePort Port {..} newValue = do
   oldValue  <- readUnboxedRef portValue
   newValue' <- liftIO
@@ -282,21 +277,5 @@ writePort Port {..} newValue = do
 
 -- | Write the value of the port directly without any checks or notifications.
 {-# INLINE directWritePort #-}
-directWritePort :: (MonadIO m, Prim a) => Port a -> a -> m ()
+directWritePort :: MonadIO m => Port -> Word8 -> m ()
 directWritePort Port {..} v = liftIO (writeUnboxedRef portValue v)
-
--- | Set writable bits and notify all listeners.
-{-# INLINE setPortBits #-}
-setPortBits :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
-setPortBits Port {..} newValue = do
-  oldValue  <- readUnboxedRef portValue
-  newValue' <- liftIO (portNotify oldValue (oldValue .|. (newValue .&. portWriteMask)))
-  writeUnboxedRef portValue newValue'
-
--- | Clear writable bits and notify all listeners.
-{-# INLINE clearPortBits #-}
-clearPortBits :: (MonadIO m, Prim a, Bits a) => Port a -> a -> m ()
-clearPortBits Port {..} newValue = do
-  oldValue  <- readUnboxedRef portValue
-  newValue' <- liftIO (portNotify oldValue (oldValue .&. complement (newValue .&. portWriteMask)))
-  writeUnboxedRef portValue newValue'

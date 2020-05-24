@@ -38,15 +38,15 @@ data State = State {
   , dmaBase         :: !(UnboxedRef Word16)
   , vram            :: !VRAM.VRAM
   , pendingHDMA     :: !(IORef PendingDMA)
-  , portDMA         :: !(Port Word8)
-  , portHDMA1       :: !(Port Word8)
-  , portHDMA2       :: !(Port Word8)
-  , portHDMA3       :: !(Port Word8)
-  , portHDMA4       :: !(Port Word8)
-  , portHDMA5       :: !(Port Word8)
+  , portDMA         :: !Port
+  , portHDMA1       :: !Port
+  , portHDMA2       :: !Port
+  , portHDMA3       :: !Port
+  , portHDMA4       :: !Port
+  , portHDMA5       :: !Port
 }
 
-ports :: State -> [(Word16, Port Word8)]
+ports :: State -> [(Word16, Port)]
 ports State {..} =
   [ (DMA  , portDMA)
   , (HDMA1, portHDMA1)

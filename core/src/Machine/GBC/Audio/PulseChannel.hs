@@ -22,12 +22,12 @@ data PulseChannel = PulseChannel {
     output             :: !(UnboxedRef Int)
   , enable             :: !(IORef Bool)
   , dacEnable          :: !(IORef Bool)
-  , port0              :: !(Port Word8)
-  , port1              :: !(Port Word8)
-  , port2              :: !(Port Word8)
-  , port3              :: !(Port Word8)
-  , port4              :: !(Port Word8)
-  , port52             :: !(Port Word8)
+  , port0              :: !Port
+  , port1              :: !Port
+  , port2              :: !Port
+  , port3              :: !Port
+  , port4              :: !Port
+  , port52             :: !Port
   , hasSweepUnit       :: !Bool
   , channelEnabledFlag :: !Word8
   , sweepUnit          :: !Sweep
@@ -37,7 +37,7 @@ data PulseChannel = PulseChannel {
   , lengthCounter      :: !Length
 }
 
-newPulseChannel :: Bool -> Port Word8 -> StateCycle FrameSequencerOutput -> Word8 -> IO PulseChannel
+newPulseChannel :: Bool -> Port -> StateCycle FrameSequencerOutput -> Word8 -> IO PulseChannel
 newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
   output    <- newUnboxedRef 0
   enable    <- newIORef False
@@ -100,7 +100,7 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
   lengthCounter    <- newLength 0x3F
   pure PulseChannel { .. }
 
-disableIO :: Port Word8 -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
+disableIO :: Port -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 channelEnabledFlag output enable = do
   writeUnboxedRef output 0
   writeIORef enable False
