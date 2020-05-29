@@ -6,6 +6,10 @@ An emulator for the Nintendo Gameboy Color in Haskell because -- why not?
 
 Work in progress!
 
+Passes all relevant parts of the Blargg test suite (cpu_instrs, instr_timing, interrupt_time, mem_timing, mem_timing-2, cgb_sound, and halt_bug).  Does not pass dmg_sound or oam_bug since H-GBC emulates the Gameboy Color, and the Gameboy Color hardware does not pass those tests.
+
+Also passes most of the relevant parts of the Mooneye GB suite, with the notable exception of the PPU tests.  H-GBC's graphics code works reasonably well, but it is not cycle-accurate.  There may be some glitches or other differences from the original hardware.
+
 The latest test report is at https://hgbc-test-results.netlify.app/ .
 
 # Build
