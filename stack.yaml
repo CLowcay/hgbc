@@ -17,7 +17,8 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-14.27
+resolver: lts-16.6
+compiler: ghc-8.8.4
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -45,7 +46,9 @@ packages:
 # extra-deps: []
 
 # Override default flag values for local packages and extra-deps
-# flags: {}
+flags:
+  sdl2:
+    no-linear: True
 
 # Extra package databases containing global packages
 # extra-package-dbs: []
