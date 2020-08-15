@@ -1,39 +1,40 @@
 {-# LANGUAGE RecordWildCards #-}
+
 module Machine.GBC.Audio.Sweep
-  ( Sweep
-  , newSweep
-  , initSweep
-  , clockSweep
-  , flagNegate
-  , hasPerformedSweepCalculationInNegateMode
+  ( Sweep,
+    newSweep,
+    initSweep,
+    clockSweep,
+    flagNegate,
+    hasPerformedSweepCalculationInNegateMode,
   )
 where
 
-import           Control.Monad
-import           Data.Bits
-import           Data.IORef
-import           Data.Word
-import           Machine.GBC.Audio.Common
-import           Machine.GBC.Primitive
-import           Machine.GBC.Primitive.UnboxedRef
-import           Machine.GBC.Util
+import Control.Monad
+import Data.Bits
+import Data.IORef
+import Data.Word
+import Machine.GBC.Audio.Common
+import Machine.GBC.Primitive
+import Machine.GBC.Primitive.UnboxedRef
+import Machine.GBC.Util
 
-data Sweep = Sweep {
-    enable       :: !(IORef Bool)
-  , hasNegated   :: !(IORef Bool)
-  , port3        :: !Port
-  , port4        :: !Port
-  , frequencyRef :: !(UnboxedRef Int)
-  , counter      :: !Counter
-}
+data Sweep = Sweep
+  { enable :: !(IORef Bool),
+    hasNegated :: !(IORef Bool),
+    port3 :: !Port,
+    port4 :: !Port,
+    frequencyRef :: !(UnboxedRef Int),
+    counter :: !Counter
+  }
 
 newSweep :: Port -> Port -> IO Sweep
 newSweep port3 port4 = do
-  enable       <- newIORef False
-  hasNegated   <- newIORef False
+  enable <- newIORef False
+  hasNegated <- newIORef False
   frequencyRef <- newUnboxedRef 0
-  counter      <- newCounter 7
-  pure Sweep { .. }
+  counter <- newCounter 7
+  pure Sweep {..}
 
 initSweep :: Sweep -> Int -> Word8 -> IO () -> IO ()
 initSweep sweep@Sweep {..} frequency0 register disableIO = do
@@ -45,12 +46,12 @@ initSweep sweep@Sweep {..} frequency0 register disableIO = do
 
 nextFrequency :: Int -> Int -> Bool -> Int
 nextFrequency frequency0 sweepShift False = frequency0 + (frequency0 .>>. sweepShift)
-nextFrequency frequency0 sweepShift True  = frequency0 - (frequency0 .>>. sweepShift)
+nextFrequency frequency0 sweepShift True = frequency0 - (frequency0 .>>. sweepShift)
 
 overflowCheck :: Sweep -> Word8 -> IO () -> IO Int
 overflowCheck Sweep {..} register disableIO = do
   frequency <- readUnboxedRef frequencyRef
-  let isNegate   = isFlagSet flagNegate register
+  let isNegate = isFlagSet flagNegate register
   let frequency' = nextFrequency frequency (getShift register) isNegate
   when isNegate $ writeIORef hasNegated True
   if frequency' > 2047 then frequency <$ disableIO else pure frequency'

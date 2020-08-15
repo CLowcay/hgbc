@@ -1,89 +1,90 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Machine.GBC.CPU
-  ( RegisterFile(..)
-  , Mode(..)
-  , State(..)
-  , Has(..)
-  , M(..)
-  , init
-  , ports
-  , getMode
-  , setMode
-  , getCycleClocks
-  , setCycleClocks
-  , getCallDepth
-  , getBacktrace
-  , reset
-  , getRegisterFile
-  , readR8
-  , writeR8
-  , readR16
-  , readR16pp
-  , writeR16
-  , writeR16pp
-  , readPC
-  , writePC
-  , readF
-  , writeF
-  , testFlag
-  , setFlags
-  , setFlagsMask
-  , setIME
-  , clearIME
-  , testIME
-  , flagCY
-  , flagN
-  , flagH
-  , flagZ
-  , flagIME
-  , flagDoubleSpeed
-  , testCondition
-  , step
+  ( RegisterFile (..),
+    Mode (..),
+    State (..),
+    Has (..),
+    M (..),
+    init,
+    ports,
+    getMode,
+    setMode,
+    getCycleClocks,
+    setCycleClocks,
+    getCallDepth,
+    getBacktrace,
+    reset,
+    getRegisterFile,
+    readR8,
+    writeR8,
+    readR16,
+    readR16pp,
+    writeR16,
+    writeR16pp,
+    readPC,
+    writePC,
+    readF,
+    writeF,
+    testFlag,
+    setFlags,
+    setFlagsMask,
+    setIME,
+    clearIME,
+    testIME,
+    flagCY,
+    flagN,
+    flagH,
+    flagZ,
+    flagIME,
+    flagDoubleSpeed,
+    testCondition,
+    step,
   )
 where
 
-import           Control.Exception              ( throwIO )
-import           Control.Monad.Reader
-import           Data.Bits
-import           Data.Foldable
-import           Data.IORef
-import           Data.Int
-import           Data.Word
-import           Foreign.Ptr
-import           Foreign.Storable
-import           Machine.GBC.CPU.Decode
-import           Machine.GBC.CPU.ISA
-import           Machine.GBC.CPU.Interrupts
-import           Machine.GBC.Errors
-import           Machine.GBC.Mode
-import           Machine.GBC.Primitive
-import           Machine.GBC.Primitive.UnboxedRef
-import           Machine.GBC.Registers
-import           Machine.GBC.Util
-import           Prelude                 hiding ( init )
-import qualified Data.Vector.Storable.Mutable  as VSM
-import qualified Machine.GBC.Bus               as Bus
-import qualified Machine.GBC.CPU.Backtrace     as Backtrace
-import qualified Machine.GBC.Memory            as Memory
+import Control.Exception (throwIO)
+import Control.Monad.Reader
+import Data.Bits
+import Data.Foldable
+import Data.IORef
+import Data.Int
+import qualified Data.Vector.Storable.Mutable as VSM
+import Data.Word
+import Foreign.Ptr
+import Foreign.Storable
+import qualified Machine.GBC.Bus as Bus
+import qualified Machine.GBC.CPU.Backtrace as Backtrace
+import Machine.GBC.CPU.Decode
+import Machine.GBC.CPU.ISA
+import Machine.GBC.CPU.Interrupts
+import Machine.GBC.Errors
+import qualified Machine.GBC.Memory as Memory
+import Machine.GBC.Mode
+import Machine.GBC.Primitive
+import Machine.GBC.Primitive.UnboxedRef
+import Machine.GBC.Registers
+import Machine.GBC.Util
+import Prelude hiding (init)
 
 -- | The register file.
-data RegisterFile = RegisterFile {
-    regF :: !Word8
-  , regA :: !Word8
-  , regC :: !Word8
-  , regB :: !Word8
-  , regE :: !Word8
-  , regD :: !Word8
-  , regL :: !Word8
-  , regH :: !Word8
-  , regSP :: !Word16
-  , regPC :: !Word16
-  , regHidden :: !Word16
-} deriving (Eq, Ord, Show)
+data RegisterFile = RegisterFile
+  { regF :: !Word8,
+    regA :: !Word8,
+    regC :: !Word8,
+    regB :: !Word8,
+    regE :: !Word8,
+    regD :: !Word8,
+    regL :: !Word8,
+    regH :: !Word8,
+    regSP :: !Word16,
+    regPC :: !Word16,
+    regHidden :: !Word16
+  }
+  deriving (Eq, Ord, Show)
 
 offsetF, offsetA, offsetC, offsetB :: Int
 offsetE, offsetD, offsetL, offsetH :: Int
@@ -91,9 +92,13 @@ offsetF = 0
 offsetA = 1
 offsetC = 2
 offsetB = 3
+
 offsetE = 4
+
 offsetD = 5
+
 offsetL = 6
+
 offsetH = 7
 
 offsetAF, offsetBC, offsetDE, offsetHL :: Int
@@ -102,55 +107,58 @@ offsetAF = 0
 offsetBC = 1
 offsetDE = 2
 offsetHL = 3
+
 offsetSP = 4
+
 offsetPC = 5
+
 offsetHidden = 6
 
 instance Storable RegisterFile where
   sizeOf _ = 14
   alignment _ = 2
   peek ptr = do
-    regA      <- peekElemOff (castPtr ptr) offsetA
-    regB      <- peekElemOff (castPtr ptr) offsetB
-    regC      <- peekElemOff (castPtr ptr) offsetC
-    regD      <- peekElemOff (castPtr ptr) offsetD
-    regE      <- peekElemOff (castPtr ptr) offsetE
-    regF      <- peekElemOff (castPtr ptr) offsetF
-    regH      <- peekElemOff (castPtr ptr) offsetH
-    regL      <- peekElemOff (castPtr ptr) offsetL
-    regSP     <- peekElemOff (castPtr ptr) offsetSP
-    regPC     <- peekElemOff (castPtr ptr) offsetPC
+    regA <- peekElemOff (castPtr ptr) offsetA
+    regB <- peekElemOff (castPtr ptr) offsetB
+    regC <- peekElemOff (castPtr ptr) offsetC
+    regD <- peekElemOff (castPtr ptr) offsetD
+    regE <- peekElemOff (castPtr ptr) offsetE
+    regF <- peekElemOff (castPtr ptr) offsetF
+    regH <- peekElemOff (castPtr ptr) offsetH
+    regL <- peekElemOff (castPtr ptr) offsetL
+    regSP <- peekElemOff (castPtr ptr) offsetSP
+    regPC <- peekElemOff (castPtr ptr) offsetPC
     regHidden <- peekElemOff (castPtr ptr) offsetHidden
-    pure RegisterFile { .. }
+    pure RegisterFile {..}
   poke ptr RegisterFile {..} = do
-    pokeElemOff (castPtr ptr) offsetA      regA
-    pokeElemOff (castPtr ptr) offsetB      regB
-    pokeElemOff (castPtr ptr) offsetC      regC
-    pokeElemOff (castPtr ptr) offsetD      regD
-    pokeElemOff (castPtr ptr) offsetE      regE
-    pokeElemOff (castPtr ptr) offsetF      regF
-    pokeElemOff (castPtr ptr) offsetH      regH
-    pokeElemOff (castPtr ptr) offsetL      regL
-    pokeElemOff (castPtr ptr) offsetSP     regSP
-    pokeElemOff (castPtr ptr) offsetPC     regPC
+    pokeElemOff (castPtr ptr) offsetA regA
+    pokeElemOff (castPtr ptr) offsetB regB
+    pokeElemOff (castPtr ptr) offsetC regC
+    pokeElemOff (castPtr ptr) offsetD regD
+    pokeElemOff (castPtr ptr) offsetE regE
+    pokeElemOff (castPtr ptr) offsetF regF
+    pokeElemOff (castPtr ptr) offsetH regH
+    pokeElemOff (castPtr ptr) offsetL regL
+    pokeElemOff (castPtr ptr) offsetSP regSP
+    pokeElemOff (castPtr ptr) offsetPC regPC
     pokeElemOff (castPtr ptr) offsetHidden regHidden
 
 -- | The current CPU mode.
 data Mode = ModeHalt | ModeStop | ModeNormal deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | The internal CPU state.
-data State = State {
-    cpuType     :: !EmulatorMode
-  , registers   :: !(VSM.IOVector RegisterFile)
-  , portIF      :: !Port
-  , portIE      :: !Port
-  , portKEY1    :: !Port
-  , cpuMode     :: !(IORef Mode)
-  , cycleClocks :: !(UnboxedRef Int)
-  , callDepth   :: !(UnboxedRef Int)
-  , backtrace   :: !Backtrace.Backtrace
-  , haltBug     :: !(IORef Bool)  -- True to trigger the halt bug
-}
+data State = State
+  { cpuType :: !EmulatorMode,
+    registers :: !(VSM.IOVector RegisterFile),
+    portIF :: !Port,
+    portIE :: !Port,
+    portKEY1 :: !Port,
+    cpuMode :: !(IORef Mode),
+    cycleClocks :: !(UnboxedRef Int),
+    callDepth :: !(UnboxedRef Int),
+    backtrace :: !Backtrace.Backtrace,
+    haltBug :: !(IORef Bool) -- True to trigger the halt bug
+  }
 
 class Memory.Has env => Has env where
   forState :: env -> State
@@ -158,42 +166,43 @@ class Memory.Has env => Has env where
 -- | Initialize a new CPU.
 init :: Port -> Port -> IORef EmulatorMode -> IO State
 init portIF portIE modeRef = do
-  cpuType   <- readIORef modeRef
+  cpuType <- readIORef modeRef
   registers <- VSM.new 1
-  portKEY1  <- newPortWithReadAction
-    0x7E
-    0x01
-    (\key1 -> do
-      mode <- readIORef modeRef
-      if mode == DMG then pure 0xFF else pure key1
-    )
-    alwaysUpdate
-  cpuMode     <- newIORef ModeNormal
+  portKEY1 <-
+    newPortWithReadAction
+      0x7E
+      0x01
+      ( \key1 -> do
+          mode <- readIORef modeRef
+          if mode == DMG then pure 0xFF else pure key1
+      )
+      alwaysUpdate
+  cpuMode <- newIORef ModeNormal
   cycleClocks <- newUnboxedRef 4
-  callDepth   <- newUnboxedRef 0
-  backtrace   <- Backtrace.new 8
-  haltBug     <- newIORef False
-  pure State { .. }
+  callDepth <- newUnboxedRef 0
+  backtrace <- Backtrace.new 8
+  haltBug <- newIORef False
+  pure State {..}
 
-ports :: State -> [(Word16, Port )]
+ports :: State -> [(Word16, Port)]
 ports State {..} = [(KEY1, portKEY1)]
 
 -- | Get the current cpu mode.
-{-# INLINABLE getMode #-}
+{-# INLINEABLE getMode #-}
 getMode :: Has env => ReaderT env IO Mode
 getMode = do
   State {..} <- asks forState
   liftIO $ readIORef cpuMode
 
 -- | Get the CPU mode.
-{-# INLINABLE setMode #-}
+{-# INLINEABLE setMode #-}
 setMode :: Has env => Mode -> ReaderT env IO ()
 setMode mode = do
   State {..} <- asks forState
   liftIO $ writeIORef cpuMode mode
 
 -- | Get the values of all the registers.
-{-# INLINABLE getRegisterFile #-}
+{-# INLINEABLE getRegisterFile #-}
 getRegisterFile :: Has env => ReaderT env IO RegisterFile
 getRegisterFile = do
   State {..} <- asks forState
@@ -214,12 +223,12 @@ writeRegister offset value = do
   liftIO $ VSM.unsafeWrite (VSM.unsafeCast registers) offset value
 
 -- | Read a single register.
-{-# INLINABLE readR8 #-}
+{-# INLINEABLE readR8 #-}
 readR8 :: Has env => Register8 -> ReaderT env IO Word8
 readR8 = readRegister . offsetR8
 
 -- | Write a single register.
-{-# INLINABLE writeR8 #-}
+{-# INLINEABLE writeR8 #-}
 writeR8 :: Has env => Register8 -> Word8 -> ReaderT env IO ()
 writeR8 register = writeRegister $ offsetR8 register
 
@@ -234,12 +243,12 @@ offsetR8 RegH = offsetH
 offsetR8 RegL = offsetL
 
 -- | Read a 16-bit register.
-{-# INLINABLE readR16 #-}
+{-# INLINEABLE readR16 #-}
 readR16 :: Has env => Register16 -> ReaderT env IO Word16
 readR16 = readRegister . offsetR16
 
 -- | Write a 16-bit register.
-{-# INLINABLE writeR16 #-}
+{-# INLINEABLE writeR16 #-}
 writeR16 :: Has env => Register16 -> Word16 -> ReaderT env IO ()
 writeR16 register = writeRegister $ offsetR16 register
 
@@ -251,15 +260,15 @@ offsetR16 RegHL = offsetHL
 offsetR16 RegSP = offsetSP
 
 -- | Read a 16-bit register.
-{-# INLINABLE readR16pp #-}
+{-# INLINEABLE readR16pp #-}
 readR16pp :: Has env => RegisterPushPop -> ReaderT env IO Word16
 readR16pp register = readRegister (offsetR16pp register)
 
 -- | Write a 16-bit register.
-{-# INLINABLE writeR16pp #-}
+{-# INLINEABLE writeR16pp #-}
 writeR16pp :: Has env => RegisterPushPop -> Word16 -> ReaderT env IO ()
 writeR16pp PushPopAF v = writeRegister offsetF (v .&. 0xFFF0)
-writeR16pp register  v = writeRegister (offsetR16pp register) v
+writeR16pp register v = writeRegister (offsetR16pp register) v
 
 -- | Get the offset in the register file of a register pair.
 offsetR16pp :: RegisterPushPop -> Int
@@ -268,7 +277,7 @@ offsetR16pp PushPopDE = offsetDE
 offsetR16pp PushPopHL = offsetHL
 offsetR16pp PushPopAF = offsetAF
 
-{-# INLINABLE readRHalf #-}
+{-# INLINEABLE readRHalf #-}
 readRHalf :: Has env => RegisterHalf -> ReaderT env IO Word8
 readRHalf RegSPL = readRegister (2 * offsetSP)
 readRHalf RegSPH = readRegister (2 * offsetSP + 1)
@@ -276,16 +285,17 @@ readRHalf RegPCL = readRegister (2 * offsetPC)
 readRHalf RegPCH = readRegister (2 * offsetPC + 1)
 
 -- | Read the PC register.
-{-# INLINABLE readPC #-}
+{-# INLINEABLE readPC #-}
 readPC :: Has env => ReaderT env IO Word16
 readPC = readRegister offsetPC
 
 -- | Write the PC register.
-{-# INLINABLE writePC #-}
+{-# INLINEABLE writePC #-}
 writePC :: Has env => Word16 -> ReaderT env IO ()
 writePC = writeRegister offsetPC
 
 type Flag = Word8
+
 flagZ, flagN, flagH, flagCY :: Flag
 flagZ = 0x80
 flagN = 0x40
@@ -302,11 +312,11 @@ allExceptN :: Word8
 allExceptN = flagH .|. flagCY .|. flagZ
 
 -- Master interrupt enable flag
-{-# INLINABLE flagIME #-}
+{-# INLINEABLE flagIME #-}
 flagIME :: Word16
 flagIME = 0x0100
 
-{-# INLINABLE flagSetIME #-}
+{-# INLINEABLE flagSetIME #-}
 flagSetIME :: Word16
 flagSetIME = 0x0200
 
@@ -321,9 +331,9 @@ testFlag flag = do
 {-# INLINE testCondition #-}
 testCondition :: Has env => ConditionCode -> ReaderT env IO Bool
 testCondition CondNZ = not <$> testFlag flagZ
-testCondition CondZ  = testFlag flagZ
+testCondition CondZ = testFlag flagZ
 testCondition CondNC = not <$> testFlag flagCY
-testCondition CondC  = testFlag flagCY
+testCondition CondC = testFlag flagCY
 
 -- | Read the F register.
 {-# INLINE readF #-}
@@ -342,11 +352,13 @@ setFlags = writeF
 
 -- | Set some flags.
 {-# INLINE setFlagsMask #-}
-setFlagsMask
-  :: Has env
-  => Word8 -- ^ bitmask containing flags to set.
-  -> Word8 -- ^ new flags values.
-  -> ReaderT env IO ()
+setFlagsMask ::
+  Has env =>
+  -- | bitmask containing flags to set.
+  Word8 ->
+  -- | new flags values.
+  Word8 ->
+  ReaderT env IO ()
 setFlagsMask mask flags = do
   oldFlags <- readF
   writeF ((oldFlags .&. complement mask) .|. (flags .&. mask))
@@ -375,8 +387,8 @@ setIMENext = do
 updateIME :: Has env => ReaderT env IO ()
 updateIME = do
   ime <- readRegister offsetHidden
-  when (ime .&. flagSetIME /= 0)
-    $ writeRegister offsetHidden ((ime .|. flagIME) .&. complement flagSetIME)
+  when (ime .&. flagSetIME /= 0) $
+    writeRegister offsetHidden ((ime .|. flagIME) .&. complement flagSetIME)
 
 -- | Check the status of the interrupt flag.
 {-# INLINE testIME #-}
@@ -386,7 +398,7 @@ testIME = do
   pure (ime .&. flagIME /= 0)
 
 -- | Reset the CPU.
-{-# INLINABLE reset #-}
+{-# INLINEABLE reset #-}
 reset :: (Has env, Bus.Has env) => ReaderT env IO ()
 reset = do
   State {..} <- asks forState
@@ -408,7 +420,7 @@ reset = do
   liftIO $ writeIORef cpuMode ModeNormal
   liftIO $ writeIORef haltBug False
   writeUnboxedRef cycleClocks 4
-  writeUnboxedRef callDepth   0
+  writeUnboxedRef callDepth 0
   Backtrace.reset backtrace
 
   Memory.writeByte P1 0xFF
@@ -502,34 +514,31 @@ reset = do
     for_ ([0xFF80 ..] `zip` atFF80) (uncurry Memory.writeByte)
 
     replicateM_ 2462 Bus.delay
-
- where
-  -- Values that would be written by the boot ROM if we had one.
-  atFF80 =
-    [0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B]
-      ++ [0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D]
-      ++ [0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E]
-      ++ [0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99]
-      ++ [0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC]
-      ++ [0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E]
+  where
+    -- Values that would be written by the boot ROM if we had one.
+    atFF80 =
+      [0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B]
+        ++ [0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D]
+        ++ [0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E]
+        ++ [0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99]
+        ++ [0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC]
+        ++ [0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E]
 
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}
 adder8 :: Word8 -> Word8 -> Word16 -> Word16 -> (Word8, Word8)
 adder8 a1 a2 wa2' carry =
-  let
-    wa1     = fromIntegral a1
-    wa2     = fromIntegral a2
-    wr      = wa1 + wa2' + carry
-    r       = fromIntegral wr
-    carryH  = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
-    carryCY = (wr .&. 0x0100) /= 0
-    flags =
-      (if r == 0 then flagZ else 0)
-        .|. (if carryH then flagH else 0)
-        .|. (if carryCY then flagCY else 0)
-  in
-    (r, flags)
+  let wa1 = fromIntegral a1
+      wa2 = fromIntegral a2
+      wr = wa1 + wa2' + carry
+      r = fromIntegral wr
+      carryH = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
+      carryCY = (wr .&. 0x0100) /= 0
+      flags =
+        (if r == 0 then flagZ else 0)
+          .|. (if carryH then flagH else 0)
+          .|. (if carryCY then flagCY else 0)
+   in (r, flags)
 
 getCarry :: Has env => ReaderT env IO Word16
 getCarry = do
@@ -543,10 +552,10 @@ negative1 = negate 1
 {-# INLINE inc8 #-}
 inc8 :: Word8 -> Word8 -> (Word8, Word8)
 inc8 value x =
-  let r      = value + x
+  let r = value + x
       carryH = (value .&. 0x10) /= (r .&. 0x010)
-      flags  = (if r == 0 then flagZ else 0) .|. (if carryH then flagH else 0)
-  in  (r, flags)
+      flags = (if r == 0 then flagZ else 0) .|. (if carryH then flagH else 0)
+   in (r, flags)
 
 flagDoubleSpeed :: Word8
 flagDoubleSpeed = 0x80
@@ -555,28 +564,28 @@ flagSpeedSwitch :: Word8
 flagSpeedSwitch = 0x01
 
 interruptVector :: Interrupt -> Word16
-interruptVector InterruptVBlank            = 0x40
-interruptVector InterruptLCDCStat          = 0x48
-interruptVector InterruptTimerOverflow     = 0x50
+interruptVector InterruptVBlank = 0x40
+interruptVector InterruptLCDCStat = 0x48
+interruptVector InterruptTimerOverflow = 0x50
 interruptVector InterruptEndSerialTransfer = 0x58
-interruptVector InterruptP1Low             = 0x60
-interruptVector InterruptCancelled         = 0
+interruptVector InterruptP1Low = 0x60
+interruptVector InterruptCancelled = 0
 
 -- | Fetch, decode, and execute a single instruction.
-{-# INLINABLE step #-}
+{-# INLINEABLE step #-}
 step :: (Has env, Bus.Has env) => ReaderT env IO ()
 step = do
   State {..} <- asks forState
 
-  ime        <- testIME
+  ime <- testIME
   updateIME
 
   -- Deal with HALT mode
   mode <- liftIO (readIORef cpuMode)
   case mode of
     ModeNormal -> do
-      pc         <- readPC
-      byte       <- Bus.read pc
+      pc <- readPC
+      byte <- Bus.read pc
       interrupts <- pendingEnabledInterrupts portIF portIE
       if interrupts /= 0 && ime
         then handleInterrupt interrupts
@@ -608,24 +617,23 @@ step = do
           if ime
             then Bus.delay >> handleInterrupt interrupts
             else run (decodeAndExecute =<< nextByte)
+  where
+    handleInterrupt interrupts = do
+      State {..} <- asks forState
+      Bus.delay
+      Bus.delay
+      sp <- readR16 RegSP
+      writeR16 RegSP (sp - 2)
+      Bus.write (sp - 1) =<< readRHalf RegPCH
+      ie <- directReadPort portIE
+      Bus.write (sp - 2) =<< readRHalf RegPCL
 
- where
-  handleInterrupt interrupts = do
-    State {..} <- asks forState
-    Bus.delay
-    Bus.delay
-    sp <- readR16 RegSP
-    writeR16 RegSP (sp - 2)
-    Bus.write (sp - 1) =<< readRHalf RegPCH
-    ie <- directReadPort portIE
-    Bus.write (sp - 2) =<< readRHalf RegPCL
-
-    let nextInterrupt = getNextInterrupt (interrupts .&. ie)
-    let vector        = interruptVector nextInterrupt
-    callStackPushed vector
-    writePC vector
-    clearIME
-    clearInterrupt portIF nextInterrupt
+      let nextInterrupt = getNextInterrupt (interrupts .&. ie)
+      let vector = interruptVector nextInterrupt
+      callStackPushed vector
+      writePC vector
+      clearIME
+      clearInterrupt portIF nextInterrupt
 
 {-# INLINE getCycleClocks #-}
 getCycleClocks :: Has env => ReaderT env IO Int
@@ -654,8 +662,8 @@ getBacktrace = do
 callStackPushed :: Has env => Word16 -> ReaderT env IO ()
 callStackPushed offset = do
   State {..} <- asks forState
-  bank       <- Memory.getBank offset
-  d          <- readUnboxedRef callDepth
+  bank <- Memory.getBank offset
+  d <- readUnboxedRef callDepth
   writeUnboxedRef callDepth (d + 1)
   Backtrace.push backtrace bank offset
 
@@ -663,7 +671,7 @@ callStackPushed offset = do
 callStackPopped :: Has env => ReaderT env IO ()
 callStackPopped = do
   State {..} <- asks forState
-  d          <- readUnboxedRef callDepth
+  d <- readUnboxedRef callDepth
   writeUnboxedRef callDepth (d - 1)
   Backtrace.pop backtrace
 
@@ -780,8 +788,8 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE ldhl #-}
   ldhl i = M $ do
     sp <- fromIntegral <$> readR16 RegSP
-    let wi      = fromIntegral i :: Int32
-    let wr      = sp + wi
+    let wi = fromIntegral i :: Int32
+    let wr = sp + wi
     let carryH = (sp .&. 0x00000010) `xor` (wi .&. 0x00000010) /= (wr .&. 0x00000010)
     let carryCY = (sp .&. 0x00000100) `xor` (wi .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegHL (fromIntegral wr)
@@ -834,7 +842,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
 
   {-# INLINE sbcr #-}
   sbcr r = M $ do
-    v     <- readR8 r
+    v <- readR8 r
     carry <- getCarry
     sub8 v (negate carry)
 
@@ -845,7 +853,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
 
   {-# INLINE sbchl #-}
   sbchl = M $ do
-    v     <- Bus.read =<< readR16 RegHL
+    v <- Bus.read =<< readR16 RegHL
     carry <- getCarry
     sub8 v (negate carry)
 
@@ -906,7 +914,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE inchl #-}
   inchl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     let (v', flags) = inc8 v 1
     setFlagsMask allExceptCY flags
     Bus.write hl v'
@@ -921,7 +929,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE dechl #-}
   dechl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     let (v', flags) = inc8 v negative1
     setFlagsMask allExceptCY (flags .|. flagN)
     Bus.write hl v'
@@ -929,10 +937,10 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE addhlss #-}
   addhlss ss = M $ do
     hl <- readR16 RegHL
-    v  <- readR16 ss
-    let hl'     = fromIntegral hl
-    let v'      = fromIntegral v
-    let wr      = hl' + v' :: Word32
+    v <- readR16 ss
+    let hl' = fromIntegral hl
+    let v' = fromIntegral v
+    let wr = hl' + v' :: Word32
     let carryH = (hl' .&. 0x00001000) `xor` (v' .&. 0x00001000) /= (wr .&. 0x00001000)
     let carryCY = (wr .&. 0x00010000) /= 0
     writeR16 RegHL (fromIntegral wr)
@@ -942,9 +950,9 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE addSP #-}
   addSP e = M $ do
     sp <- readR16 RegSP
-    let sp'     = fromIntegral sp
-    let e'      = fromIntegral e
-    let wr      = e' + sp' :: Int32
+    let sp' = fromIntegral sp
+    let e' = fromIntegral e
+    let wr = e' + sp' :: Int32
     let carryH = (sp' .&. 0x00000010) `xor` (e' .&. 0x00000010) /= (wr .&. 0x00000010)
     let carryCY = (sp' .&. 0x00000100) `xor` (e' .&. 0x00000100) /= (wr .&. 0x00000100)
     writeR16 RegSP (fromIntegral (wr .&. 0xFFFF))
@@ -998,7 +1006,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE rlchl #-}
   rlchl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< rlc v
 
   {-# INLINE rlr #-}
@@ -1007,7 +1015,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE rlhl #-}
   rlhl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< rl v
 
   {-# INLINE rrcr #-}
@@ -1016,7 +1024,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE rrchl #-}
   rrchl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< rrc v
 
   {-# INLINE rrr #-}
@@ -1025,7 +1033,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE rrhl #-}
   rrhl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< rr v
 
   {-# INLINE slar #-}
@@ -1034,7 +1042,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE slahl #-}
   slahl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< sla v
 
   {-# INLINE srar #-}
@@ -1043,7 +1051,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE srahl #-}
   srahl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< sra v
 
   {-# INLINE srlr #-}
@@ -1052,7 +1060,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE srlhl #-}
   srlhl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< srl v
 
   {-# INLINE swapr #-}
@@ -1061,7 +1069,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE swaphl #-}
   swaphl = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl =<< swap v
 
   {-# INLINE bitr #-}
@@ -1082,7 +1090,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE sethl #-}
   sethl b = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl (v `setBit` fromIntegral b)
 
   {-# INLINE resr #-}
@@ -1093,7 +1101,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE reshl #-}
   reshl b = M $ do
     hl <- readR16 RegHL
-    v  <- Bus.read hl
+    v <- Bus.read hl
     Bus.write hl (v `clearBit` fromIntegral b)
 
   {-# INLINE jpnn #-}
@@ -1141,19 +1149,20 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE daa #-}
   daa = M $ do
     flags <- readF
-    a     <- readR8 RegA
-    let isH   = isFlagSet flagH flags
-    let isN   = isFlagSet flagN flags
-    let isCy  = isFlagSet flagCY flags
+    a <- readR8 RegA
+    let isH = isFlagSet flagH flags
+    let isN = isFlagSet flagN flags
+    let isCy = isFlagSet flagCY flags
     let aWide = fromIntegral a :: Int
 
-    let rWide = if isN
-          then
-            let aWide' = if isH then (aWide - 0x06) .&. 0xFF else aWide
-            in  if isCy then aWide' - 0x60 else aWide'
-          else
-            let aWide' = if isH || aWide .&. 0x0F > 9 then aWide + 0x06 else aWide
-            in  if isCy || aWide' > 0x9F then aWide' + 0x60 else aWide'
+    let rWide =
+          if isN
+            then
+              let aWide' = if isH then (aWide - 0x06) .&. 0xFF else aWide
+               in if isCy then aWide' - 0x60 else aWide'
+            else
+              let aWide' = if isH || aWide .&. 0x0F > 9 then aWide + 0x06 else aWide
+               in if isCy || aWide' > 0x9F then aWide' + 0x60 else aWide'
 
     let r = fromIntegral (rWide .&. 0xFF)
     writeR8 RegA r
@@ -1188,22 +1197,23 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   halt = M $ do
     State {..} <- asks forState
     interrupts <- pendingEnabledInterrupts portIF portIE
-    ime        <- testIME
+    ime <- testIME
     when (not ime && interrupts /= 0) $ liftIO $ writeIORef haltBug True
     setMode ModeHalt
 
   {-# INLINE stop #-}
   stop = M $ do
     State {..} <- asks forState
-    key1       <- directReadPort portKEY1
+    key1 <- directReadPort portKEY1
     if isFlagSet flagSpeedSwitch key1
-      then if isFlagSet flagDoubleSpeed key1
-        then do
-          directWritePort portKEY1 0x7E
-          writeUnboxedRef cycleClocks 4
-        else do
-          directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
-          writeUnboxedRef cycleClocks 2
+      then
+        if isFlagSet flagDoubleSpeed key1
+          then do
+            directWritePort portKEY1 0x7E
+            writeUnboxedRef cycleClocks 4
+          else do
+            directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
+            writeUnboxedRef cycleClocks 2
       else setMode ModeStop
 
   {-# INLINE invalid #-}
@@ -1243,7 +1253,7 @@ push16 value = do
 {-# INLINE pop16 #-}
 pop16 :: (Has env, Bus.Has env) => ReaderT env IO Word16
 pop16 = do
-  sp     <- readR16 RegSP
+  sp <- readR16 RegSP
   valueL <- Bus.read sp
   valueH <- Bus.read (sp + 1)
   writeR16 RegSP (sp + 2)

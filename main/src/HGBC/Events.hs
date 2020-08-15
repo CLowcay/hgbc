@@ -1,26 +1,28 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module HGBC.Events
-  ( Event(..)
-  , Channel
-  , newChannel
-  , send
-  , waitAction
+  ( Event (..),
+    Channel,
+    newChannel,
+    send,
+    waitAction,
   )
 where
 
-import           Control.Concurrent.STM
-import           Control.Exception              ( IOException )
-import           Control.Monad.IO.Class
-import           Machine.GBC.Disassembler
-import qualified Machine.GBC.Errors            as GBC
+import Control.Concurrent.STM
+import Control.Exception (IOException)
+import Control.Monad.IO.Class
+import Machine.GBC.Disassembler
+import qualified Machine.GBC.Errors as GBC
 
 data Event
   = Resumed
   | Paused
   | Fault GBC.Fault
-  | Statistics Double Int          -- ^ Time in seconds * emulator clock.
-  | IOWarning String IOException   -- ^ A non-fatal IO error occured.
+  | -- | Time in seconds * emulator clock.
+    Statistics Double Int
+  | -- | A non-fatal IO error occured.
+    IOWarning String IOException
   | BreakPointSet LongAddress
   | BreakPointDisabled LongAddress
   | BreakPointRemoved LongAddress

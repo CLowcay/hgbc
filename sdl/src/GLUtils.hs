@@ -1,76 +1,76 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE DeriveAnyClass #-}
 
 -- | OpenGL utility and convenience functions.
 module GLUtils
-  ( OpenGLError(..)
+  ( OpenGLError (..),
 
-  -- * Matrices
-  , GLmatrix(..)
-  , GLmatrix4(..)
+    -- * Matrices
+    GLmatrix (..),
+    GLmatrix4 (..),
 
-  -- * Uniforms
-  , linkUniform
+    -- * Uniforms
+    linkUniform,
 
-  -- * Vertex array objects
-  , VertexArrayObject
-  , genVertexArrayObject
-  , bindVertexArrayObject
+    -- * Vertex array objects
+    VertexArrayObject,
+    genVertexArrayObject,
+    bindVertexArrayObject,
 
-  -- * Attributes
-  , Attribute(..)
-  , AttributeDivisor(..)
-  , IntegerHandling(..)
-  , NumComponents
-  , ElementDataType(..)
-  , Offset
-  , Stride
-  , linkAttribute
+    -- * Attributes
+    Attribute (..),
+    AttributeDivisor (..),
+    IntegerHandling (..),
+    NumComponents,
+    ElementDataType (..),
+    Offset,
+    Stride,
+    linkAttribute,
 
-  -- * Buffers
-  , BufferObject(..)
-  , BufferTarget(..)
-  , BufferUpdateStrategy(..)
-  , genBuffer
-  , bindBuffer
-  , makeVertexBuffer
-  , makeElementBuffer
-  , makeWritablePersistentBuffer
-  , linkTextureBuffer
-  , linkTextureBufferRange
-  , linkUniformBuffer
+    -- * Buffers
+    BufferObject (..),
+    BufferTarget (..),
+    BufferUpdateStrategy (..),
+    genBuffer,
+    bindBuffer,
+    makeVertexBuffer,
+    makeElementBuffer,
+    makeWritablePersistentBuffer,
+    linkTextureBuffer,
+    linkTextureBufferRange,
+    linkUniformBuffer,
 
-  -- * Textures
-  , Texture(..)
-  , TextureUnit(..)
-  , TextureTarget(..)
-  , activeTextureUnit
-  , genTexture
-  , bindTexture
+    -- * Textures
+    Texture (..),
+    TextureUnit (..),
+    TextureTarget (..),
+    activeTextureUnit,
+    genTexture,
+    bindTexture,
 
-  -- * Programs
-  , Program(..)
-  , ShaderType(..)
-  , useProgram
-  , compileShaders
+    -- * Programs
+    Program (..),
+    ShaderType (..),
+    useProgram,
+    compileShaders,
   )
 where
 
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Resource
-import           Data.Bits
-import           Data.Foldable
-import           Data.StateVar
-import           Foreign.ForeignPtr
-import           Foreign.Marshal.Alloc
-import           Foreign.Marshal.Array
-import           Foreign.Ptr
-import           Foreign.Storable
-import           Graphics.GL.Core44
-import qualified Data.ByteString               as B
+import Control.Exception
+import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Resource
+import Data.Bits
+import qualified Data.ByteString as B
+import Data.Foldable
+import Data.StateVar
+import Foreign.ForeignPtr
+import Foreign.Marshal.Alloc
+import Foreign.Marshal.Array
+import Foreign.Ptr
+import Foreign.Storable
+import Graphics.GL.Core44
 
 data OpenGLError = OpenGLError String !B.ByteString deriving (Eq, Ord, Show, Exception)
 
@@ -99,12 +99,13 @@ newtype GLmatrix4 = GLmatrix4 (ForeignPtr Float)
 -- | Load matrix data (data must be in column major order).
 instance GLmatrix GLmatrix4 where
   {-# INLINE makeMatrix #-}
-  makeMatrix elements = if length elements /= 16
-    then error "Invalid args to makeMatrix"
-    else do
-      fptr <- liftIO (mallocForeignPtrArray 16)
-      liftIO . withForeignPtr fptr $ \ptr -> pokeArray ptr elements
-      pure (GLmatrix4 fptr)
+  makeMatrix elements =
+    if length elements /= 16
+      then error "Invalid args to makeMatrix"
+      else do
+        fptr <- liftIO (mallocForeignPtrArray 16)
+        liftIO . withForeignPtr fptr $ \ptr -> pokeArray ptr elements
+        pure (GLmatrix4 fptr)
 
 instance UniformAccess GLmatrix4 where
   {-# INLINE getUniform #-}
@@ -124,12 +125,12 @@ linkUniform (Program program) uniform = liftIO $ do
   pure (makeStateVar (getUniform program uniformLocation) (setUniform uniformLocation))
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
-{-# INLINABLE linkTextureBuffer #-}
+{-# INLINEABLE linkTextureBuffer #-}
 linkTextureBuffer :: MonadIO m => BufferObject -> m ()
 linkTextureBuffer (BufferObject buffer) = glTexBuffer GL_TEXTURE_BUFFER GL_R8UI buffer
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
-{-# INLINABLE linkTextureBufferRange #-}
+{-# INLINEABLE linkTextureBufferRange #-}
 linkTextureBufferRange :: MonadIO m => BufferObject -> GLintptr -> GLsizeiptr -> m ()
 linkTextureBufferRange (BufferObject buffer) = glTexBufferRange GL_TEXTURE_BUFFER GL_R8UI buffer
 
@@ -146,38 +147,40 @@ bindVertexArrayObject :: MonadIO m => VertexArrayObject -> m ()
 bindVertexArrayObject (VertexArrayObject vao) = glBindVertexArray vao
 
 -- | How to convert and normalize vertex attribute elements.
-data IntegerHandling = NormalizeToFloat
-                     | ConvertToFloat
-                     | KeepInteger
-                     deriving (Eq, Ord, Show, Bounded, Enum)
+data IntegerHandling
+  = NormalizeToFloat
+  | ConvertToFloat
+  | KeepInteger
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Number of components in a vertex attribute.
 type NumComponents = GLint
 
 -- | Element data type of a vertex attribute.
-data ElementDataType = Bytes
-                     | Shorts
-                     | Ints
-                     | UnsignedBytes
-                     | UnsignedShorts
-                     | UnsignedInts
-                     | Floats
-                     | HalfFloats
-                     | Doubles
-                     | Fixeds
-                     deriving (Eq, Ord, Show, Bounded, Enum)
+data ElementDataType
+  = Bytes
+  | Shorts
+  | Ints
+  | UnsignedBytes
+  | UnsignedShorts
+  | UnsignedInts
+  | Floats
+  | HalfFloats
+  | Doubles
+  | Fixeds
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum ElementDataType where
-  toOpenGLEnum Bytes          = GL_BYTE
-  toOpenGLEnum Shorts         = GL_SHORT
-  toOpenGLEnum Ints           = GL_INT
-  toOpenGLEnum UnsignedBytes  = GL_UNSIGNED_BYTE
+  toOpenGLEnum Bytes = GL_BYTE
+  toOpenGLEnum Shorts = GL_SHORT
+  toOpenGLEnum Ints = GL_INT
+  toOpenGLEnum UnsignedBytes = GL_UNSIGNED_BYTE
   toOpenGLEnum UnsignedShorts = GL_UNSIGNED_SHORT
-  toOpenGLEnum UnsignedInts   = GL_UNSIGNED_INT
-  toOpenGLEnum Floats         = GL_FLOAT
-  toOpenGLEnum HalfFloats     = GL_HALF_FLOAT
-  toOpenGLEnum Doubles        = GL_DOUBLE
-  toOpenGLEnum Fixeds         = GL_FIXED
+  toOpenGLEnum UnsignedInts = GL_UNSIGNED_INT
+  toOpenGLEnum Floats = GL_FLOAT
+  toOpenGLEnum HalfFloats = GL_HALF_FLOAT
+  toOpenGLEnum Doubles = GL_DOUBLE
+  toOpenGLEnum Fixeds = GL_FIXED
 
 data AttributeDivisor = PerVertex | PerInstance deriving (Eq, Ord, Show, Bounded, Enum)
 
@@ -185,53 +188,59 @@ data AttributeDivisor = PerVertex | PerInstance deriving (Eq, Ord, Show, Bounded
 data Attribute = Attribute !B.ByteString !NumComponents !ElementDataType !AttributeDivisor !IntegerHandling deriving (Eq, Show)
 
 type Offset = IntPtr
+
 type Stride = GLsizei
 
 -- | Set the offset and stride of an 'Attribute' in the current vertex buffer.
-{-# INLINABLE linkAttribute #-}
+{-# INLINEABLE linkAttribute #-}
 linkAttribute :: Program -> Attribute -> Offset -> Stride -> IO ()
-linkAttribute (Program program) (Attribute name numComponents elementType divisor integerHandling) offset stride
-  = do
+linkAttribute (Program program) (Attribute name numComponents elementType divisor integerHandling) offset stride =
+  do
     attribute <- fromIntegral <$> B.useAsCString name (glGetAttribLocation program)
     glEnableVertexAttribArray attribute
     case integerHandling of
       NormalizeToFloat -> vertexAttribPointerFloat attribute GL_TRUE
-      ConvertToFloat   -> vertexAttribPointerFloat attribute GL_FALSE
-      KeepInteger      -> glVertexAttribIPointer attribute
-                                                 numComponents
-                                                 (toOpenGLEnum elementType)
-                                                 stride
-                                                 (intPtrToPtr offset)
+      ConvertToFloat -> vertexAttribPointerFloat attribute GL_FALSE
+      KeepInteger ->
+        glVertexAttribIPointer
+          attribute
+          numComponents
+          (toOpenGLEnum elementType)
+          stride
+          (intPtrToPtr offset)
     handleDivisor attribute
- where
-  handleDivisor attribute = case divisor of
-    PerVertex   -> pure ()
-    PerInstance -> glVertexAttribDivisor attribute 1
-  vertexAttribPointerFloat attribute normalize = glVertexAttribPointer attribute
-                                                                       numComponents
-                                                                       (toOpenGLEnum elementType)
-                                                                       normalize
-                                                                       stride
-                                                                       (intPtrToPtr offset)
+  where
+    handleDivisor attribute = case divisor of
+      PerVertex -> pure ()
+      PerInstance -> glVertexAttribDivisor attribute 1
+    vertexAttribPointerFloat attribute normalize =
+      glVertexAttribPointer
+        attribute
+        numComponents
+        (toOpenGLEnum elementType)
+        normalize
+        stride
+        (intPtrToPtr offset)
 
 -- | A buffer of some sort.
 newtype BufferObject = BufferObject GLuint deriving (Eq, Show)
 
 -- | The buffer types that we can bind.
-data BufferTarget = ArrayBuffer
-                  | ElementArrayBuffer
-                  | TextureBufferBuffer
-                  | UniformBuffer
-                  | PixelUpload
-                  deriving (Eq, Ord, Show, Bounded, Enum)
+data BufferTarget
+  = ArrayBuffer
+  | ElementArrayBuffer
+  | TextureBufferBuffer
+  | UniformBuffer
+  | PixelUpload
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Get the OpenGL enum for a 'BufferTarget'.
 instance OpenGLEnum BufferTarget where
-  toOpenGLEnum ArrayBuffer         = GL_ARRAY_BUFFER
-  toOpenGLEnum ElementArrayBuffer  = GL_ELEMENT_ARRAY_BUFFER
+  toOpenGLEnum ArrayBuffer = GL_ARRAY_BUFFER
+  toOpenGLEnum ElementArrayBuffer = GL_ELEMENT_ARRAY_BUFFER
   toOpenGLEnum TextureBufferBuffer = GL_TEXTURE_BUFFER
-  toOpenGLEnum UniformBuffer       = GL_UNIFORM_BUFFER
-  toOpenGLEnum PixelUpload         = GL_PIXEL_UNPACK_BUFFER
+  toOpenGLEnum UniformBuffer = GL_UNIFORM_BUFFER
+  toOpenGLEnum PixelUpload = GL_PIXEL_UNPACK_BUFFER
 
 -- | Generate an empty buffer object.
 {-# INLINE genBuffer #-}
@@ -244,18 +253,18 @@ bindBuffer :: MonadIO m => BufferTarget -> BufferObject -> m ()
 bindBuffer target (BufferObject bo) = glBindBuffer (toOpenGLEnum target) bo
 
 -- | Create and initialize a vertex buffer.
-{-# INLINABLE makeVertexBuffer #-}
-makeVertexBuffer :: MonadIO m => forall a . Storable a => [a] -> m BufferObject
+{-# INLINEABLE makeVertexBuffer #-}
+makeVertexBuffer :: MonadIO m => forall a. Storable a => [a] -> m BufferObject
 makeVertexBuffer = makeBuffer ArrayBuffer
 
 -- | Create and initialize an element buffer.
-{-# INLINABLE makeElementBuffer #-}
+{-# INLINEABLE makeElementBuffer #-}
 makeElementBuffer :: MonadIO m => [GLuint] -> m BufferObject
 makeElementBuffer = makeBuffer ElementArrayBuffer
 
 -- | Make a static buffer.
 {-# INLINE makeBuffer #-}
-makeBuffer :: forall m a . (MonadIO m, Storable a) => BufferTarget -> [a] -> m BufferObject
+makeBuffer :: forall m a. (MonadIO m, Storable a) => BufferTarget -> [a] -> m BufferObject
 makeBuffer bufferTarget vdata = do
   bo <- capture (glGenBuffers 1)
   glBindBuffer target bo
@@ -263,32 +272,36 @@ makeBuffer bufferTarget vdata = do
     let bufferSize = fromIntegral (length vdata * sizeOf (undefined :: a))
     glBufferData target bufferSize pData GL_STATIC_DRAW
     pure (BufferObject bo)
-  where target = toOpenGLEnum bufferTarget
+  where
+    target = toOpenGLEnum bufferTarget
 
 -- | The strategy for propagating changes to a persistent buffer back to OpenGL.
-data BufferUpdateStrategy = Coherent       -- ^ Writes are propagated immediately.
-                          | ExplicitFlush  -- ^ Writes are never propagated until glFlush is executed.
-                          deriving (Eq, Ord, Show, Bounded, Enum)
+data BufferUpdateStrategy
+  = -- | Writes are propagated immediately.
+    Coherent
+  | -- | Writes are never propagated until glFlush is executed.
+    ExplicitFlush
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Allocate and bind a coherent writeable persistent buffer.
-{-# INLINABLE makeWritablePersistentBuffer #-}
-makeWritablePersistentBuffer
-  :: MonadIO m => BufferUpdateStrategy -> BufferTarget -> GLsizeiptr -> m (BufferObject, Ptr a)
+{-# INLINEABLE makeWritablePersistentBuffer #-}
+makeWritablePersistentBuffer ::
+  MonadIO m => BufferUpdateStrategy -> BufferTarget -> GLsizeiptr -> m (BufferObject, Ptr a)
 makeWritablePersistentBuffer updateStrategy bufferTarget size = do
   bo <- capture (glGenBuffers 1)
   glBindBuffer target bo
   glBufferStorage target size nullPtr storageFlags
   ptr <- glMapBufferRange target 0 size mapFlags
   pure (BufferObject bo, ptr)
- where
-  target                   = toOpenGLEnum bufferTarget
-  baseFlags                = GL_MAP_WRITE_BIT .|. GL_MAP_PERSISTENT_BIT
-  (storageFlags, mapFlags) = case updateStrategy of
-    Coherent      -> (baseFlags .|. GL_MAP_COHERENT_BIT, baseFlags .|. GL_MAP_COHERENT_BIT)
-    ExplicitFlush -> (baseFlags, baseFlags .|. GL_MAP_FLUSH_EXPLICIT_BIT)
+  where
+    target = toOpenGLEnum bufferTarget
+    baseFlags = GL_MAP_WRITE_BIT .|. GL_MAP_PERSISTENT_BIT
+    (storageFlags, mapFlags) = case updateStrategy of
+      Coherent -> (baseFlags .|. GL_MAP_COHERENT_BIT, baseFlags .|. GL_MAP_COHERENT_BIT)
+      ExplicitFlush -> (baseFlags, baseFlags .|. GL_MAP_FLUSH_EXPLICIT_BIT)
 
 -- | Bind a buffer to a buffer-backed uniform.
-{-# INLINABLE linkUniformBuffer #-}
+{-# INLINEABLE linkUniformBuffer #-}
 linkUniformBuffer :: MonadIO m => Program -> B.ByteString -> BufferObject -> GLuint -> m ()
 linkUniformBuffer (Program program) uniform (BufferObject buffer) bindingLocation = do
   glBindBufferBase GL_UNIFORM_BUFFER bindingLocation buffer
@@ -311,16 +324,17 @@ activeTextureUnit (TextureUnit tu) = glActiveTexture (GL_TEXTURE0 + fromIntegral
 newtype Texture = Texture GLuint deriving (Eq, Show)
 
 -- | An OpenGL texture target.
-data TextureTarget = Texture1D
-                   | Texture2D
-                   | Texture3D
-                   | TextureBuffer
-                   deriving (Eq, Ord, Show, Bounded, Enum)
+data TextureTarget
+  = Texture1D
+  | Texture2D
+  | Texture3D
+  | TextureBuffer
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum TextureTarget where
-  toOpenGLEnum Texture1D     = GL_TEXTURE_1D
-  toOpenGLEnum Texture2D     = GL_TEXTURE_2D
-  toOpenGLEnum Texture3D     = GL_TEXTURE_3D
+  toOpenGLEnum Texture1D = GL_TEXTURE_1D
+  toOpenGLEnum Texture2D = GL_TEXTURE_2D
+  toOpenGLEnum Texture3D = GL_TEXTURE_3D
   toOpenGLEnum TextureBuffer = GL_TEXTURE_BUFFER
 
 -- | Make a new texture.
@@ -333,21 +347,22 @@ bindTexture :: MonadIO m => TextureTarget -> Texture -> m ()
 bindTexture target (Texture texture) = glBindTexture (toOpenGLEnum target) texture
 
 -- | A shader type.
-data ShaderType = ComputeShader
-                | VertexShader
-                | TessControlShader
-                | TessEvaluationShader
-                | GeometryShader
-                | FragmentShader
-                deriving (Eq, Ord, Show, Bounded, Enum)
+data ShaderType
+  = ComputeShader
+  | VertexShader
+  | TessControlShader
+  | TessEvaluationShader
+  | GeometryShader
+  | FragmentShader
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum ShaderType where
-  toOpenGLEnum ComputeShader        = GL_COMPUTE_SHADER
-  toOpenGLEnum VertexShader         = GL_VERTEX_SHADER
-  toOpenGLEnum TessControlShader    = GL_TESS_CONTROL_SHADER
+  toOpenGLEnum ComputeShader = GL_COMPUTE_SHADER
+  toOpenGLEnum VertexShader = GL_VERTEX_SHADER
+  toOpenGLEnum TessControlShader = GL_TESS_CONTROL_SHADER
   toOpenGLEnum TessEvaluationShader = GL_TESS_EVALUATION_SHADER
-  toOpenGLEnum GeometryShader       = GL_GEOMETRY_SHADER
-  toOpenGLEnum FragmentShader       = GL_FRAGMENT_SHADER
+  toOpenGLEnum GeometryShader = GL_GEOMETRY_SHADER
+  toOpenGLEnum FragmentShader = GL_FRAGMENT_SHADER
 
 -- A shader program.
 newtype Program = Program GLuint deriving (Eq, Show)
@@ -358,7 +373,7 @@ useProgram :: MonadIO m => Program -> m ()
 useProgram (Program program) = glUseProgram program
 
 -- | Compile and link a set of shaders.
-{-# INLINABLE compileShaders #-}
+{-# INLINEABLE compileShaders #-}
 compileShaders :: MonadUnliftIO m => [(ShaderType, B.ByteString)] -> m Program
 compileShaders shaders = runResourceT $ do
   (programKey, program) <- allocate glCreateProgram glDeleteProgram
@@ -368,32 +383,31 @@ compileShaders shaders = runResourceT $ do
   isLinked <- capture (glGetProgramiv program GL_LINK_STATUS)
   when (isLinked == 0) . liftIO $ do
     logLength <- capture (glGetProgramiv program GL_INFO_LOG_LENGTH)
-    message   <- allocaBytes (fromIntegral logLength) $ \ptr -> do
+    message <- allocaBytes (fromIntegral logLength) $ \ptr -> do
       glGetProgramInfoLog program (fromIntegral logLength) nullPtr ptr
       B.packCString ptr
     throwIO (OpenGLError "Program linkage failed" message)
 
   void (unprotect programKey)
   pure (Program program)
+  where
+    loadShader program (shaderType, source) = do
+      (_, shader) <- allocate (glCreateShader (toOpenGLEnum shaderType)) glDeleteShader
+      liftIO . B.useAsCString source $ \pSource -> alloca $ \ppSource -> do
+        poke ppSource pSource
+        glShaderSource shader 1 ppSource nullPtr
+      glCompileShader shader
 
- where
-  loadShader program (shaderType, source) = do
-    (_, shader) <- allocate (glCreateShader (toOpenGLEnum shaderType)) glDeleteShader
-    liftIO . B.useAsCString source $ \pSource -> alloca $ \ppSource -> do
-      poke ppSource pSource
-      glShaderSource shader 1 ppSource nullPtr
-    glCompileShader shader
+      compilePassed <- capture (glGetShaderiv shader GL_COMPILE_STATUS)
+      when (compilePassed == 0) . liftIO $ do
+        logLength <- capture (glGetShaderiv shader GL_INFO_LOG_LENGTH)
+        message <- allocaBytes (fromIntegral logLength) $ \ptr -> do
+          glGetShaderInfoLog shader (fromIntegral logLength) nullPtr ptr
+          B.packCString ptr
+        throwIO (OpenGLError "Shader compilation failed" message)
 
-    compilePassed <- capture (glGetShaderiv shader GL_COMPILE_STATUS)
-    when (compilePassed == 0) . liftIO $ do
-      logLength <- capture (glGetShaderiv shader GL_INFO_LOG_LENGTH)
-      message   <- allocaBytes (fromIntegral logLength) $ \ptr -> do
-        glGetShaderInfoLog shader (fromIntegral logLength) nullPtr ptr
-        B.packCString ptr
-      throwIO (OpenGLError "Shader compilation failed" message)
-
-    void (allocate (shader <$ glAttachShader program shader) (glDetachShader program))
-    pure shader
+      void (allocate (shader <$ glAttachShader program shader) (glDetachShader program))
+      pure shader
 
 -- | Utility to deal with foreign functions that use pointers to return values.
 {-# INLINE capture #-}

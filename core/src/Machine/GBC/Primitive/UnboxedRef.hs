@@ -1,14 +1,14 @@
 module Machine.GBC.Primitive.UnboxedRef
-  ( UnboxedRef
-  , newUnboxedRef
-  , writeUnboxedRef
-  , readUnboxedRef
+  ( UnboxedRef,
+    newUnboxedRef,
+    writeUnboxedRef,
+    readUnboxedRef,
   )
 where
 
-import           Control.Monad.IO.Class
-import           Data.Primitive
-import           GHC.Exts
+import Control.Monad.IO.Class
+import Data.Primitive
+import GHC.Exts
 
 newtype UnboxedRef a = UnboxedRef (MutablePrimArray RealWorld a)
 

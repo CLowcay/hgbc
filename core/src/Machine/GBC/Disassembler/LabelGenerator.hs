@@ -1,14 +1,14 @@
-{-# LANGUAGE  OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Machine.GBC.Disassembler.LabelGenerator
-  ( nextGlobalLabel
-  , nextLocalLabel
+  ( nextGlobalLabel,
+    nextLocalLabel,
   )
 where
 
-import           System.IO.Unsafe
-import qualified Data.Text                     as T
-import           Data.IORef
+import Data.IORef
+import qualified Data.Text as T
+import System.IO.Unsafe
 
 {-# NOINLINE globalCounter #-}
 globalCounter :: IORef Int

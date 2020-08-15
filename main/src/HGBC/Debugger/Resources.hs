@@ -2,25 +2,25 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module HGBC.Debugger.Resources
-  ( css
-  , js
-  , svgRun
-  , svgPause
-  , svgStep
-  , svgStepout
-  , svgStepthrough
-  , svgReset
-  , svgRunto
-  , svgBreakpoint
-  , svgBreakpointDisabled
-  , svgHome
-  , svgLabel
-  , svgDownload
+  ( css,
+    js,
+    svgRun,
+    svgPause,
+    svgStep,
+    svgStepout,
+    svgStepthrough,
+    svgReset,
+    svgRunto,
+    svgBreakpoint,
+    svgBreakpointDisabled,
+    svgHome,
+    svgLabel,
+    svgDownload,
   )
 where
 
-import           Data.FileEmbed
-import qualified Data.ByteString.Lazy          as LB
+import qualified Data.ByteString.Lazy as LB
+import Data.FileEmbed
 
 svgRun :: LB.ByteString
 svgRun = LB.fromStrict $(embedOneFileOf ["data/play.svg", "../data/play.svg"])
@@ -48,8 +48,9 @@ svgBreakpoint :: LB.ByteString
 svgBreakpoint = LB.fromStrict $(embedOneFileOf ["data/breakpoint.svg", "../data/breakpoint.svg"])
 
 svgBreakpointDisabled :: LB.ByteString
-svgBreakpointDisabled = LB.fromStrict
-  $(embedOneFileOf ["data/breakpoint_disabled.svg", "../data/breakpoint_disabled.svg"])
+svgBreakpointDisabled =
+  LB.fromStrict
+    $(embedOneFileOf ["data/breakpoint_disabled.svg", "../data/breakpoint_disabled.svg"])
 
 svgHome :: LB.ByteString
 svgHome = LB.fromStrict $(embedOneFileOf ["data/home.svg", "../data/home.svg"])
@@ -61,7 +62,7 @@ svgDownload :: LB.ByteString
 svgDownload = LB.fromStrict $(embedOneFileOf ["data/download.svg", "../data/download.svg"])
 
 css :: LB.ByteString
-css = LB.fromStrict $(embedOneFileOf ["data/debugger.css","../data/debugger.css"])
+css = LB.fromStrict $(embedOneFileOf ["data/debugger.css", "../data/debugger.css"])
 
 js :: LB.ByteString
-js = LB.fromStrict $(embedOneFileOf ["data/debugger.js","../data/debugger.js"])
+js = LB.fromStrict $(embedOneFileOf ["data/debugger.js", "../data/debugger.js"])

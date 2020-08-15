@@ -1,24 +1,24 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Machine.GBC.DecodeSpec
-  ( spec
+  ( spec,
   )
 where
 
-import           Control.Monad.Reader
-import           Control.Monad.State
-import           Data.Bits
-import           Data.Word
-import           Machine.GBC.CPU.Decode
-import           Machine.GBC.CPU.ISA
-import           Machine.GBC.Util
-import           Test.Hspec
+import Control.Monad.Reader
+import Control.Monad.State
+import Data.Bits
+import Data.Word
+import Machine.GBC.CPU.Decode
+import Machine.GBC.CPU.ISA
+import Machine.GBC.Util
+import Test.Hspec
 
-newtype DecodeM a = DecodeM { runDecodeM :: StateT [Word8] Maybe a }
+newtype DecodeM a = DecodeM {runDecodeM :: StateT [Word8] Maybe a}
   deriving (Monad, Applicative, Functor)
 
 instance MonadFetch DecodeM where
@@ -36,16 +36,16 @@ instance MonadGMBZ80 DecodeM where
   ldHLn n = pure ("LD (HL), " <> formatHex n)
   ldaBC = pure "LD A, (BC)"
   ldaDE = pure "LD A, (DE)"
-  ldaC  = pure "LD A, (C)"
-  ldCa  = pure "LD (C), A"
+  ldaC = pure "LD A, (C)"
+  ldCa = pure "LD (C), A"
   ldan n = pure ("LD A, (FF" <> formatHex n <> ")")
   ldna n = pure ("LD (FF" <> formatHex n <> "), A")
   ldann nn = pure ("LD A, (" <> formatHex nn <> ")")
   ldnna nn = pure ("LD (" <> formatHex nn <> "), A")
   ldaHLI = pure "LD A, (HLI)"
   ldaHLD = pure "LD A, (HLD)"
-  ldBCa  = pure "LD (BC), A"
-  ldDEa  = pure "LD (DE), A"
+  ldBCa = pure "LD (BC), A"
+  ldDEa = pure "LD (DE), A"
   ldHLIa = pure "LD (HLI), A"
   ldHLDa = pure "LD (HLD), A"
   ldddnn dd nn = pure ("LD " <> show dd <> ", " <> formatHex nn)
@@ -87,9 +87,9 @@ instance MonadGMBZ80 DecodeM where
   incss ss = pure ("INC " <> show ss)
   decss ss = pure ("DEC " <> show ss)
   rlca = pure "RLCA"
-  rla  = pure "RLA"
+  rla = pure "RLA"
   rrca = pure "RRCA"
-  rra  = pure "RRA"
+  rra = pure "RRA"
   rlcr r = pure ("RLC " <> show r)
   rlchl = pure "RLC (HL)"
   rlr r = pure ("RL " <> show r)
@@ -119,17 +119,17 @@ instance MonadGMBZ80 DecodeM where
   jrcc cc i = pure ("JR " <> show cc <> ", " <> formatHex i)
   call nn = pure ("CALL " <> formatHex nn)
   callcc cc nn = pure ("CALL " <> show cc <> ", " <> formatHex nn)
-  ret  = pure "RET"
+  ret = pure "RET"
   reti = pure "RETI"
   retcc cc = pure ("RET " <> show cc)
   rst i = pure ("RST " <> show i)
-  daa  = pure "DAA"
-  cpl  = pure "CPL"
-  nop  = pure "NOP"
-  ccf  = pure "CCF"
-  scf  = pure "SCF"
-  di   = pure "DI"
-  ei   = pure "EI"
+  daa = pure "DAA"
+  cpl = pure "CPL"
+  nop = pure "NOP"
+  ccf = pure "CCF"
+  scf = pure "SCF"
+  di = pure "DI"
+  ei = pure "EI"
   halt = pure "HALT"
   stop = pure "STOP"
   invalid b = pure (".data " <> formatHex b)
@@ -138,7 +138,7 @@ decodesTo :: [Word8] -> String -> IO ()
 decodesTo encoding expectedDecoding = do
   let result = runStateT (runDecodeM (decodeAndExecute =<< nextByte)) encoding
   case result of
-    Nothing                    -> expectationFailure "Failed to decode instruction"
+    Nothing -> expectationFailure "Failed to decode instruction"
     Just (decoding, remainder) -> do
       decoding `shouldBe` expectedDecoding
       remainder `shouldBe` []

@@ -1,33 +1,34 @@
 module Machine.GBC.CPU.Interrupts
-  ( Interrupt(..)
-  , flagInterrupt
-  , raiseInterrupt
-  , clearInterrupt
-  , pendingEnabledInterrupts
-  , getNextInterrupt
+  ( Interrupt (..),
+    flagInterrupt,
+    raiseInterrupt,
+    clearInterrupt,
+    pendingEnabledInterrupts,
+    getNextInterrupt,
   )
 where
 
-import           Control.Monad.IO.Class
-import           Data.Bits
-import           Data.Word
-import           Machine.GBC.Primitive
+import Control.Monad.IO.Class
+import Data.Bits
+import Data.Word
+import Machine.GBC.Primitive
 
-data Interrupt = InterruptVBlank
-               | InterruptLCDCStat
-               | InterruptTimerOverflow
-               | InterruptEndSerialTransfer
-               | InterruptP1Low
-               | InterruptCancelled
-               deriving (Eq, Ord, Show, Bounded, Enum)
+data Interrupt
+  = InterruptVBlank
+  | InterruptLCDCStat
+  | InterruptTimerOverflow
+  | InterruptEndSerialTransfer
+  | InterruptP1Low
+  | InterruptCancelled
+  deriving (Eq, Ord, Show, Bounded, Enum)
 
 flagInterrupt :: Interrupt -> Word8
-flagInterrupt InterruptVBlank            = 0x01
-flagInterrupt InterruptLCDCStat          = 0x02
-flagInterrupt InterruptTimerOverflow     = 0x04
+flagInterrupt InterruptVBlank = 0x01
+flagInterrupt InterruptLCDCStat = 0x02
+flagInterrupt InterruptTimerOverflow = 0x04
 flagInterrupt InterruptEndSerialTransfer = 0x08
-flagInterrupt InterruptP1Low             = 0x10
-flagInterrupt InterruptCancelled         = 0
+flagInterrupt InterruptP1Low = 0x10
+flagInterrupt InterruptCancelled = 0
 
 {-# INLINE raiseInterrupt #-}
 raiseInterrupt :: MonadIO m => Port -> Interrupt -> m ()
@@ -46,7 +47,7 @@ clearInterrupt portIF interrupt = do
 pendingEnabledInterrupts :: MonadIO m => Port -> Port -> m Word8
 pendingEnabledInterrupts portIF portIE = do
   interrupt <- directReadPort portIF
-  enabled   <- directReadPort portIE
+  enabled <- directReadPort portIE
   pure (interrupt .&. enabled .&. 0x1F)
 
 -- | Get the next interrupt to service.

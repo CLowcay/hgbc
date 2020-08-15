@@ -1,42 +1,49 @@
 {-# LANGUAGE RecordWildCards #-}
+
 module Window
-  ( Window
-  , Notification(..)
-  , sdlWindow
-  , new
-  , send
-  , dispatchEvent
+  ( Window,
+    Notification (..),
+    sdlWindow,
+    new,
+    send,
+    dispatchEvent,
   )
 where
 
-import           Control.Concurrent
-import           Control.Exception
-import           Control.Monad.IO.Class
-import           Data.Int
-import           Prelude                 hiding ( lookup )
+import Control.Concurrent
+import Control.Exception
+import Control.Monad.IO.Class
+import Data.Int
 import qualified SDL
+import Prelude hiding (lookup)
 
 -- | Notification of a window event.
 data Notification
-  = Close                      -- ^ The window was closed.
-  | Paused                     -- ^ The emulator has been paused.
-  | Fault                      -- ^ The emulator has stopped after a fault.
-  | Resumed                    -- ^ The emulator has been resumed.
-  | SizeChanged (SDL.V2 Int32) -- ^ The window size was changed.
-  | Moved (SDL.Point SDL.V2 Int32) -- ^ The window was moved.
+  = -- | The window was closed.
+    Close
+  | -- | The emulator has been paused.
+    Paused
+  | -- | The emulator has stopped after a fault.
+    Fault
+  | -- | The emulator has been resumed.
+    Resumed
+  | -- | The window size was changed.
+    SizeChanged (SDL.V2 Int32)
+  | -- | The window was moved.
+    Moved (SDL.Point SDL.V2 Int32)
   deriving (Eq, Ord, Show)
 
 instance Exception Notification
 
 -- | A wrapper over an SDL 'SDL.Window'.
 data Window = Window
-  { sdlWindow :: SDL.Window
-  , threadId  :: ThreadId
+  { sdlWindow :: SDL.Window,
+    threadId :: ThreadId
   }
 
 -- | Create a new 'Window' from an 'SDL.Window'.
 new :: SDL.Window -> ThreadId -> Window
-new sdlWindow threadId = Window { .. }
+new sdlWindow threadId = Window {..}
 
 -- | Send a 'Notification' to a window.
 send :: MonadIO m => Window -> Notification -> m ()
@@ -52,6 +59,6 @@ dispatchEvent lookup event = case event of
   (SDL.WindowMovedEvent (SDL.WindowMovedEventData window position)) ->
     maybeSend (lookup window) (Moved position)
   _ -> pure ()
- where
-  maybeSend Nothing       _            = pure ()
-  maybeSend (Just window) notification = send window notification
+  where
+    maybeSend Nothing _ = pure ()
+    maybeSend (Just window) notification = send window notification

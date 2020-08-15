@@ -1,23 +1,23 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module HGBC.Debugger.Disassembly
-  ( get
-  , set
-  , getAll
-  , getN
+  ( get,
+    set,
+    getAll,
+    getN,
   )
 where
 
-import           Data.IORef
-import           Data.String
-import           HGBC.Debugger.State
-import           Machine.GBC.Disassembler
-import qualified HGBC.Debugger.JSON            as JSON
-import qualified Data.Aeson.Encoding           as JSON
-import qualified Data.ByteString.Builder       as BB
-import qualified Data.ByteString.Lazy.Char8    as LBC
-import qualified Data.HashMap.Strict           as HM
-import qualified Data.Text.Lazy                as LT
+import qualified Data.Aeson.Encoding as JSON
+import qualified Data.ByteString.Builder as BB
+import qualified Data.ByteString.Lazy.Char8 as LBC
+import qualified Data.HashMap.Strict as HM
+import Data.IORef
+import Data.String
+import qualified Data.Text.Lazy as LT
+import qualified HGBC.Debugger.JSON as JSON
+import HGBC.Debugger.State
+import Machine.GBC.Disassembler
 
 get :: DebugState -> IO Disassembly
 get debugState = readIORef (disassemblyRef debugState)
@@ -28,11 +28,12 @@ set debugState disassembly = writeIORef (disassemblyRef debugState) $! disassemb
 getAll :: DebugState -> IO LT.Text
 getAll debugState = do
   disassembly <- readIORef (disassemblyRef debugState)
-  labels      <- readIORef (labelsRef debugState)
+  labels <- readIORef (labelsRef debugState)
   pure
-    (";; " <> fromString (romFileName debugState) <> "\n\n" <> generateOutput
-      disassembly
-      ((fst <$>) . (`HM.lookup` labels))
+    ( ";; " <> fromString (romFileName debugState) <> "\n\n"
+        <> generateOutput
+          disassembly
+          ((fst <$>) . (`HM.lookup` labels))
     )
 
 getN :: DebugState -> LongAddress -> Int -> IO LBC.ByteString

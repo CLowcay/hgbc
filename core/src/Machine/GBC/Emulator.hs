@@ -2,60 +2,60 @@
 {-# LANGUAGE RecursiveDo #-}
 
 module Machine.GBC.Emulator
-  ( State(..)
-  , init
-  , getClock
-  , step
-  , keyDown
-  , keyUp
-  , writeBgPalette
-  , writeSpritePalette
+  ( State (..),
+    init,
+    getClock,
+    step,
+    keyDown,
+    keyUp,
+    writeBgPalette,
+    writeSpritePalette,
   )
 where
 
-import           Control.Applicative
-import           Control.Monad.Reader
-import           Data.Functor
-import           Data.IORef
-import           Data.Maybe
-import           Data.Word
-import           Foreign.Ptr
-import           Machine.GBC.Graphics.VRAM
-import           Machine.GBC.Mode
-import           Machine.GBC.Primitive
-import           Machine.GBC.Primitive.UnboxedRef
-import           Machine.GBC.ROM
-import           Machine.GBC.Registers
-import           Prelude                 hiding ( init )
-import qualified Data.ByteString               as B
-import qualified Data.Vector.Storable          as VS
-import qualified Machine.GBC.Audio             as Audio
-import qualified Machine.GBC.Bus               as Bus
-import qualified Machine.GBC.CPU               as CPU
-import qualified Machine.GBC.Color             as Color
-import qualified Machine.GBC.DMA               as DMA
-import qualified Machine.GBC.Graphics          as Graphics
-import qualified Machine.GBC.Keypad            as Keypad
-import qualified Machine.GBC.Memory            as Memory
-import qualified Machine.GBC.Serial            as Serial
-import qualified Machine.GBC.Timer             as Timer
+import Control.Applicative
+import Control.Monad.Reader
+import qualified Data.ByteString as B
+import Data.Functor
+import Data.IORef
+import Data.Maybe
+import qualified Data.Vector.Storable as VS
+import Data.Word
+import Foreign.Ptr
+import qualified Machine.GBC.Audio as Audio
+import qualified Machine.GBC.Bus as Bus
+import qualified Machine.GBC.CPU as CPU
+import qualified Machine.GBC.Color as Color
+import qualified Machine.GBC.DMA as DMA
+import qualified Machine.GBC.Graphics as Graphics
+import Machine.GBC.Graphics.VRAM
+import qualified Machine.GBC.Keypad as Keypad
+import qualified Machine.GBC.Memory as Memory
+import Machine.GBC.Mode
+import Machine.GBC.Primitive
+import Machine.GBC.Primitive.UnboxedRef
+import Machine.GBC.ROM
+import Machine.GBC.Registers
+import qualified Machine.GBC.Serial as Serial
+import qualified Machine.GBC.Timer as Timer
+import Prelude hiding (init)
 
-data State = State {
-    mode            :: !EmulatorMode
-  , memory          :: !Memory.State
-  , vram            :: !VRAM
-  , cpu             :: !CPU.State
-  , dmaState        :: !DMA.State
-  , graphicsState   :: !Graphics.State
-  , graphicsSync    :: !Graphics.Sync
-  , keypadState     :: !Keypad.State
-  , timerState      :: !Timer.State
-  , audioState      :: !Audio.State
-  , serialState     :: !Serial.State
-  , hblankPending   :: !(IORef Bool) -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
-  , currentTime     :: !(UnboxedRef Int) -- Time in clocks
-  , lastEventPoll   :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
-}
+data State = State
+  { mode :: !EmulatorMode,
+    memory :: !Memory.State,
+    vram :: !VRAM,
+    cpu :: !CPU.State,
+    dmaState :: !DMA.State,
+    graphicsState :: !Graphics.State,
+    graphicsSync :: !Graphics.Sync,
+    keypadState :: !Keypad.State,
+    timerState :: !Timer.State,
+    audioState :: !Audio.State,
+    serialState :: !Serial.State,
+    hblankPending :: !(IORef Bool), -- Set if there is an HBlank but we're not ready to do HBlank DMA yet
+    currentTime :: !(UnboxedRef Int), -- Time in clocks
+    lastEventPoll :: !(UnboxedRef Int) -- The time of the last event poll (in clocks)
+  }
 
 instance Memory.Has State where
   {-# INLINE forState #-}
@@ -68,43 +68,43 @@ instance CPU.Has State where
 -- | Create a new 'State' given a 'ROM', a 'GraphicsSync', and a pointer
 -- to the output frame buffer. The frame buffer is a 32bit RGB buffer with
 -- 160x144 pixels.
-init
-  :: Maybe B.ByteString
-  -> ROM
-  -> Maybe EmulatorMode
-  -> Color.Correction
-  -> Serial.Sync
-  -> Graphics.Sync
-  -> Ptr Word8
-  -> IO State
+init ::
+  Maybe B.ByteString ->
+  ROM ->
+  Maybe EmulatorMode ->
+  Color.Correction ->
+  Serial.Sync ->
+  Graphics.Sync ->
+  Ptr Word8 ->
+  IO State
 init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBufferBytes = mdo
   let bootMode = bootROM <&> \content -> if B.length content > 0x100 then CGB else DMG
   let romMode = case cgbSupport (romHeader rom) of
-        CGBCompatible   -> CGB
-        CGBExclusive    -> CGB
+        CGBCompatible -> CGB
+        CGBExclusive -> CGB
         CGBIncompatible -> DMG
   let mode = fromMaybe romMode (requestedMode <|> bootMode)
   vram <- initVRAM colorCorrection
 
   writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True  0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True  1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  writeRGBPalette vram True 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  writeRGBPalette vram True 1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
 
-  modeRef       <- newIORef mode
-  portIF        <- newPort 0xE0 0x1F alwaysUpdate
-  portIE        <- newPort 0x00 0xFF alwaysUpdate
+  modeRef <- newIORef mode
+  portIF <- newPort 0xE0 0x1F alwaysUpdate
+  portIE <- newPort 0x00 0xFF alwaysUpdate
 
-  cpu           <- CPU.init portIF portIE modeRef
-  dmaState      <- DMA.init vram modeRef
+  cpu <- CPU.init portIF portIE modeRef
+  dmaState <- DMA.init vram modeRef
   graphicsState <- Graphics.init vram modeRef frameBufferBytes portIF
-  keypadState   <- Keypad.init portIF
-  audioState    <- Audio.init
-  timerState    <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
-  serialState   <- Serial.init serialSync portIF modeRef
+  keypadState <- Keypad.init portIF
+  audioState <- Audio.init
+  timerState <- Timer.init (Audio.clockFrameSequencer audioState) (CPU.portKEY1 cpu) portIF
+  serialState <- Serial.init serialSync portIF modeRef
 
   let allPorts =
-        (IF, portIF)
-          :  CPU.ports cpu
+        (IF, portIF) :
+        CPU.ports cpu
           ++ DMA.ports dmaState
           ++ Graphics.ports graphicsState
           ++ Keypad.ports keypadState
@@ -115,10 +115,10 @@ init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBuff
   memory <- Memory.initForROM (VS.fromList . B.unpack <$> bootROM) rom vram allPorts portIE modeRef
 
   hblankPending <- newIORef False
-  currentTime   <- newUnboxedRef 0
+  currentTime <- newUnboxedRef 0
   lastEventPoll <- newUnboxedRef 0
 
-  let emulatorState = State { .. }
+  let emulatorState = State {..}
   pure emulatorState
 
 instance Bus.Has State where
@@ -144,11 +144,11 @@ instance Bus.Has State where
 updateTime :: Int -> ReaderT State IO ()
 updateTime clocks = do
   time <- asks currentTime
-  now  <- readUnboxedRef time
+  now <- readUnboxedRef time
   writeUnboxedRef time (now + clocks)
 
 -- | Get the number of clocks since the emulator started.
-{-# INLINABLE getClock #-}
+{-# INLINEABLE getClock #-}
 getClock :: ReaderT State IO Int
 getClock = readUnboxedRef =<< asks currentTime
 

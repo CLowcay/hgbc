@@ -1,74 +1,75 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 -- | This module contains pattern synonyms for the hardware registers.
-module Machine.GBC.Registers (
-    pattern P1
-  , pattern SB
-  , pattern SC
-  , pattern DIV
-  , pattern TIMA
-  , pattern TMA
-  , pattern TAC
-  , pattern NR10
-  , pattern NR11
-  , pattern NR12
-  , pattern NR13
-  , pattern NR14
-  , pattern NR20
-  , pattern NR21
-  , pattern NR22
-  , pattern NR23
-  , pattern NR24
-  , pattern NR30
-  , pattern NR31
-  , pattern NR32
-  , pattern NR33
-  , pattern NR34
-  , pattern NR40
-  , pattern NR41
-  , pattern NR42
-  , pattern NR43
-  , pattern NR44
-  , pattern NR50
-  , pattern NR51
-  , pattern NR52
-  , pattern IF
-  , pattern LCDC
-  , pattern STAT
-  , pattern SCY
-  , pattern SCX
-  , pattern LY
-  , pattern LYC
-  , pattern DMA
-  , pattern BGP
-  , pattern OBP0
-  , pattern OBP1
-  , pattern WY
-  , pattern WX
-  , pattern R4C
-  , pattern KEY1
-  , pattern VBK
-  , pattern BLCK
-  , pattern HDMA1
-  , pattern HDMA2
-  , pattern HDMA3
-  , pattern HDMA4
-  , pattern HDMA5
-  , pattern RP
-  , pattern BCPS
-  , pattern BCPD
-  , pattern OCPS
-  , pattern OCPD
-  , pattern R6C
-  , pattern SVBK
-  , pattern R72
-  , pattern R73
-  , pattern R74
-  , pattern R75
-  , pattern PCM12
-  , pattern PCM34
-  , pattern IE
-  ) where
+module Machine.GBC.Registers
+  ( pattern P1,
+    pattern SB,
+    pattern SC,
+    pattern DIV,
+    pattern TIMA,
+    pattern TMA,
+    pattern TAC,
+    pattern NR10,
+    pattern NR11,
+    pattern NR12,
+    pattern NR13,
+    pattern NR14,
+    pattern NR20,
+    pattern NR21,
+    pattern NR22,
+    pattern NR23,
+    pattern NR24,
+    pattern NR30,
+    pattern NR31,
+    pattern NR32,
+    pattern NR33,
+    pattern NR34,
+    pattern NR40,
+    pattern NR41,
+    pattern NR42,
+    pattern NR43,
+    pattern NR44,
+    pattern NR50,
+    pattern NR51,
+    pattern NR52,
+    pattern IF,
+    pattern LCDC,
+    pattern STAT,
+    pattern SCY,
+    pattern SCX,
+    pattern LY,
+    pattern LYC,
+    pattern DMA,
+    pattern BGP,
+    pattern OBP0,
+    pattern OBP1,
+    pattern WY,
+    pattern WX,
+    pattern R4C,
+    pattern KEY1,
+    pattern VBK,
+    pattern BLCK,
+    pattern HDMA1,
+    pattern HDMA2,
+    pattern HDMA3,
+    pattern HDMA4,
+    pattern HDMA5,
+    pattern RP,
+    pattern BCPS,
+    pattern BCPD,
+    pattern OCPS,
+    pattern OCPD,
+    pattern R6C,
+    pattern SVBK,
+    pattern R72,
+    pattern R73,
+    pattern R74,
+    pattern R75,
+    pattern PCM12,
+    pattern PCM34,
+    pattern IE,
+  )
+where
 
 import Data.Word
 

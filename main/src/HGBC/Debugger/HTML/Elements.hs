@@ -1,51 +1,52 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module HGBC.Debugger.HTML.Elements
-  ( html
-  , head
-  , title
-  , charset
-  , meta
-  , link
-  , script
-  , inlineScript
-  , body
-  , h
-  , nav
-  , innerNav
-  , br
-  , p
-  , table
-  , tr
-  , td
-  , tdspan
-  , th
-  , ul
-  , ulid
-  , div
-  , divclass
-  , divclassid
-  , focusDiv
-  , spanclass
-  , img
-  , label
-  , input
-  , value
-  , field
-  , fieldGroup
-  , descField
-  , enableDisable
-  , unused
-  , button
-  , tabs
+  ( html,
+    head,
+    title,
+    charset,
+    meta,
+    link,
+    script,
+    inlineScript,
+    body,
+    h,
+    nav,
+    innerNav,
+    br,
+    p,
+    table,
+    tr,
+    td,
+    tdspan,
+    th,
+    ul,
+    ulid,
+    div,
+    divclass,
+    divclassid,
+    focusDiv,
+    spanclass,
+    img,
+    label,
+    input,
+    value,
+    field,
+    fieldGroup,
+    descField,
+    enableDisable,
+    unused,
+    button,
+    tabs,
   )
 where
 
-import           Data.List               hiding ( head )
-import           Prelude                 hiding ( head
-                                                , div
-                                                )
-import qualified Data.ByteString.Builder       as BB
+import qualified Data.ByteString.Builder as BB
+import Data.List hiding (head)
+import Prelude hiding
+  ( div,
+    head,
+  )
 
 html :: [BB.Builder] -> BB.Builder
 html contents = "<!DOCTYPE html><html>" <> mconcat contents <> "</html>"
@@ -84,9 +85,9 @@ innerNav :: [BB.Builder] -> [BB.Builder] -> BB.Builder
 innerNav contentsLeft contentsRight =
   "<nav class=innerNav>"
     <> mconcat contentsLeft
-    <> (if null contentsRight
-         then ""
-         else "<span class=leftRightSeparator></span>" <> mconcat contentsRight
+    <> ( if null contentsRight
+           then ""
+           else "<span class=leftRightSeparator></span>" <> mconcat contentsRight
        )
     <> "</nav>"
 
@@ -132,10 +133,10 @@ divclass c contents = "<div class=" <> c <> ">" <> mconcat contents <> "</div>"
 
 divclassid :: BB.Builder -> [BB.Builder] -> [BB.Builder] -> BB.Builder
 divclassid did c contents = "<div id=" <> did <> classes c <> ">" <> mconcat contents <> "</div>"
- where
-  classes []   = ""
-  classes [cl] = " class=" <> cl
-  classes cls  = " class='" <> mconcat (intersperse " " cls) <> "'"
+  where
+    classes [] = ""
+    classes [cl] = " class=" <> cl
+    classes cls = " class='" <> mconcat (intersperse " " cls) <> "'"
 
 focusDiv :: BB.Builder -> [BB.Builder] -> BB.Builder
 focusDiv c contents = "<div class=" <> c <> " tabindex=0>" <> mconcat contents <> "</div>"
@@ -187,19 +188,21 @@ button name tt content =
   "<button id=" <> name <> " title='" <> tt <> "'>" <> mconcat content <> "</button>"
 
 tabs :: BB.Builder -> BB.Builder -> [(BB.Builder, [BB.Builder])] -> BB.Builder
-tabs _         _            []       = divclass "tabs" []
-tabs groupName contentClass (t : ts) = divclassid
-  groupName
-  ["tabs"]
-  (tab True (0, t) : (tab False <$> ([1 ..] `zip` ts)))
- where
-  tab checked (i, (name, content)) =
-    let tid = groupName <> "-" <> BB.intDec i
-    in  divclass
-          "tab"
-          [ "<input type=radio name=" <> groupName <> " id=" <> tid <> if checked
-            then " checked>"
-            else ">"
-          , "<label tabindex=0 for=" <> tid <> ">" <> name <> "</label>"
-          , divclass ("'tabContent " <> contentClass <> "'") content
-          ]
+tabs _ _ [] = divclass "tabs" []
+tabs groupName contentClass (t : ts) =
+  divclassid
+    groupName
+    ["tabs"]
+    (tab True (0, t) : (tab False <$> ([1 ..] `zip` ts)))
+  where
+    tab checked (i, (name, content)) =
+      let tid = groupName <> "-" <> BB.intDec i
+       in divclass
+            "tab"
+            [ "<input type=radio name=" <> groupName <> " id=" <> tid
+                <> if checked
+                  then " checked>"
+                  else ">",
+              "<label tabindex=0 for=" <> tid <> ">" <> name <> "</label>",
+              divclass ("'tabContent " <> contentClass <> "'") content
+            ]

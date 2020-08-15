@@ -1,33 +1,34 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module Machine.GBC.MBC.MBC5
-  ( mbc5
+  ( mbc5,
   )
 where
 
-import           Control.Monad
-import           Data.Bits
-import           Data.IORef
-import           Machine.GBC.MBC.Interface
-import           Machine.GBC.Util
-import qualified Data.Vector.Storable.Mutable  as VSM
+import Control.Monad
+import Data.Bits
+import Data.IORef
+import qualified Data.Vector.Storable.Mutable as VSM
+import Machine.GBC.MBC.Interface
+import Machine.GBC.Util
 
 mbc5 :: Int -> Int -> RAMAllocator -> IO MBC
 mbc5 bankMask ramMask ramAllocator = do
-  ramG            <- newIORef False
-  romB0           <- newIORef 1
-  romB1           <- newIORef 0
-  ramB            <- newIORef 0
-  ram             <- ramAllocator 0x40000
+  ramG <- newIORef False
+  romB0 <- newIORef 1
+  romB1 <- newIORef 0
+  ramB <- newIORef 0
+  ram <- ramAllocator 0x40000
 
   cachedROMOffset <- newIORef 0x4000
 
   let updateROMOffset = do
-        low  <- readIORef romB0
+        low <- readIORef romB0
         high <- readIORef romB1
         writeIORef cachedROMOffset ((((high .<<. 8) .|. low) .&. bankMask) .<<. 14)
 
-  let lowBankOffset  = pure 0
+  let lowBankOffset = pure 0
   let highBankOffset = readIORef cachedROMOffset
 
   let ramBankOffset = do
@@ -59,4 +60,4 @@ mbc5 bankMask ramMask ramAllocator = do
         when enabled $ do
           offset <- ramBankOffset
           VSM.unsafeWrite ram (offset + fromIntegral address) value
-  pure MBC { .. }
+  pure MBC {..}

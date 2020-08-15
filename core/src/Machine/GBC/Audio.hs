@@ -3,62 +3,62 @@
 {-# LANGUAGE TupleSections #-}
 
 module Machine.GBC.Audio
-  ( State(..)
-  , init
-  , clockFrameSequencer
-  , ports
-  , step
+  ( State (..),
+    init,
+    clockFrameSequencer,
+    ports,
+    step,
   )
 where
 
-import           Control.Monad.Reader
-import           Data.Bifunctor
-import           Data.Bits
-import           Data.Functor
-import           Data.Word
-import           Machine.GBC.Audio.Common
-import           Machine.GBC.Audio.NoiseChannel
-import           Machine.GBC.Audio.PulseChannel
-import           Machine.GBC.Audio.WaveChannel
-import           Machine.GBC.Primitive
-import           Machine.GBC.Registers
-import           Machine.GBC.Util
-import           Prelude                 hiding ( init )
+import Control.Monad.Reader
+import Data.Bifunctor
+import Data.Bits
+import Data.Functor
+import Data.Word
+import Machine.GBC.Audio.Common
+import Machine.GBC.Audio.NoiseChannel
+import Machine.GBC.Audio.PulseChannel
+import Machine.GBC.Audio.WaveChannel
+import Machine.GBC.Primitive
+import Machine.GBC.Registers
+import Machine.GBC.Util
+import Prelude hiding (init)
 
-data State = State {
-    audioOut       :: !(RingBuffer Word16)
-  , sampler        :: !Counter
-  , frameSequencer :: !(StateCycle FrameSequencerOutput)
-  , port50         :: !Port
-  , port51         :: !Port
-  , port52         :: !Port
-  , portPCM12      :: !Port
-  , portPCM34      :: !Port
-  , channel1       :: !PulseChannel
-  , channel2       :: !PulseChannel
-  , channel3       :: !WaveChannel
-  , channel4       :: !NoiseChannel
-}
+data State = State
+  { audioOut :: !(RingBuffer Word16),
+    sampler :: !Counter,
+    frameSequencer :: !(StateCycle FrameSequencerOutput),
+    port50 :: !Port,
+    port51 :: !Port,
+    port52 :: !Port,
+    portPCM12 :: !Port,
+    portPCM34 :: !Port,
+    channel1 :: !PulseChannel,
+    channel2 :: !PulseChannel,
+    channel3 :: !WaveChannel,
+    channel4 :: !NoiseChannel
+  }
 
 frameSequencerStates :: [(FrameSequencerOutput, Int)]
-frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (, 1)
+frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (,1)
 
 init :: IO State
 init = mdo
-  audioOut       <- newRingBuffer 12
+  audioOut <- newRingBuffer 12
 
-  sampler        <- newCounter 0xFF
+  sampler <- newCounter 0xFF
   frameSequencer <- newStateCycle frameSequencerStates
 
-  channel1       <- newPulseChannel True port52 frameSequencer flagChannel1Enable
-  channel2       <- newPulseChannel False port52 frameSequencer flagChannel2Enable
-  channel3       <- newWaveChannel port52 frameSequencer
-  channel4       <- newNoiseChannel port52 frameSequencer
+  channel1 <- newPulseChannel True port52 frameSequencer flagChannel1Enable
+  channel2 <- newPulseChannel False port52 frameSequencer flagChannel2Enable
+  channel3 <- newWaveChannel port52 frameSequencer
+  channel4 <- newNoiseChannel port52 frameSequencer
 
-  port50         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
-  port51         <- newAudioPort port52 0xFF 0xFF alwaysUpdate
-  port52         <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
-    let masterPower  = isFlagSet flagMasterPower register52
+  port50 <- newAudioPort port52 0xFF 0xFF alwaysUpdate
+  port51 <- newAudioPort port52 0xFF 0xFF alwaysUpdate
+  port52 <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
+    let masterPower = isFlagSet flagMasterPower register52
     let masterPower' = isFlagSet flagMasterPower register52'
     if not masterPower' && masterPower
       then do
@@ -75,7 +75,7 @@ init = mdo
   portPCM12 <- newPort 0x00 0x00 neverUpdate
   portPCM34 <- newPort 0x00 0x00 neverUpdate
 
-  pure State { .. }
+  pure State {..}
 
 ports :: State -> [(Word16, Port)]
 ports State {..} =
@@ -84,11 +84,11 @@ ports State {..} =
     ++ channel2Ports
     ++ channel3Ports
     ++ channel4Ports
- where
-  channel1Ports = first ((+ NR10) . fromIntegral) <$> getPorts channel1
-  channel2Ports = first ((+ NR20) . fromIntegral) <$> getPorts channel2
-  channel3Ports = first ((+ NR30) . fromIntegral) <$> getPorts channel3
-  channel4Ports = first ((+ NR40) . fromIntegral) <$> getPorts channel4
+  where
+    channel1Ports = first ((+ NR10) . fromIntegral) <$> getPorts channel1
+    channel2Ports = first ((+ NR20) . fromIntegral) <$> getPorts channel2
+    channel3Ports = first ((+ NR30) . fromIntegral) <$> getPorts channel3
+    channel4Ports = first ((+ NR40) . fromIntegral) <$> getPorts channel4
 
 samplePeriod :: Int
 samplePeriod = 94
@@ -99,19 +99,19 @@ mixOutputChannel (v1, v2, v3, v4) channelFlags =
       out2 = if channelFlags `testBit` 1 then v2 else 8
       out3 = if channelFlags `testBit` 2 then v3 else 8
       out4 = if channelFlags `testBit` 3 then v4 else 8
-  in  fromIntegral (((out1 + out2 + out3 + out4 - 32) * 4) + 128)
+   in fromIntegral (((out1 + out2 + out3 + out4 - 32) * 4) + 128)
 
 clockFrameSequencer :: State -> IO ()
 clockFrameSequencer State {..} = do
   register52 <- directReadPort port52
-  when (isFlagSet flagMasterPower register52)
-    $ void
-    $ updateStateCycle frameSequencer 1
-    $ \state -> do
-        frameSequencerClock channel1 state
-        frameSequencerClock channel2 state
-        frameSequencerClock channel3 state
-        frameSequencerClock channel4 state
+  when (isFlagSet flagMasterPower register52) $
+    void $
+      updateStateCycle frameSequencer 1 $
+        \state -> do
+          frameSequencerClock channel1 state
+          frameSequencerClock channel2 state
+          frameSequencerClock channel3 state
+          frameSequencerClock channel4 state
 
 step :: State -> Int -> IO ()
 step State {..} clockAdvance = do
@@ -132,10 +132,10 @@ step State {..} clockAdvance = do
 
       register50 <- directReadPort port50
       register51 <- directReadPort port51
-      let volumeLeft  = 8 - (register50 .>>. 4 .&. 0x07)
+      let volumeLeft = 8 - (register50 .>>. 4 .&. 0x07)
       let volumeRight = 8 - (register50 .&. 0x07)
-      let left        = register51 .>>. 4
-      let right       = register51 .&. 0x0F
+      let left = register51 .>>. 4
+      let right = register51 .&. 0x0F
 
       let leftSample = mixOutputChannel (v1, v2, v3, v4) left `div` volumeLeft
       let rightSample = mixOutputChannel (v1, v2, v3, v4) right `div` volumeRight

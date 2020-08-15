@@ -1,35 +1,36 @@
 {-# LANGUAGE RecordWildCards #-}
+
 module Machine.GBC.Audio.Length
-  ( Length
-  , newLength
-  , initLength
-  , powerOffLength
-  , reloadLength
-  , extraClocks
-  , clockLength
+  ( Length,
+    newLength,
+    initLength,
+    powerOffLength,
+    reloadLength,
+    extraClocks,
+    clockLength,
   )
 where
 
-import           Control.Monad
-import           Data.Bits
-import           Data.IORef
-import           Data.Word
-import           Machine.GBC.Audio.Common
-import           Machine.GBC.Primitive
+import Control.Monad
+import Data.Bits
+import Data.IORef
+import Data.Word
+import Machine.GBC.Audio.Common
+import Machine.GBC.Primitive
 
-data Length = Length {
-    bitMask            :: !Word8
-  , reloadValue        :: !Int
-  , counter            :: !Counter
-  , frozen             :: !(IORef Bool) -- Has the length counter clocked to 0 and not been reloaded?
-}
+data Length = Length
+  { bitMask :: !Word8,
+    reloadValue :: !Int,
+    counter :: !Counter,
+    frozen :: !(IORef Bool) -- Has the length counter clocked to 0 and not been reloaded?
+  }
 
 newLength :: Word8 -> IO Length
 newLength bitMask = do
   let reloadValue = 1 + fromIntegral bitMask
   counter <- newCounter (fromIntegral bitMask)
-  frozen  <- newIORef False -- Set when the counter reaches 0 to prevent further clocking.
-  pure Length { .. }
+  frozen <- newIORef False -- Set when the counter reaches 0 to prevent further clocking.
+  pure Length {..}
 
 initLength :: Length -> FrameSequencerOutput -> Bool -> IO ()
 initLength Length {..} frameSequencer enabled = do
@@ -41,8 +42,8 @@ initLength Length {..} frameSequencer enabled = do
   -- Quirk: If we are enabling the length counter, and it is currently 0, and
   -- the last frame sequencer step clocked the length, then clock the length
   -- again.
-  when (enabled && (lastStepClockedLength frameSequencer) && v == 0)
-    $ updateCounter counter 1 (pure 0)
+  when (enabled && (lastStepClockedLength frameSequencer) && v == 0) $
+    updateCounter counter 1 (pure 0)
 
 powerOffLength :: Length -> IO ()
 powerOffLength Length {..} = do
@@ -52,7 +53,7 @@ powerOffLength Length {..} = do
 reloadLength :: Length -> Word8 -> IO ()
 reloadLength Length {..} register =
   let len = fromIntegral (negate (register .&. bitMask) .&. bitMask)
-  in  do
+   in do
         unless (len == 0) $ writeIORef frozen False
         reloadCounter counter len
 
@@ -62,9 +63,10 @@ reloadLength Length {..} register =
 extraClocks :: Length -> FrameSequencerOutput -> IO () -> IO ()
 extraClocks Length {..} frameSequencer action = do
   isFrozen <- readIORef frozen
-  when (lastStepClockedLength frameSequencer && not isFrozen) $ updateCounter counter 1 $ do
-    writeIORef frozen True
-    0 <$ action
+  when (lastStepClockedLength frameSequencer && not isFrozen) $
+    updateCounter counter 1 $ do
+      writeIORef frozen True
+      0 <$ action
 
 {-# INLINE clockLength #-}
 clockLength :: Length -> IO () -> IO ()

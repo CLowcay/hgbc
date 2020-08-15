@@ -1,55 +1,56 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RecursiveDo #-}
+
 module Machine.GBC.Audio.PulseChannel
-  ( PulseChannel
-  , newPulseChannel
+  ( PulseChannel,
+    newPulseChannel,
   )
 where
 
-import           Control.Monad.Reader
-import           Data.Bits
-import           Data.IORef
-import           Data.Word
-import           Machine.GBC.Audio.Common
-import           Machine.GBC.Audio.Envelope
-import           Machine.GBC.Audio.Length
-import           Machine.GBC.Audio.Sweep
-import           Machine.GBC.Primitive
-import           Machine.GBC.Primitive.UnboxedRef
-import           Machine.GBC.Util
+import Control.Monad.Reader
+import Data.Bits
+import Data.IORef
+import Data.Word
+import Machine.GBC.Audio.Common
+import Machine.GBC.Audio.Envelope
+import Machine.GBC.Audio.Length
+import Machine.GBC.Audio.Sweep
+import Machine.GBC.Primitive
+import Machine.GBC.Primitive.UnboxedRef
+import Machine.GBC.Util
 
-data PulseChannel = PulseChannel {
-    output             :: !(UnboxedRef Int)
-  , enable             :: !(IORef Bool)
-  , dacEnable          :: !(IORef Bool)
-  , port0              :: !Port
-  , port1              :: !Port
-  , port2              :: !Port
-  , port3              :: !Port
-  , port4              :: !Port
-  , port52             :: !Port
-  , hasSweepUnit       :: !Bool
-  , channelEnabledFlag :: !Word8
-  , sweepUnit          :: !Sweep
-  , frequencyCounter   :: !Counter
-  , dutyCycle          :: !(UnboxedRef Int)
-  , envelope           :: !Envelope
-  , lengthCounter      :: !Length
-}
+data PulseChannel = PulseChannel
+  { output :: !(UnboxedRef Int),
+    enable :: !(IORef Bool),
+    dacEnable :: !(IORef Bool),
+    port0 :: !Port,
+    port1 :: !Port,
+    port2 :: !Port,
+    port3 :: !Port,
+    port4 :: !Port,
+    port52 :: !Port,
+    hasSweepUnit :: !Bool,
+    channelEnabledFlag :: !Word8,
+    sweepUnit :: !Sweep,
+    frequencyCounter :: !Counter,
+    dutyCycle :: !(UnboxedRef Int),
+    envelope :: !Envelope,
+    lengthCounter :: !Length
+  }
 
 newPulseChannel :: Bool -> Port -> StateCycle FrameSequencerOutput -> Word8 -> IO PulseChannel
 newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
-  output    <- newUnboxedRef 0
-  enable    <- newIORef False
+  output <- newUnboxedRef 0
+  enable <- newIORef False
   dacEnable <- newIORef True
 
-  let port0ReadMask  = if hasSweepUnit then 0x80 else 0xFF
+  let port0ReadMask = if hasSweepUnit then 0x80 else 0xFF
   let port0WriteMask = if hasSweepUnit then 0x7F else 0x00
   port0 <- newAudioPortWithReadMask port52 0xFF port0ReadMask port0WriteMask $ \_ register0 -> do
     when hasSweepUnit $ do
       hasNegated <- hasPerformedSweepCalculationInNegateMode sweepUnit
-      when (hasNegated && not (isFlagSet flagNegate register0))
-        $ disableIO port52 channelEnabledFlag output enable
+      when (hasNegated && not (isFlagSet flagNegate register0)) $
+        disableIO port52 channelEnabledFlag output enable
     pure register0
 
   port1 <- newAudioPortWithReadMask port52 0xFF 0x3F 0xFF $ \_ register1 -> do
@@ -66,8 +67,9 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
     frame <- getStateCycle frameSequencer
-    when (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
-         (extraClocks lengthCounter frame (disableIO port52 channelEnabledFlag output enable))
+    when
+      (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
+      (extraClocks lengthCounter frame (disableIO port52 channelEnabledFlag output enable))
 
     when (isFlagSet flagTrigger register4) $ do
       register0 <- directReadPort port0
@@ -78,10 +80,12 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       updateStatus port52 channelEnabledFlag isDacEnabled
-      when hasSweepUnit $ initSweep sweepUnit
-                                    frequency
-                                    register0
-                                    (disableIO port52 channelEnabledFlag output enable)
+      when hasSweepUnit $
+        initSweep
+          sweepUnit
+          frequency
+          register0
+          (disableIO port52 channelEnabledFlag output enable)
       initLength lengthCounter frame (isFlagSet flagLength register4)
       initEnvelope envelope register2 frame
 
@@ -93,12 +97,12 @@ newPulseChannel hasSweepUnit port52 frameSequencer channelEnabledFlag = mdo
 
     pure register4
 
-  sweepUnit        <- newSweep port3 port4
+  sweepUnit <- newSweep port3 port4
   frequencyCounter <- newCounter 0x7FF
-  dutyCycle        <- newUnboxedRef 0
-  envelope         <- newEnvelope
-  lengthCounter    <- newLength 0x3F
-  pure PulseChannel { .. }
+  dutyCycle <- newUnboxedRef 0
+  envelope <- newEnvelope
+  lengthCounter <- newLength 0x3F
+  pure PulseChannel {..}
 
 disableIO :: Port -> Word8 -> UnboxedRef Int -> IORef Bool -> IO ()
 disableIO port52 channelEnabledFlag output enable = do
@@ -123,9 +127,9 @@ instance Channel PulseChannel where
 
   frameSequencerClock channel@PulseChannel {..} step = do
     register4 <- directReadPort port4
-    when (isLengthClockingStep step && isFlagSet flagLength register4)
-      $ clockLength lengthCounter
-      $ disable channel
+    when (isLengthClockingStep step && isFlagSet flagLength register4) $
+      clockLength lengthCounter $
+        disable channel
     when (isEnvelopeClockingStep step) $ clockEnvelope envelope
     when (hasSweepUnit && isSweepClockingStep step) $ do
       register0 <- directReadPort port0
@@ -133,18 +137,19 @@ instance Channel PulseChannel where
 
   masterClock PulseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
-    when isEnabled $ updateCounter frequencyCounter clockAdvance $ do
-      i0 <- readUnboxedRef dutyCycle
-      let i = (i0 + 1) .&. 7
-      writeUnboxedRef dutyCycle i
+    when isEnabled $
+      updateCounter frequencyCounter clockAdvance $ do
+        i0 <- readUnboxedRef dutyCycle
+        let i = (i0 + 1) .&. 7
+        writeUnboxedRef dutyCycle i
 
-      register1 <- directReadPort port1
-      sample    <- envelopeVolume envelope
-      writeUnboxedRef output (if dutyCycleOutput register1 i then sample else 0)
+        register1 <- directReadPort port1
+        sample <- envelopeVolume envelope
+        writeUnboxedRef output (if dutyCycleOutput register1 i then sample else 0)
 
-      register3 <- directReadPort port3
-      register4 <- directReadPort port4
-      pure (getTimerPeriod (getFrequency register3 register4))
+        register3 <- directReadPort port3
+        register4 <- directReadPort port4
+        pure (getTimerPeriod (getFrequency register3 register4))
 
   directReadPorts PulseChannel {..} =
     (,,,,)

@@ -1,18 +1,18 @@
 module HGBC.Debugger.Breakpoints
-  ( getAsList
-  , check
-  , set
-  , disable
-  , unset
+  ( getAsList,
+    check,
+    set,
+    disable,
+    unset,
   )
 where
 
-import           Control.Exception              ( catch )
-import           Data.Maybe
-import           HGBC.Debugger.State
-import           Machine.GBC.Disassembler
-import qualified Data.HashTable.IO             as H
-import qualified HGBC.Events                   as Event
+import Control.Exception (catch)
+import qualified Data.HashTable.IO as H
+import Data.Maybe
+import HGBC.Debugger.State
+import qualified HGBC.Events as Event
+import Machine.GBC.Disassembler
 
 getAsList :: DebugState -> IO [(LongAddress, Bool)]
 getAsList debugState = H.toList (breakpoints debugState)

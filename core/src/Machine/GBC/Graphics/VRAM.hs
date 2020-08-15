@@ -1,63 +1,64 @@
 {-# LANGUAGE RecordWildCards #-}
+
 module Machine.GBC.Graphics.VRAM
-  ( VRAM
-  , initVRAM
-  , setVRAMAccessible
-  , setOAMAccessible
-  , getVRAMBank
-  , setVRAMBank
-  , writePalette
-  , readPalette
-  , readRGBPalette
-  , writeRGBPalette
-  , readSpritePosition
-  , readSpriteAttributes
-  , readTile
-  , readTileAttrs
-  , readTileData
-  , readBankedTileData
-  , readOAM
-  , writeOAM
-  , writeOAMDirect
-  , readVRAM
-  , readVRAMBankOffset
-  , writeVRAM
+  ( VRAM,
+    initVRAM,
+    setVRAMAccessible,
+    setOAMAccessible,
+    getVRAMBank,
+    setVRAMBank,
+    writePalette,
+    readPalette,
+    readRGBPalette,
+    writeRGBPalette,
+    readSpritePosition,
+    readSpriteAttributes,
+    readTile,
+    readTileAttrs,
+    readTileData,
+    readBankedTileData,
+    readOAM,
+    writeOAM,
+    writeOAMDirect,
+    readVRAM,
+    readVRAMBankOffset,
+    writeVRAM,
   )
 where
 
-import           Control.Monad
-import           Data.Bits
-import           Data.IORef
-import           Data.Word
-import           Machine.GBC.Primitive.UnboxedRef
-import           Machine.GBC.Util
-import qualified Data.Vector.Storable.Mutable  as VSM
-import qualified Machine.GBC.Color             as Color
+import Control.Monad
+import Data.Bits
+import Data.IORef
+import qualified Data.Vector.Storable.Mutable as VSM
+import Data.Word
+import qualified Machine.GBC.Color as Color
+import Machine.GBC.Primitive.UnboxedRef
+import Machine.GBC.Util
 
-data VRAM = VRAM {
-    vram           :: !(VSM.IOVector Word8)
-  , oam            :: !(VSM.IOVector Word8)
-  , rawPalettes    :: !(VSM.IOVector Word16)
-  , rgbPalettes    :: !(VSM.IOVector Word32)
-  , oamAccessible  :: !(IORef Bool)
-  , vramAccessible :: !(IORef Bool)
-  , vramBank       :: !(UnboxedRef Int)
-  , colorFunction  :: !(Color.Correction)
-}
+data VRAM = VRAM
+  { vram :: !(VSM.IOVector Word8),
+    oam :: !(VSM.IOVector Word8),
+    rawPalettes :: !(VSM.IOVector Word16),
+    rgbPalettes :: !(VSM.IOVector Word32),
+    oamAccessible :: !(IORef Bool),
+    vramAccessible :: !(IORef Bool),
+    vramBank :: !(UnboxedRef Int),
+    colorFunction :: !(Color.Correction)
+  }
 
 totalPaletteEntries :: Int
 totalPaletteEntries = 8 * 4 * 2 -- 2 sets of 8 palettes with 4 colors each.
 
 initVRAM :: Color.Correction -> IO VRAM
 initVRAM colorFunction = do
-  vram           <- VSM.new 0x4000
-  oam            <- VSM.new 160
-  oamAccessible  <- newIORef True
+  vram <- VSM.new 0x4000
+  oam <- VSM.new 160
+  oamAccessible <- newIORef True
   vramAccessible <- newIORef True
-  vramBank       <- newUnboxedRef 0
-  rawPalettes    <- VSM.replicate totalPaletteEntries 0x7FFF
-  rgbPalettes    <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
-  pure VRAM { .. }
+  vramBank <- newUnboxedRef 0
+  rawPalettes <- VSM.replicate totalPaletteEntries 0x7FFF
+  rgbPalettes <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
+  pure VRAM {..}
 
 {-# INLINE setVRAMAccessible #-}
 setVRAMAccessible :: VRAM -> Bool -> IO ()
@@ -102,26 +103,29 @@ readRGBPalette :: VRAM -> Bool -> Word8 -> IO Word32
 readRGBPalette VRAM {..} fg addr = VSM.unsafeRead rgbPalettes (paletteIndex fg addr)
 
 -- | Write RGB palette data.
-writeRGBPalette
-  :: VRAM    -- ^ Video RAM.
-  -> Bool    -- ^ True to write a foreground palette, otherwise write a background palette.
-  -> Int     -- ^ The palette number (0 to 7) to write.
-  -> (Word32, Word32, Word32, Word32)
-  -> IO ()
+writeRGBPalette ::
+  -- | Video RAM.
+  VRAM ->
+  -- | True to write a foreground palette, otherwise write a background palette.
+  Bool ->
+  -- | The palette number (0 to 7) to write.
+  Int ->
+  (Word32, Word32, Word32, Word32) ->
+  IO ()
 writeRGBPalette VRAM {..} fg i (c0, c1, c2, c3) =
   let base = 4 * i + if fg then 32 else 0
-  in  do
+   in do
         VSM.write rgbPalettes base (swizzle c0)
         VSM.write rgbPalettes (base + 1) (swizzle c1)
         VSM.write rgbPalettes (base + 2) (swizzle c2)
         VSM.write rgbPalettes (base + 3) (swizzle c3)
- where
-  swizzle x =
-    let r = x .>>. 24
-        g = (x .>>. 16) .&. 0xFF
-        b = (x .>>. 8) .&. 0xFF
-        a = x .&. 0xFF
-    in  (a .<<. 24) .|. (b .<<. 16) .|. (g .<<. 8) .|. r
+  where
+    swizzle x =
+      let r = x .>>. 24
+          g = (x .>>. 16) .&. 0xFF
+          b = (x .>>. 8) .&. 0xFF
+          a = x .&. 0xFF
+       in (a .<<. 24) .|. (b .<<. 16) .|. (g .<<. 8) .|. r
 
 {-# INLINE readSpritePosition #-}
 readSpritePosition :: VRAM -> Int -> IO (Word8, Word8)
@@ -205,8 +209,8 @@ writeVRAM VRAM {..} addr value = do
 
 encodeColor :: Color.Correction -> Word16 -> Word32
 encodeColor correction color =
-  let b            = (color .>>. 10) .&. 0x1F
-      g            = (color .>>. 5) .&. 0x1F
-      r            = color .&. 0x1F
+  let b = (color .>>. 10) .&. 0x1F
+      g = (color .>>. 5) .&. 0x1F
+      r = color .&. 0x1F
       (r', g', b') = correction (r, g, b)
-  in  (b' .<<. 16) .|. (g' .<<. 8) .|. r'
+   in (b' .<<. 16) .|. (g' .<<. 8) .|. r'

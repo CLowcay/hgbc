@@ -1,5 +1,5 @@
 module HGBC.Errors
-  ( FileParseErrors
+  ( FileParseErrors,
   )
 where
 
