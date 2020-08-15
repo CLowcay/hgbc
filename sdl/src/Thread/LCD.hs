@@ -4,51 +4,54 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Thread.LCD
-  ( start
+  ( start,
   )
 where
 
-import           Control.Concurrent
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Identity
-import           Data.FileEmbed
-import           Data.Functor
-import           Data.StateVar
-import           Data.Word
-import           Foreign.Ptr
-import           GLUtils
-import           Graphics.GL.Core44
-import           SDL.Extras
-import qualified Data.ByteString               as B
-import qualified Data.Text                     as T
+import Control.Concurrent
+import Control.Exception
+import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Identity
+import qualified Data.ByteString as B
+import Data.FileEmbed
+import Data.Functor
+import Data.StateVar
+import qualified Data.Text as T
+import Data.Word
+import Foreign.Ptr
+import GLUtils
+import Graphics.GL.Core44
 import qualified HGBC.Config
-import qualified Machine.GBC.Graphics          as Graphics
+import qualified Machine.GBC.Graphics as Graphics
 import qualified SDL
+import SDL.Extras
 import qualified SDL.Raw
+import System.FilePath
 import qualified Window
 
 -- | Window state.
-data WindowContext = WindowContext {
-    sdlWindow       :: !SDL.Window
-  , romFileName     :: !FilePath
-  , sync            :: !Graphics.Sync
-  , displayIndex    :: !DisplayIndex  -- ^ The SDL display that the current window is centred on.
-  , framesPerVsync  :: !Double
-  , speed           :: !Double        -- ^ Speed relative to full speed (60fps)
-  , glState         :: !GLState
-}
+data WindowContext = WindowContext
+  { sdlWindow :: !SDL.Window,
+    romFileName :: !FilePath,
+    sync :: !Graphics.Sync,
+    -- | The SDL display that the current window is centred on.
+    displayIndex :: !DisplayIndex,
+    framesPerVsync :: !Double,
+    -- | Speed relative to full speed (60fps)
+    speed :: !Double,
+    glState :: !GLState
+  }
 
 -- | OpenGL state variables.
-data GLState = GLState {
-    scaleProgram            :: !Program
-  , aspectCorrection        :: !(StateVar GLmatrix4)
-  , frameVAO                :: !VertexArrayObject
-  , frameTexture            :: !Texture
-  , frameTextureBuffer      :: !BufferObject
-  , frameTextureBufferBytes :: !(Ptr Word8)
-}
+data GLState = GLState
+  { scaleProgram :: !Program,
+    aspectCorrection :: !(StateVar GLmatrix4),
+    frameVAO :: !VertexArrayObject,
+    frameTexture :: !Texture,
+    frameTextureBuffer :: !BufferObject,
+    frameTextureBufferBytes :: !(Ptr Word8)
+  }
 
 data WindowStatus = Running | Paused | Fault deriving (Eq, Ord, Show)
 
@@ -56,38 +59,41 @@ windowTitle :: FilePath -> WindowStatus -> T.Text
 windowTitle romFileName status =
   let prefix = case status of
         Running -> "GBC - "
-        Paused  -> "GBC *paused* - "
-        Fault   -> "GBC *fault* - "
-  in  prefix <> T.pack romFileName
+        Paused -> "GBC *paused* - "
+        Fault -> "GBC *fault* - "
+   in prefix <> T.pack (takeFileName romFileName)
 
 getFramesPerVsync :: DisplayIndex -> Double -> IO Double
-getFramesPerVsync display speed = getCurrentDisplayMode display <&> \case
-  Nothing -> 1
-  Just mode ->
-    let rawRefreshRate = SDL.Raw.displayModeRefreshRate mode
-        refreshRate    = (15 :: Int) * round (fromIntegral rawRefreshRate / 15.0 :: Double)
-    in  fromIntegral refreshRate / (60.0 * speed)
+getFramesPerVsync display speed =
+  getCurrentDisplayMode display <&> \case
+    Nothing -> 1
+    Just mode ->
+      let rawRefreshRate = SDL.Raw.displayModeRefreshRate mode
+          refreshRate = (15 :: Int) * round (fromIntegral rawRefreshRate / 15.0 :: Double)
+       in fromIntegral refreshRate / (60.0 * speed)
 
 -- | Initialize a window, and start the rendering thread.
 start :: FilePath -> HGBC.Config.Config k Identity -> Graphics.Sync -> IO (Window.Window, Ptr Word8)
 start romFileName HGBC.Config.Config {..} sync = do
-  let glConfig = SDL.defaultOpenGL { SDL.glProfile = SDL.Core SDL.Normal 4 4 }
-  sdlWindow <- SDL.createWindow
-    (windowTitle romFileName Running)
-    SDL.defaultWindow { SDL.windowInitialSize = fromIntegral <$> SDL.V2 (160 * scale) (144 * scale)
-                      , SDL.windowGraphicsContext = SDL.OpenGLContext glConfig
-                      , SDL.windowResizable = True
-                      }
-  displayIndex          <- getWindowDisplayIndex sdlWindow
-  framesPerVsync        <- getFramesPerVsync displayIndex speed
+  let glConfig = SDL.defaultOpenGL {SDL.glProfile = SDL.Core SDL.Normal 4 4}
+  sdlWindow <-
+    SDL.createWindow
+      (windowTitle romFileName Running)
+      SDL.defaultWindow
+        { SDL.windowInitialSize = fromIntegral <$> SDL.V2 (160 * scale) (144 * scale),
+          SDL.windowGraphicsContext = SDL.OpenGLContext glConfig,
+          SDL.windowResizable = True
+        }
+  displayIndex <- getWindowDisplayIndex sdlWindow
+  framesPerVsync <- getFramesPerVsync displayIndex speed
   frameBufferPointerRef <- newEmptyMVar
-  threadId              <- forkOS $ do
+  threadId <- forkOS $ do
     void (SDL.glCreateContext sdlWindow)
     SDL.swapInterval $= if noVsync then SDL.ImmediateUpdates else SDL.SynchronizedUpdates
     glState <- setUpOpenGL
     putMVar frameBufferPointerRef (frameTextureBufferBytes glState)
 
-    mask $ \_ -> eventLoop 0 WindowContext { .. }
+    mask $ \_ -> eventLoop 0 WindowContext {..}
     SDL.destroyWindow sdlWindow
 
   frameBufferPointer <- takeMVar frameBufferPointerRef
@@ -112,28 +118,22 @@ eventLoop extraFrames context@WindowContext {..} = do
     Left Window.Close ->
       -- Drain the signal MVar to prevent the emulator thread from blocking.
       void $ tryTakeMVar (Graphics.signalWindow sync)
-
     Left (Window.SizeChanged (SDL.V2 w h)) -> do
       glViewport 0 0 w h
       matrix <- aspectCorrectionMatrix w h
       aspectCorrection glState $= matrix
       glClear GL_COLOR_BUFFER_BIT
       eventLoop extraFrames context
-
     Left (Window.Moved _) -> eventLoop extraFrames =<< updateFramesPerSync context
-
-    Left Window.Paused    -> do
+    Left Window.Paused -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName Paused
       eventLoop extraFrames context
-
-    Left Window.Fault    -> do
+    Left Window.Fault -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName Fault
       eventLoop extraFrames context
-
     Left Window.Resumed -> do
       SDL.windowTitle sdlWindow $= windowTitle romFileName Running
       eventLoop extraFrames context
-
     Right () -> do
       let frames = extraFrames + framesPerVsync
 
@@ -149,24 +149,23 @@ eventLoop extraFrames context@WindowContext {..} = do
 
           extraFrames' <- renderFrames frames
           eventLoop extraFrames' context
-
- where
-  -- Draw as many frames as required
-  renderFrames frames
-    | frames < 1 = pure frames
-    | frames < 2 = do
-      -- This is the last frame, so notify that we're done with the buffer.
-      glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-      glFinish
-      void $ tryPutMVar (Graphics.bufferAvailable sync) ()
-      SDL.glSwapWindow sdlWindow
-      pure (frames - 1)
-    | otherwise = do
-      -- There is at least one more frame after this one, so put out the frame
-      -- quickly and carry one.
-      glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-      SDL.glSwapWindow sdlWindow
-      renderFrames (frames - 1)
+  where
+    -- Draw as many frames as required
+    renderFrames frames
+      | frames < 1 = pure frames
+      | frames < 2 = do
+        -- This is the last frame, so notify that we're done with the buffer.
+        glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+        glFinish
+        void $ tryPutMVar (Graphics.bufferAvailable sync) ()
+        SDL.glSwapWindow sdlWindow
+        pure (frames - 1)
+      | otherwise = do
+        -- There is at least one more frame after this one, so put out the frame
+        -- quickly and carry one.
+        glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+        SDL.glSwapWindow sdlWindow
+        renderFrames (frames - 1)
 
 -- | Update framesPerVsync based on the current refresh rate.
 updateFramesPerSync :: WindowContext -> IO WindowContext
@@ -176,7 +175,7 @@ updateFramesPerSync context = do
     then pure context
     else do
       f <- getFramesPerVsync display (speed context)
-      pure (context { displayIndex = display, framesPerVsync = f })
+      pure (context {displayIndex = display, framesPerVsync = f})
 
 -- | Position of the output point.
 position :: Attribute
@@ -200,7 +199,7 @@ setUpOpenGL = do
   linkAttribute scaleProgram position 0 8
   void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
 
-  aspectCorrection        <- linkUniform scaleProgram "aspectCorrection"
+  aspectCorrection <- linkUniform scaleProgram "aspectCorrection"
   initialAspectCorrection <- aspectCorrectionMatrix 160 144
   aspectCorrection $= initialAspectCorrection
 
@@ -213,21 +212,24 @@ setUpOpenGL = do
   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER (fromIntegral GL_NEAREST)
   glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER (fromIntegral GL_NEAREST)
 
-  (frameTextureBuffer, frameTextureBufferBytes) <- makeWritablePersistentBuffer ExplicitFlush
-                                                                                PixelUpload
-                                                                                (160 * 144 * 4)
+  (frameTextureBuffer, frameTextureBufferBytes) <-
+    makeWritablePersistentBuffer
+      ExplicitFlush
+      PixelUpload
+      (160 * 144 * 4)
 
-  pure GLState { .. }
+  pure GLState {..}
 
 aspectCorrectionMatrix :: MonadIO m => GLsizei -> GLsizei -> m GLmatrix4
-aspectCorrectionMatrix w h | w * 144 == h * 160 = identity
-                           | w * 144 > h * 160  = tooWide
-                           | otherwise          = tooTall
- where
-  wf       = fromIntegral w
-  hf       = fromIntegral h
-  wc       = 160.0 * hf / 144.0
-  hc       = 144.0 * wf / 160.0
-  identity = makeMatrix ([1, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
-  tooWide  = makeMatrix ([wc / wf, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
-  tooTall  = makeMatrix ([1, 0, 0, 0] <> [0, hc / hf, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+aspectCorrectionMatrix w h
+  | w * 144 == h * 160 = identity
+  | w * 144 > h * 160 = tooWide
+  | otherwise = tooTall
+  where
+    wf = fromIntegral w
+    hf = fromIntegral h
+    wc = 160.0 * hf / 144.0
+    hc = 144.0 * wf / 160.0
+    identity = makeMatrix ([1, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+    tooWide = makeMatrix ([wc / wf, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+    tooTall = makeMatrix ([1, 0, 0, 0] <> [0, hc / hf, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
