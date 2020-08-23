@@ -6,7 +6,7 @@ module Machine.GBC.CPU.ISA
     Register16 (..),
     RegisterPushPop (..),
     ConditionCode (..),
-    MonadGMBZ80 (..),
+    MonadSm83x (..),
   )
 where
 
@@ -28,7 +28,7 @@ data RegisterPushPop = PushPopAF | PushPopBC | PushPopDE | PushPopHL deriving (E
 -- | A condition.
 data ConditionCode = CondNZ | CondZ | CondNC | CondC deriving (Eq, Ord, Bounded, Enum)
 
-class MonadGMBZ80 m where
+class MonadSm83x m where
   type ExecuteResult m
   ldrr :: Register8 -> Register8 -> m (ExecuteResult m)
   ldrn :: Register8 -> Word8 -> m (ExecuteResult m)

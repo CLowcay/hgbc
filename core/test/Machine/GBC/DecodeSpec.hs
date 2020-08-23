@@ -27,7 +27,7 @@ instance MonadFetch DecodeM where
     put bs
     pure b0
 
-instance MonadGMBZ80 DecodeM where
+instance MonadSm83x DecodeM where
   type ExecuteResult DecodeM = String
   ldrr r r' = pure ("LD " <> show r <> ", " <> show r')
   ldrn r n = pure ("LD " <> show r <> ", " <> formatHex n)

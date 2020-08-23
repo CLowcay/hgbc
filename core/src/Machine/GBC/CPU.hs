@@ -524,29 +524,27 @@ reset = do
         ++ [0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC]
         ++ [0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E]
 
+type Operator = Word16 -> Word16 -> Word16
+
 -- | Perform an arithmetic operation and adjust the flags.
 {-# INLINE adder8 #-}
-adder8 :: Word8 -> Word8 -> Word16 -> Word16 -> (Word8, Word8)
-adder8 a1 a2 wa2' carry =
+adder8 :: Word8 -> Operator -> Word8 -> Word16 -> (Word8, Word8)
+adder8 a1 op a2 carry =
   let wa1 = fromIntegral a1
       wa2 = fromIntegral a2
-      wr = wa1 + wa2' + carry
+      wr = (wa1 `op` wa2 `op` carry) .&. 0x01FF
       r = fromIntegral wr
-      carryH = (wa1 .&. 0x0010) `xor` (wa2 .&. 0x0010) /= (wr .&. 0x0010)
-      carryCY = (wr .&. 0x0100) /= 0
+      carryH = ((wa1 .&. 0x0F) `op` (wa2 .&. 0x0F) `op` carry) >= 0x10
       flags =
         (if r == 0 then flagZ else 0)
           .|. (if carryH then flagH else 0)
-          .|. (if carryCY then flagCY else 0)
+          .|. (if wr >= 0x0100 then flagCY else 0)
    in (r, flags)
 
 getCarry :: Has env => ReaderT env IO Word16
 getCarry = do
   f <- readF
   pure ((fromIntegral f .>>. 4) .&. 1)
-
-negative1 :: Word8
-negative1 = negate 1
 
 -- | Perform an increment operation and adjust the flags.
 {-# INLINE inc8 #-}
@@ -685,7 +683,7 @@ instance (Bus.Has env, Has env) => MonadFetch (M env) where
     writePC (pc + 1)
     Bus.read pc
 
-instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
+instance (Bus.Has env, Has env) => MonadSm83x (M env) where
   type ExecuteResult (M env) = ()
 
   {-# INLINE ldrr #-}
@@ -844,18 +842,18 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   sbcr r = M $ do
     v <- readR8 r
     carry <- getCarry
-    sub8 v (negate carry)
+    sub8 v carry
 
   {-# INLINE sbcn #-}
   sbcn n = M $ do
     carry <- getCarry
-    sub8 n (negate carry)
+    sub8 n carry
 
   {-# INLINE sbchl #-}
   sbchl = M $ do
     v <- Bus.read =<< readR16 RegHL
     carry <- getCarry
-    sub8 v (negate carry)
+    sub8 v carry
 
   {-# INLINE andr #-}
   andr r = M (andOp8 =<< readR8 r)
@@ -888,20 +886,20 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   cpr r = M $ do
     a <- readR8 RegA
     v <- readR8 r
-    let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
+    let (_, flags) = adder8 a (-) v 0
     setFlags (flagN .|. flags)
 
   {-# INLINE cpn #-}
   cpn n = M $ do
     a <- readR8 RegA
-    let (_, flags) = adder8 a n (negate (fromIntegral n)) 0
+    let (_, flags) = adder8 a (-) n 0
     setFlags (flagN .|. flags)
 
   {-# INLINE cphl #-}
   cphl = M $ do
     a <- readR8 RegA
     v <- Bus.read =<< readR16 RegHL
-    let (_, flags) = adder8 a v (negate (fromIntegral v)) 0
+    let (_, flags) = adder8 a (-) v 0
     setFlags (flagN .|. flags)
 
   {-# INLINE incr #-}
@@ -922,7 +920,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   {-# INLINE decr #-}
   decr r = M $ do
     v <- readR8 r
-    let (v', flags) = inc8 v negative1
+    let (v', flags) = inc8 v (negate 1)
     writeR8 r v'
     setFlagsMask allExceptCY (flags .|. flagN)
 
@@ -930,7 +928,7 @@ instance (Bus.Has env, Has env) => MonadGMBZ80 (M env) where
   dechl = M $ do
     hl <- readR16 RegHL
     v <- Bus.read hl
-    let (v', flags) = inc8 v negative1
+    let (v', flags) = inc8 v (negate 1)
     setFlagsMask allExceptCY (flags .|. flagN)
     Bus.write hl v'
 
@@ -1263,7 +1261,7 @@ pop16 = do
 add8 :: Has env => Word8 -> Word16 -> ReaderT env IO ()
 add8 x carry = do
   a <- readR8 RegA
-  let (a', flags) = adder8 a x (fromIntegral x) carry
+  let (a', flags) = adder8 a (+) x carry
   writeR8 RegA a'
   setFlags flags
 
@@ -1271,7 +1269,7 @@ add8 x carry = do
 sub8 :: Has env => Word8 -> Word16 -> ReaderT env IO ()
 sub8 x carry = do
   a <- readR8 RegA
-  let (a', flags) = adder8 a x (negate (fromIntegral x)) carry
+  let (a', flags) = adder8 a (-) x carry
   writeR8 RegA a'
   setFlags (flags .|. flagN)
 

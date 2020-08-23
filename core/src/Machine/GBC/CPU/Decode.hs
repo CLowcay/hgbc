@@ -29,18 +29,18 @@ nextWord = do
   pure (fromIntegral l .|. (fromIntegral h .<<. 8))
 
 {-# INLINE decodeAndExecute #-}
-decodeAndExecute :: (MonadGMBZ80 m, MonadFetch m) => Word8 -> m (ExecuteResult m)
+decodeAndExecute :: (MonadSm83x m, MonadFetch m) => Word8 -> m (ExecuteResult m)
 decodeAndExecute b0 = V.unsafeIndex table0 (fromIntegral b0)
 
 {-# INLINEABLE table0 #-}
-table0 :: (MonadGMBZ80 m, MonadFetch m) => V.Vector (m (ExecuteResult m))
+table0 :: (MonadSm83x m, MonadFetch m) => V.Vector (m (ExecuteResult m))
 table0 = V.generate 256 (decodeByte0 . splitByte . fromIntegral)
 
 {-# INLINEABLE table1 #-}
-table1 :: (MonadGMBZ80 m) => V.Vector (m (ExecuteResult m))
+table1 :: MonadSm83x m => V.Vector (m (ExecuteResult m))
 table1 = V.generate 256 (decodeByte1 . splitByte . fromIntegral)
 
-decodeByte0 :: (MonadGMBZ80 m, MonadFetch m) => (Word8, Word8, Word8) -> m (ExecuteResult m)
+decodeByte0 :: (MonadSm83x m, MonadFetch m) => (Word8, Word8, Word8) -> m (ExecuteResult m)
 decodeByte0 (0, 0, 0) = nop
 decodeByte0 (0, 1, 0) = ldnnSP =<< nextWord
 decodeByte0 (0, 2, 0) = do
@@ -139,7 +139,7 @@ decodeByte0 (3, 1, 3) = do
   V.unsafeIndex table1 (fromIntegral b1)
 decodeByte0 (a, b, c) = invalid ((a .<<. 6) .|. (b .<<. 3) .|. c)
 
-decodeByte1 :: MonadGMBZ80 m => (Word8, Word8, Word8) -> m (ExecuteResult m)
+decodeByte1 :: MonadSm83x m => (Word8, Word8, Word8) -> m (ExecuteResult m)
 decodeByte1 (0, 0, 6) = rlchl
 decodeByte1 (0, 0, r) = let reg = register r in rlcr reg
 decodeByte1 (0, 1, 6) = rrchl

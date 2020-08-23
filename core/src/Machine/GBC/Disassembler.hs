@@ -604,7 +604,7 @@ instance MonadFetch (StateT DisassemblyState IO) where
       )
     pure byte
 
-instance MonadGMBZ80 (StateT DisassemblyState IO) where
+instance MonadSm83x (StateT DisassemblyState IO) where
   type ExecuteResult (StateT DisassemblyState IO) = (NextAction, Instruction)
   ldrr r r' = pure (Continue, Instruction2 "LD" (formatR8 r) (formatR8 r'))
   ldrn r n = pure (Continue, Instruction2 "LD" (formatR8 r) (formatW8 n))
