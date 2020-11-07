@@ -9,9 +9,7 @@ module Machine.GBC.DecodeSpec
   )
 where
 
-import Control.Monad.Reader
 import Control.Monad.State
-import Data.Bits
 import Data.Word
 import Machine.GBC.CPU.Decode
 import Machine.GBC.CPU.ISA

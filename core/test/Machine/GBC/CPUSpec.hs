@@ -8,23 +8,16 @@ module Machine.GBC.CPUSpec
   )
 where
 
-import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 import Data.Bits
-import qualified Data.ByteString as B
 import Data.Foldable
-import Data.Function
 import Data.IORef
-import Data.Int
-import Data.Maybe
-import Data.Traversable
 import qualified Data.Vector.Storable as VS
 import Data.Word
 import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.CPU as CPU
-import Machine.GBC.CPU.Decode
 import Machine.GBC.CPU.ISA
 import qualified Machine.GBC.Color as Color
 import Machine.GBC.Graphics.VRAM

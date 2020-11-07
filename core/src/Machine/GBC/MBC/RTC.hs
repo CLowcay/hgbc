@@ -32,7 +32,7 @@ data RTCState = RTCState
 
 makeRTC :: Int64 -> SystemTime -> RTCState
 makeRTC base time =
-  let stamp = (systemSeconds time) - base
+  let stamp = systemSeconds time - base
       (noSeconds, seconds) = fromIntegral <$> stamp `divMod` 60
       (noMinutes, minutes) = fromIntegral <$> noSeconds `divMod` 60
       (days, hours) = fromIntegral <$> noMinutes `divMod` 24

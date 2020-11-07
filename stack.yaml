@@ -1,5 +1,4 @@
-resolver: lts-16.10
-compiler: ghc-8.8.4
+resolver: lts-16.20
 
 packages:
 - core

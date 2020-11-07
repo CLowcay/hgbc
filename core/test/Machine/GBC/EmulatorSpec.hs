@@ -15,7 +15,6 @@ import qualified Machine.GBC.DMA as DMA
 import Machine.GBC.Emulator
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
-import Machine.GBC.Graphics.VRAM
 import qualified Machine.GBC.Keypad as Keypad
 import Machine.GBC.ROM
 import qualified Machine.GBC.ROM as ROM

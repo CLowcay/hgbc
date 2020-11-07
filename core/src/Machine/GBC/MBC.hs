@@ -34,7 +34,7 @@ nullMBC = do
         writeROM = \_ _ -> pure (),
         readRAM = VSM.unsafeRead ram . fromIntegral,
         readRAMBankOffset = \_ -> VSM.unsafeRead ram . fromIntegral,
-        writeRAM = \address value -> VSM.unsafeWrite ram (fromIntegral address) value
+        writeRAM = VSM.unsafeWrite ram . fromIntegral
       }
 
 nullRTC :: RTC

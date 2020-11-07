@@ -290,7 +290,7 @@ romTest filename serialHandler terminate getResult timeoutHandler =
       takeMVar (Graphics.signalWindow gs)
       putMVar (Graphics.bufferAvailable gs) ()
 
-    runLoop buffer 0 = liftIO . throwIO =<< Timeout <$> timeoutHandler buffer
+    runLoop buffer 0 = liftIO . throwIO . Timeout =<< timeoutHandler buffer
     runLoop buffer !remainingSteps =
       do
         Emulator.step

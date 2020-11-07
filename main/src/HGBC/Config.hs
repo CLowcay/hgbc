@@ -88,7 +88,7 @@ finalize defaultKeymap Config {..} =
   Config
     { speed = fromMaybe 1 speed,
       scale = fromMaybe 2 scale,
-      noVsync = fromMaybe False noVsync,
+      noVsync = noVsync == Just True,
       debugPort = fromMaybe 8080 debugPort,
       bootROM = bootROM,
       colorCorrection = fromMaybe Color.DefaultCorrection colorCorrection,
