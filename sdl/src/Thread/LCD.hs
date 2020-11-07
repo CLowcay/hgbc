@@ -9,25 +9,36 @@ module Thread.LCD
 where
 
 import Control.Concurrent
-import Control.Exception
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Identity
+  ( forkOS,
+    newEmptyMVar,
+    putMVar,
+    takeMVar,
+    tryPutMVar,
+    tryTakeMVar,
+  )
+import Control.Exception (mask, try)
+import Control.Monad (join, void)
+import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.Identity (Identity)
 import qualified Data.ByteString as B
-import Data.FileEmbed
-import Data.Functor
-import Data.StateVar
+import Data.FileEmbed (embedOneFileOf)
+import Data.Functor ((<&>))
+import Data.StateVar (HasSetter (($=)), StateVar)
 import qualified Data.Text as T
-import Data.Word
-import Foreign.Ptr
-import GLUtils
-import Graphics.GL.Core44
+import Data.Word (Word8)
+import Foreign.Ptr (Ptr, nullPtr)
+import qualified GLUtils as GL
+import qualified Graphics.GL.Core44 as GL
 import qualified HGBC.Config
 import qualified Machine.GBC.Graphics as Graphics
 import qualified SDL
 import SDL.Extras
+  ( DisplayIndex,
+    getCurrentDisplayMode,
+    getWindowDisplayIndex,
+  )
 import qualified SDL.Raw
-import System.FilePath
+import System.FilePath (takeFileName)
 import qualified Window
 
 -- | Window state.
@@ -45,11 +56,11 @@ data WindowContext = WindowContext
 
 -- | OpenGL state variables.
 data GLState = GLState
-  { scaleProgram :: !Program,
-    aspectCorrection :: !(StateVar GLmatrix4),
-    frameVAO :: !VertexArrayObject,
-    frameTexture :: !Texture,
-    frameTextureBuffer :: !BufferObject,
+  { scaleProgram :: !GL.Program,
+    aspectCorrection :: !(StateVar GL.GLmatrix4),
+    frameVAO :: !GL.VertexArrayObject,
+    frameTexture :: !GL.Texture,
+    frameTextureBuffer :: !GL.BufferObject,
     frameTextureBufferBytes :: !(Ptr Word8)
   }
 
@@ -119,10 +130,9 @@ eventLoop extraFrames context@WindowContext {..} = do
       -- Drain the signal MVar to prevent the emulator thread from blocking.
       void $ tryTakeMVar (Graphics.signalWindow sync)
     Left (Window.SizeChanged (SDL.V2 w h)) -> do
-      glViewport 0 0 w h
+      GL.glViewport 0 0 w h
       matrix <- aspectCorrectionMatrix w h
       aspectCorrection glState $= matrix
-      glClear GL_COLOR_BUFFER_BIT
       eventLoop extraFrames context
     Left (Window.Moved _) -> eventLoop extraFrames =<< updateFramesPerSync context
     Left Window.Paused -> do
@@ -142,10 +152,11 @@ eventLoop extraFrames context@WindowContext {..} = do
           void $ tryPutMVar (Graphics.bufferAvailable sync) ()
           eventLoop frames context
         else do
-          bindBuffer PixelUpload (frameTextureBuffer glState)
-          glFlushMappedBufferRange GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 4)
-          bindTexture Texture2D (frameTexture glState)
-          glTexSubImage2D GL_TEXTURE_2D 0 0 0 160 144 GL_RGBA GL_UNSIGNED_BYTE nullPtr
+          GL.glClear GL.GL_COLOR_BUFFER_BIT
+          GL.bindBuffer GL.PixelUpload (frameTextureBuffer glState)
+          GL.glFlushMappedBufferRange GL.GL_PIXEL_UNPACK_BUFFER 0 (160 * 144 * 4)
+          GL.bindTexture GL.Texture2D (frameTexture glState)
+          GL.glTexSubImage2D GL.GL_TEXTURE_2D 0 0 0 160 144 GL.GL_RGBA GL.GL_UNSIGNED_BYTE nullPtr
 
           extraFrames' <- renderFrames frames
           eventLoop extraFrames' context
@@ -155,15 +166,15 @@ eventLoop extraFrames context@WindowContext {..} = do
       | frames < 1 = pure frames
       | frames < 2 = do
         -- This is the last frame, so notify that we're done with the buffer.
-        glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
-        glFinish
+        GL.glDrawElements GL.GL_TRIANGLES 6 GL.GL_UNSIGNED_INT nullPtr
+        GL.glFinish
         void $ tryPutMVar (Graphics.bufferAvailable sync) ()
         SDL.glSwapWindow sdlWindow
         pure (frames - 1)
       | otherwise = do
         -- There is at least one more frame after this one, so put out the frame
         -- quickly and carry one.
-        glDrawElements GL_TRIANGLES 6 GL_UNSIGNED_INT nullPtr
+        GL.glDrawElements GL.GL_TRIANGLES 6 GL.GL_UNSIGNED_INT nullPtr
         SDL.glSwapWindow sdlWindow
         renderFrames (frames - 1)
 
@@ -178,8 +189,8 @@ updateFramesPerSync context = do
       pure (context {displayIndex = display, framesPerVsync = f})
 
 -- | Position of the output point.
-position :: Attribute
-position = Attribute "position" 2 Ints PerVertex KeepInteger
+position :: GL.Attribute
+position = GL.Attribute "position" 2 GL.Ints GL.PerVertex GL.KeepInteger
 
 scaleVert :: B.ByteString
 scaleVert = $(embedOneFileOf ["sdl/shaders/scale.vert", "shaders/scale.vert"])
@@ -190,37 +201,37 @@ scaleFrag = $(embedOneFileOf ["sdl/shaders/scale.frag", "shaders/scale.frag"])
 -- | Configure OpenGL.
 setUpOpenGL :: IO GLState
 setUpOpenGL = do
-  scaleProgram <- compileShaders [(VertexShader, scaleVert), (FragmentShader, scaleFrag)]
-  useProgram scaleProgram
+  scaleProgram <- GL.compileShaders [(GL.VertexShader, scaleVert), (GL.FragmentShader, scaleFrag)]
+  GL.useProgram scaleProgram
 
-  frameVAO <- genVertexArrayObject
-  bindVertexArrayObject frameVAO
-  void (makeVertexBuffer (join [[-1.0, -1.0 :: Float], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]))
-  linkAttribute scaleProgram position 0 8
-  void (makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
+  frameVAO <- GL.genVertexArrayObject
+  GL.bindVertexArrayObject frameVAO
+  void (GL.makeVertexBuffer (join [[-1.0, -1.0 :: Float], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]))
+  GL.linkAttribute scaleProgram position 0 8
+  void (GL.makeElementBuffer (join [[0, 1, 2], [2, 3, 0]]))
 
-  aspectCorrection <- linkUniform scaleProgram "aspectCorrection"
+  aspectCorrection <- GL.linkUniform scaleProgram "aspectCorrection"
   initialAspectCorrection <- aspectCorrectionMatrix 160 144
   aspectCorrection $= initialAspectCorrection
 
-  activeTextureUnit (TextureUnit 0)
-  frameSampler <- linkUniform scaleProgram "frame"
-  frameSampler $= TextureUnit 0
-  frameTexture <- genTexture
-  bindTexture Texture2D frameTexture
-  glTexStorage2D GL_TEXTURE_2D 1 GL_RGBA8 160 144
-  glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MAG_FILTER (fromIntegral GL_NEAREST)
-  glTexParameteri GL_TEXTURE_2D GL_TEXTURE_MIN_FILTER (fromIntegral GL_NEAREST)
+  GL.activeTextureUnit (GL.TextureUnit 0)
+  frameSampler <- GL.linkUniform scaleProgram "frame"
+  frameSampler $= GL.TextureUnit 0
+  frameTexture <- GL.genTexture
+  GL.bindTexture GL.Texture2D frameTexture
+  GL.glTexStorage2D GL.GL_TEXTURE_2D 1 GL.GL_RGBA8 160 144
+  GL.glTexParameteri GL.GL_TEXTURE_2D GL.GL_TEXTURE_MAG_FILTER (fromIntegral GL.GL_NEAREST)
+  GL.glTexParameteri GL.GL_TEXTURE_2D GL.GL_TEXTURE_MIN_FILTER (fromIntegral GL.GL_NEAREST)
 
   (frameTextureBuffer, frameTextureBufferBytes) <-
-    makeWritablePersistentBuffer
-      ExplicitFlush
-      PixelUpload
+    GL.makeWritablePersistentBuffer
+      GL.ExplicitFlush
+      GL.PixelUpload
       (160 * 144 * 4)
 
   pure GLState {..}
 
-aspectCorrectionMatrix :: MonadIO m => GLsizei -> GLsizei -> m GLmatrix4
+aspectCorrectionMatrix :: MonadIO m => GL.GLsizei -> GL.GLsizei -> m GL.GLmatrix4
 aspectCorrectionMatrix w h
   | w * 144 == h * 160 = identity
   | w * 144 > h * 160 = tooWide
@@ -230,6 +241,6 @@ aspectCorrectionMatrix w h
     hf = fromIntegral h
     wc = 160.0 * hf / 144.0
     hc = 144.0 * wf / 160.0
-    identity = makeMatrix ([1, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
-    tooWide = makeMatrix ([wc / wf, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
-    tooTall = makeMatrix ([1, 0, 0, 0] <> [0, hc / hf, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+    identity = GL.makeMatrix ([1, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+    tooWide = GL.makeMatrix ([wc / wf, 0, 0, 0] <> [0, 1, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
+    tooTall = GL.makeMatrix ([1, 0, 0, 0] <> [0, hc / hf, 0, 0] <> [0, 0, 1, 0] <> [0, 0, 0, 1])
