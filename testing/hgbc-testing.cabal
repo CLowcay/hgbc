@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6fdb61edf37f118d6bdf976d2de6cc9ea54389e6cd5e7ef2ebd216540204bc47
+-- hash: e71210c831253abda320f454ea04bc8bf9db831f1d389642e864c44ee50277ad
 
 name:           hgbc-testing
 version:        0.1.0.0
@@ -30,7 +30,7 @@ executable hgbc-tester
       Paths_hgbc_testing
   hs-source-dirs:
       src
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
+  ghc-options: -threaded -rtsopts -with-rtsopts "-N --nonmoving-gc" -Wall -Wcompat -Wincomplete-uni-patterns -Wincomplete-record-updates -Wredundant-constraints -Wpartial-fields
   build-depends:
       ansi-terminal
     , base >=4.7 && <5
