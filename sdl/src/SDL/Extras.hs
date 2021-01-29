@@ -5,11 +5,11 @@ module SDL.Extras
   )
 where
 
-import Control.Monad.IO.Class
-import Foreign.C.Types
-import Foreign.Marshal.Alloc
-import Foreign.Storable
-import SDL.Internal.Types
+import Control.Monad.IO.Class (MonadIO (..))
+import Foreign.C.Types (CInt (..))
+import Foreign.Marshal.Alloc (alloca)
+import Foreign.Storable (Storable (peek))
+import SDL.Internal.Types (Window (..))
 import qualified SDL.Raw
 
 newtype DisplayIndex = DisplayIndex CInt deriving (Eq, Ord, Show)

@@ -11,18 +11,18 @@ module Machine.GBC.Audio
   )
 where
 
-import Control.Monad.Reader
-import Data.Bifunctor
-import Data.Bits
-import Data.Functor
-import Data.Word
-import Machine.GBC.Audio.Common
-import Machine.GBC.Audio.NoiseChannel
-import Machine.GBC.Audio.PulseChannel
-import Machine.GBC.Audio.WaveChannel
+import Control.Monad.Reader (void, when)
+import Data.Bifunctor (Bifunctor (first))
+import Data.Bits (Bits (testBit, (.&.), (.|.)))
+import Data.Functor ((<&>))
+import Data.Word (Word16, Word8)
+import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput (..), flagChannel1Enable, flagChannel2Enable, flagMasterPower, newAudioPort)
+import Machine.GBC.Audio.NoiseChannel (NoiseChannel, newNoiseChannel)
+import Machine.GBC.Audio.PulseChannel (PulseChannel, newPulseChannel)
+import Machine.GBC.Audio.WaveChannel (WaveChannel, newWaveChannel)
 import Machine.GBC.Primitive
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
 
 data State = State
@@ -79,16 +79,16 @@ init = mdo
 
 ports :: State -> [(Word16, Port)]
 ports State {..} =
-  [(NR50, port50), (NR51, port51), (NR52, port52), (PCM12, portPCM12), (PCM34, portPCM34)]
+  [(R.NR50, port50), (R.NR51, port51), (R.NR52, port52), (R.PCM12, portPCM12), (R.PCM34, portPCM34)]
     ++ channel1Ports
     ++ channel2Ports
     ++ channel3Ports
     ++ channel4Ports
   where
-    channel1Ports = first ((+ NR10) . fromIntegral) <$> getPorts channel1
-    channel2Ports = first ((+ NR20) . fromIntegral) <$> getPorts channel2
-    channel3Ports = first ((+ NR30) . fromIntegral) <$> getPorts channel3
-    channel4Ports = first ((+ NR40) . fromIntegral) <$> getPorts channel4
+    channel1Ports = first ((+ R.NR10) . fromIntegral) <$> getPorts channel1
+    channel2Ports = first ((+ R.NR20) . fromIntegral) <$> getPorts channel2
+    channel3Ports = first ((+ R.NR30) . fromIntegral) <$> getPorts channel3
+    channel4Ports = first ((+ R.NR40) . fromIntegral) <$> getPorts channel4
 
 samplePeriod :: Int
 samplePeriod = 94

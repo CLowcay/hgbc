@@ -4,9 +4,9 @@ module Machine.GBC.Mode
   )
 where
 
-import Data.IORef
-import Data.Word
-import Machine.GBC.Primitive
+import Data.IORef (IORef, readIORef)
+import Data.Word (Word8)
+import Machine.GBC.Primitive (Port, newPortWithReadAction)
 
 data EmulatorMode = DMG | CGB deriving (Eq, Ord, Show, Bounded, Enum)
 

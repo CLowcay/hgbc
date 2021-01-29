@@ -8,18 +8,18 @@ module HGBC.Debugger.SymFile
 where
 
 import qualified Data.Attoparsec.ByteString.Char8 as P
-import Data.Bifunctor
+import Data.Bifunctor (Bifunctor (first))
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy.Char8 as LBC
-import Data.Char
-import Data.List
-import Data.String
+import Data.Char (isAlphaNum, isSpace)
+import Data.List (foldl', sortOn)
+import Data.String (IsString (fromString))
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
-import Data.Word
-import Machine.GBC.Disassembler
+import Data.Word (Word8)
+import Machine.GBC.Disassembler (LongAddress (..), encodeAddress)
 import Machine.GBC.Util (formatHex)
 import Prelude hiding (lines)
 

@@ -5,7 +5,7 @@ module Machine.GBC.Color
   )
 where
 
-import Data.Word
+import Data.Word (Word16, Word32)
 
 type Correction = (Word16, Word16, Word16) -> (Word32, Word32, Word32)
 

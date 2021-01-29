@@ -5,10 +5,10 @@ module HGBC.Config.CommandLine
 where
 
 import qualified Data.Text as T
-import HGBC.Config.Decode
+import HGBC.Config.Decode (decodeColorCorrection, decodeMode)
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Mode
-import Options.Applicative
+import Machine.GBC.Mode (EmulatorMode)
+import Options.Applicative (Parser, ParserInfo, action, auto, completeWith, eitherReader, execParser, fullDesc, header, help, helper, info, long, metavar, option, str, strArgument, switch, value, (<**>))
 
 data Options = Options
   { debugMode :: Bool,

@@ -9,12 +9,12 @@ module Machine.GBC.DecodeSpec
   )
 where
 
-import Control.Monad.State
-import Data.Word
-import Machine.GBC.CPU.Decode
-import Machine.GBC.CPU.ISA
-import Machine.GBC.Util
-import Test.Hspec
+import Control.Monad.State (MonadState (get, put), StateT (..))
+import Data.Word (Word8)
+import Machine.GBC.CPU.Decode (MonadFetch (..), decodeAndExecute)
+import Machine.GBC.CPU.ISA (MonadSm83x (..))
+import Machine.GBC.Util (formatHex)
+import Test.Hspec ( Spec, describe, expectationFailure, it, shouldBe,)
 
 newtype DecodeM a = DecodeM {runDecodeM :: StateT [Word8] Maybe a}
   deriving (Monad, Applicative, Functor)

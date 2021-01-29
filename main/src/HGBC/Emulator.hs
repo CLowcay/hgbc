@@ -13,18 +13,18 @@ module HGBC.Emulator
   )
 where
 
-import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Data.Bifunctor
-import Data.Bits
+import Control.Concurrent (forkIO, putMVar, takeMVar)
+import Control.Concurrent.STM (TChan, atomically, newTChanIO, readTChan, tryReadTChan, writeTChan)
+import Control.Monad.Except (ExceptT (..), MonadIO (..), forever, mapExceptT, void, when)
+import Control.Monad.Reader (ReaderT)
+import Control.Monad.Writer (WriterT, mapWriterT)
+import Data.Bifunctor (Bifunctor (bimap, first))
+import Data.Bits (Bits ((.&.)))
 import qualified Data.ByteString as B
-import Data.Functor.Identity
-import Data.Time.Clock.System
-import Data.Word
-import Foreign.Ptr
+import Data.Functor.Identity (Identity)
+import Data.Time.Clock.System (SystemTime (MkSystemTime), getSystemTime)
+import Data.Word (Word8)
+import Foreign.Ptr (Ptr)
 import HGBC.Config (Config (..))
 import qualified HGBC.Config.CommandLine as CommandLine
 import qualified HGBC.Config.Paths as Path
@@ -32,21 +32,26 @@ import qualified HGBC.Debugger.Breakpoints as Breakpoints
 import qualified HGBC.Debugger.Disassembly as Disassembly
 import qualified HGBC.Debugger.Labels as Labels
 import qualified HGBC.Debugger.State as DebugState
-import HGBC.Errors
+import HGBC.Errors (FileParseErrors)
 import qualified HGBC.Events as Event
 import Machine.GBC.CPU (readPC)
 import qualified Machine.GBC.CPU as CPU
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Disassembler
+import Machine.GBC.Disassembler (LongAddress (..), disassembleFrom, disassemblyRequired)
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
 import Machine.GBC.Memory (getBank)
-import Machine.GBC.Mode
+import Machine.GBC.Mode (EmulatorMode (DMG))
 import qualified Machine.GBC.ROM as ROM
 import qualified Machine.GBC.Serial as Serial
-import System.Directory
-import System.FilePath
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath (takeDirectory)
 import UnliftIO.Exception
+  ( Exception (displayException),
+    IOException,
+    catch,
+    try,
+  )
 
 -- | A notification for the emulator thread.
 data Command

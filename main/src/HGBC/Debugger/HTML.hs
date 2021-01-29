@@ -7,16 +7,13 @@ where
 
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as LB
-import Data.String
-import HGBC.Debugger.HTML.CPURegisters
-import HGBC.Debugger.HTML.Elements
-import HGBC.Debugger.HTML.LCDRegisters
-import HGBC.Debugger.HTML.SoundRegisters
-import HGBC.Debugger.HTML.SystemRegisters
-import Prelude hiding
-  ( div,
-    head,
-  )
+import Data.String (IsString (fromString))
+import HGBC.Debugger.HTML.CPURegisters (cpuRegisters)
+import HGBC.Debugger.HTML.Elements (body, button, charset, div, divclass, divclassid, focusDiv, h, head, html, img, inlineScript, innerNav, input, link, meta, nav, script, tabs, title, ulid)
+import HGBC.Debugger.HTML.LCDRegisters (lcdRegisters)
+import HGBC.Debugger.HTML.SoundRegisters (soundRegisters)
+import HGBC.Debugger.HTML.SystemRegisters (systemRegisters)
+import Prelude hiding (div, head)
 
 debugHTML :: FilePath -> Int -> LB.ByteString
 debugHTML romFileName bootROMLimit = BB.toLazyByteString (html [header, main])

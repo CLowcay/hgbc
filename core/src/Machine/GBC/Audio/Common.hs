@@ -21,10 +21,10 @@ module Machine.GBC.Audio.Common
   )
 where
 
-import Data.Bits
-import Data.Word
+import Data.Bits (Bits (..))
+import Data.Word (Word8)
 import Machine.GBC.Primitive
-import Machine.GBC.Util
+import Machine.GBC.Util (isFlagSet, (.<<.))
 
 flagTrigger, flagLength :: Word8
 flagTrigger = 0x80

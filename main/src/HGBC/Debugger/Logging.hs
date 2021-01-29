@@ -4,10 +4,10 @@ module HGBC.Debugger.Logging
 where
 
 import qualified Data.ByteString.Char8 as CB
-import Data.Time.Format
-import Data.Time.LocalTime
+import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Time.LocalTime (getZonedTime)
 import qualified Network.Wai as Wai
-import System.IO
+import System.IO (hPutStrLn, stderr)
 
 logError :: Wai.Request -> String -> IO ()
 logError req message = do

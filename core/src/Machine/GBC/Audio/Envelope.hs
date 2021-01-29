@@ -9,13 +9,13 @@ module Machine.GBC.Audio.Envelope
   )
 where
 
-import Control.Monad
-import Data.Bits
-import Data.Word
-import Machine.GBC.Audio.Common
+import Control.Monad (unless)
+import Data.Bits (Bits (..))
+import Data.Word (Word8)
+import Machine.GBC.Audio.Common (FrameSequencerOutput, nextStepWillClockEnvelope)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util (isFlagSet, (.>>.))
 
 data Envelope = Envelope
   { volumeRef :: !(UnboxedRef Int),

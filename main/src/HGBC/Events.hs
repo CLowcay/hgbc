@@ -9,10 +9,10 @@ module HGBC.Events
   )
 where
 
-import Control.Concurrent.STM
+import Control.Concurrent.STM (TChan, atomically, dupTChan, newBroadcastTChanIO, readTChan, writeTChan)
 import Control.Exception (IOException)
-import Control.Monad.IO.Class
-import Machine.GBC.Disassembler
+import Control.Monad.IO.Class (MonadIO (..))
+import Machine.GBC.Disassembler (Labels, LongAddress)
 import qualified Machine.GBC.Errors as GBC
 
 data Event

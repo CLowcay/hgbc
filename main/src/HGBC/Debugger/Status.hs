@@ -6,26 +6,26 @@ module HGBC.Debugger.Status
   )
 where
 
-import Control.Applicative
-import Control.Monad.Reader
-import Data.Aeson
-import Data.Bits
+import Control.Applicative (Applicative (liftA2))
+import Control.Monad.Reader (MonadIO (liftIO), ReaderT (runReaderT))
+import Data.Aeson (KeyValue ((.=)), Series, fromEncoding, pairs)
+import Data.Bits (Bits (testBit, (.&.)))
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as LBS
-import Data.Functor
-import Data.List
+import Data.Functor ((<&>))
+import Data.List (foldl')
 import qualified Data.Vector as V
 import qualified Machine.GBC.Audio as Audio
 import Machine.GBC.Audio.Common (directReadPorts)
 import Machine.GBC.Audio.WaveChannel (WaveChannel (..))
-import Machine.GBC.CPU
-import Machine.GBC.CPU.ISA
+import qualified Machine.GBC.CPU as CPU
+import Machine.GBC.CPU.ISA (Register16 (RegSP), Register8 (RegB, RegC, RegD, RegE, RegH, RegL), RegisterPushPop (PushPopAF))
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
-import Machine.GBC.Memory
-import Machine.GBC.Primitive
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Memory (getBank, getRamGate, readByte)
+import Machine.GBC.Primitive (directReadPort)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (formatHex, isFlagSet, (.>>.))
 import Prelude hiding (div)
 
 getStatus :: Emulator.State -> IO LBS.ByteString
@@ -39,52 +39,52 @@ getStatus emulatorState =
       fmap (foldl' (<>) mempty)
         . foldl' (liftA2 (++)) (pure [])
         $ [ rAF,
-            field "rB" formatHex <$> readR8 RegB,
-            field "rC" formatHex <$> readR8 RegC,
-            field "rD" formatHex <$> readR8 RegD,
-            field "rE" formatHex <$> readR8 RegE,
-            field "rH" formatHex <$> readR8 RegH,
-            field "rL" formatHex <$> readR8 RegL,
+            field "rB" formatHex <$> CPU.readR8 RegB,
+            field "rC" formatHex <$> CPU.readR8 RegC,
+            field "rD" formatHex <$> CPU.readR8 RegD,
+            field "rE" formatHex <$> CPU.readR8 RegE,
+            field "rH" formatHex <$> CPU.readR8 RegH,
+            field "rL" formatHex <$> CPU.readR8 RegL,
             rPC,
             rSP,
             flags,
             p1,
-            field "div" formatHex <$> readByte DIV,
-            field "tima" formatHex <$> readByte TIMA,
-            field "tma" formatHex <$> readByte TMA,
+            field "div" formatHex <$> readByte R.DIV,
+            field "tima" formatHex <$> readByte R.TIMA,
+            field "tma" formatHex <$> readByte R.TMA,
             tac,
             key1,
-            field "vbk0" (getBit 0) <$> readByte VBK,
+            field "vbk0" (getBit 0) <$> readByte R.VBK,
             svbk,
             ie,
             rif,
             sc,
-            allBitsOf "sb" <$> readByte SB,
+            allBitsOf "sb" <$> readByte R.SB,
             rp,
             romBanks,
             field "ramGate" (\g -> if g then 'O' else 'C') <$> getRamGate,
             field "ramBank" formatHex <$> getBank 0xA000,
-            allBitsOf "lcdc" <$> readByte LCDC,
-            field "dma" formatHex <$> readByte DMA,
+            allBitsOf "lcdc" <$> readByte R.LCDC,
+            field "dma" formatHex <$> readByte R.DMA,
             hdma5,
-            field "hdma4" formatHex <$> readByte HDMA4,
-            field "hdma3" formatHex <$> readByte HDMA3,
-            field "hdma2" formatHex <$> readByte HDMA2,
-            field "hdma1" formatHex <$> readByte HDMA1,
-            dmgPalette "bgp" <$> readByte BGP,
-            dmgPalette "obp0" <$> readByte OBP0,
-            dmgPalette "obp1" <$> readByte OBP1,
+            field "hdma4" formatHex <$> readByte R.HDMA4,
+            field "hdma3" formatHex <$> readByte R.HDMA3,
+            field "hdma2" formatHex <$> readByte R.HDMA2,
+            field "hdma1" formatHex <$> readByte R.HDMA1,
+            dmgPalette "bgp" <$> readByte R.BGP,
+            dmgPalette "obp0" <$> readByte R.OBP0,
+            dmgPalette "obp1" <$> readByte R.OBP1,
             stat,
-            field "scy" formatHex <$> readByte SCY,
-            field "wy" formatHex <$> readByte WY,
-            field "ly" formatHex <$> readByte LY,
-            field "scx" formatHex <$> readByte SCX,
-            field "wx" formatHex <$> readByte WX,
-            field "lyc" formatHex <$> readByte LYC,
-            cgbPalette "bcps" <$> readByte BCPS,
+            field "scy" formatHex <$> readByte R.SCY,
+            field "wy" formatHex <$> readByte R.WY,
+            field "ly" formatHex <$> readByte R.LY,
+            field "scx" formatHex <$> readByte R.SCX,
+            field "wx" formatHex <$> readByte R.WX,
+            field "lyc" formatHex <$> readByte R.LYC,
+            cgbPalette "bcps" <$> readByte R.BCPS,
             field "bcpd" formatHex
               <$> liftIO (directReadPort (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
-            cgbPalette "ocps" <$> readByte OCPS,
+            cgbPalette "ocps" <$> readByte R.OCPS,
             field "ocpd" formatHex
               <$> liftIO (directReadPort (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
             audio1,
@@ -92,10 +92,10 @@ getStatus emulatorState =
             audio3,
             audio4,
             nr50,
-            allBitsOf "nr51" <$> readByte NR51,
+            allBitsOf "nr51" <$> readByte R.NR51,
             nr52,
-            nibbles "pcm12" <$> readByte PCM12,
-            nibbles "pcm34" <$> readByte PCM34,
+            nibbles "pcm12" <$> readByte R.PCM12,
+            nibbles "pcm34" <$> readByte R.PCM34,
             field "wave0" formatHex <$> liftIO (directReadPort (waveTable V.! 0x0)),
             field "wave1" formatHex <$> liftIO (directReadPort (waveTable V.! 0x1)),
             field "wave2" formatHex <$> liftIO (directReadPort (waveTable V.! 0x2)),
@@ -115,35 +115,35 @@ getStatus emulatorState =
           ]
     field label decoder = pure . (label .=) . decoder
     rAF = do
-      (rA, rF) <- highlow <$> readR16pp PushPopAF
+      (rA, rF) <- highlow <$> CPU.readR16pp PushPopAF
       pure ["rA" .= rA, "rF" .= rF]
     rPC = do
-      pc <- readPC
+      pc <- CPU.readPC
       bank <- getBank pc
       let (rPCH, rPCL) = highlow pc
       pure ["rPCH" .= rPCH, "rPCL" .= rPCL, "pcBank" .= formatHex bank]
     rSP = do
-      sp <- readR16 RegSP
+      sp <- CPU.readR16 RegSP
       let (rSPH, rSPL) = highlow sp
       pure ["rSPH" .= rSPH, "rSPL" .= rSPL, "sp" .= sp]
     flags = do
-      i <- testIME <&> \ime -> if ime then 'I' else 'i'
-      r <- readF
+      i <- CPU.testIME <&> \ime -> if ime then 'I' else 'i'
+      r <- CPU.readF
       currentMode <-
-        getMode <&> \case
-          ModeHalt -> ("HALT" :: String)
-          ModeStop -> "STOP"
-          ModeNormal -> "RUN"
+        CPU.getMode <&> \case
+          CPU.ModeHalt -> ("HALT" :: String)
+          CPU.ModeStop -> "STOP"
+          CPU.ModeNormal -> "RUN"
       pure
         [ "i" .= i,
-          "z" .= if isFlagSet flagZ r then 'Z' else 'z',
-          "n" .= if isFlagSet flagN r then 'N' else 'n',
-          "h" .= if isFlagSet flagH r then 'H' else 'h',
-          "c" .= if isFlagSet flagCY r then 'C' else 'c',
+          "z" .= if isFlagSet CPU.flagZ r then 'Z' else 'z',
+          "n" .= if isFlagSet CPU.flagN r then 'N' else 'n',
+          "h" .= if isFlagSet CPU.flagH r then 'H' else 'h',
+          "c" .= if isFlagSet CPU.flagCY r then 'C' else 'c',
           "cpuMode" .= currentMode
         ]
     p1 = do
-      r <- readByte P1
+      r <- readByte R.P1
       pure
         [ "p15" .= getBit 5 r,
           "p14" .= getBit 4 r,
@@ -153,13 +153,13 @@ getStatus emulatorState =
           "p10" .= getBit 0 r
         ]
     tac = do
-      r <- readByte TAC
+      r <- readByte R.TAC
       pure ["tac2" .= getBit 2 r, "tac1_0" .= formatHex (r .&. 3) !! 1]
     key1 = do
-      r <- readByte KEY1
+      r <- readByte R.KEY1
       pure ["key17" .= getBit 7 r, "key10" .= getBit 0 r]
     svbk = do
-      r <- readByte SVBK
+      r <- readByte R.SVBK
       pure
         [ "svbk7" .= getBit 7 r,
           "svbk5" .= getBit 5 r,
@@ -168,7 +168,7 @@ getStatus emulatorState =
           "svbk2_0" .= formatHex (r .&. 7) !! 1
         ]
     ie = do
-      r <- readByte IE
+      r <- readByte R.IE
       pure
         [ "ie4" .= getBit 4 r,
           "ie3" .= getBit 3 r,
@@ -177,7 +177,7 @@ getStatus emulatorState =
           "ie0" .= getBit 0 r
         ]
     rif = do
-      r <- readByte IF
+      r <- readByte R.IF
       pure
         [ "if4" .= getBit 4 r,
           "if3" .= getBit 3 r,
@@ -196,10 +196,10 @@ getStatus emulatorState =
         (name <> "0") .= getBit 0 r
       ]
     sc = do
-      r <- readByte SC
+      r <- readByte R.SC
       pure ["sc7" .= getBit 7 r, "sc1" .= getBit 1 r, "sc0" .= getBit 0 r]
     rp = do
-      r <- readByte RP
+      r <- readByte R.RP
       pure ["rp7_6" .= formatHex (r .>>. 6) !! 1, "rp1" .= getBit 1 r, "rp0" .= getBit 0 r]
     romBanks = do
       bank0 <- getBank 0x3000
@@ -210,7 +210,7 @@ getStatus emulatorState =
           "romBank" .= formatHex (if bank0 == 0 then bank1 else bank0)
         ]
     hdma5 = do
-      r <- readByte HDMA5
+      r <- readByte R.HDMA5
       pure ["hdma57" .= getBit 7 r, "hdma56_0" .= formatHex (r .&. 0x7F)]
     dmgPalette name r =
       [ (name <> "76") .= formatHex (r .>>. 6) !! 1,
@@ -219,7 +219,7 @@ getStatus emulatorState =
         (name <> "10") .= formatHex (r .&. 3) !! 1
       ]
     stat = do
-      r <- readByte STAT
+      r <- readByte R.STAT
       pure
         [ "stat6" .= getBit 6 r,
           "stat5" .= getBit 5 r,
@@ -297,7 +297,7 @@ getStatus emulatorState =
           "nr446" .= getBit 6 nr44
         ]
     nr50 = do
-      r <- readByte NR50
+      r <- readByte R.NR50
       pure
         [ "nr507" .= getBit 7 r,
           "nr506_4" .= head (formatHex (r .&. 0x70)),
@@ -305,7 +305,7 @@ getStatus emulatorState =
           "nr502_0" .= formatHex (r .&. 0x07) !! 1
         ]
     nr52 = do
-      r <- readByte NR52
+      r <- readByte R.NR52
       pure
         [ "nr527" .= getBit 7 r,
           "nr523" .= getBit 3 r,

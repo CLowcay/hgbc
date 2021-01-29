@@ -10,7 +10,7 @@ module Machine.GBC.MBC.Interface
 where
 
 import qualified Data.Vector.Storable.Mutable as VSM
-import Data.Word
+import Data.Word (Word16, Word8)
 
 type RAMAllocator = Int -> IO (VSM.IOVector Word8)
 

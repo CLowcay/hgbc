@@ -16,15 +16,15 @@ module Framework
   )
 where
 
-import Data.Bifunctor
+import Data.Bifunctor (Bifunctor (bimap))
+import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as LB
-import qualified Data.ByteString.Lazy.Builder as BB
-import Data.Maybe
-import Data.Time
-import System.Console.ANSI
-import System.Exit
-import System.FilePath
-import UnliftIO
+import Data.Maybe (catMaybes, isNothing)
+import Data.Time (UTCTime, defaultTimeLocale, formatTime)
+import System.Console.ANSI (Color (Green, Red), ColorIntensity (Dull), ConsoleLayer (Foreground), SGR (SetColor), setSGR)
+import System.Exit (exitFailure, exitSuccess)
+import System.FilePath ((</>))
+import UnliftIO (Exception (displayException), catchAny)
 
 type Name = String
 

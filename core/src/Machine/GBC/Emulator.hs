@@ -13,29 +13,31 @@ module Machine.GBC.Emulator
   )
 where
 
-import Control.Applicative
-import Control.Monad.Reader
+import Control.Applicative (Alternative ((<|>)))
+import Control.Monad.Reader (MonadIO (liftIO), MonadReader (ask), ReaderT, asks, replicateM_, when)
 import qualified Data.ByteString as B
-import Data.Functor
-import Data.IORef
-import Data.Maybe
+import Data.Functor ((<&>))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector.Storable as VS
-import Data.Word
-import Foreign.Ptr
+import Data.Word (Word32, Word8)
+import Foreign.Ptr (Ptr)
 import qualified Machine.GBC.Audio as Audio
 import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.CPU as CPU
 import qualified Machine.GBC.Color as Color
 import qualified Machine.GBC.DMA as DMA
 import qualified Machine.GBC.Graphics as Graphics
-import Machine.GBC.Graphics.VRAM
+import Machine.GBC.Graphics.VRAM (VRAM)
+import qualified Machine.GBC.Graphics.VRAM as VRAM
 import qualified Machine.GBC.Keypad as Keypad
 import qualified Machine.GBC.Memory as Memory
-import Machine.GBC.Mode
-import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.ROM
-import Machine.GBC.Registers
+import Machine.GBC.Mode (EmulatorMode (..))
+import Machine.GBC.Primitive (alwaysUpdate, newPort)
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.ROM (ROM)
+import qualified Machine.GBC.ROM as ROM
+import qualified Machine.GBC.Registers as R
 import qualified Machine.GBC.Serial as Serial
 import qualified Machine.GBC.Timer as Timer
 import Prelude hiding (init)
@@ -79,16 +81,16 @@ init ::
   IO State
 init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBufferBytes = mdo
   let bootMode = bootROM <&> \content -> if B.length content > 0x100 then CGB else DMG
-  let romMode = case cgbSupport (romHeader rom) of
-        CGBCompatible -> CGB
-        CGBExclusive -> CGB
-        CGBIncompatible -> DMG
+  let romMode = case ROM.cgbSupport (ROM.romHeader rom) of
+        ROM.CGBCompatible -> CGB
+        ROM.CGBExclusive -> CGB
+        ROM.CGBIncompatible -> DMG
   let mode = fromMaybe romMode (requestedMode <|> bootMode)
-  vram <- initVRAM colorCorrection
+  vram <- VRAM.init colorCorrection
 
-  writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
-  writeRGBPalette vram True 1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  VRAM.writeRGBPalette vram False 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  VRAM.writeRGBPalette vram True 0 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
+  VRAM.writeRGBPalette vram True 1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
 
   modeRef <- newIORef mode
   portIF <- newPort 0xE0 0x1F alwaysUpdate
@@ -103,7 +105,7 @@ init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBuff
   serialState <- Serial.init serialSync portIF modeRef
 
   let allPorts =
-        (IF, portIF) :
+        (R.IF, portIF) :
         CPU.ports cpu
           ++ DMA.ports dmaState
           ++ Graphics.ports graphicsState
@@ -160,11 +162,11 @@ step = do
   CPU.step
 
   state <- ask
-  DMA.doPendingHDMA (dmaState state)
+  DMA.doPending (dmaState state)
   isHBlankPending <- liftIO $ readIORef (hblankPending state)
   when isHBlankPending $ do
     liftIO $ writeIORef (hblankPending state) False
-    DMA.doHBlankHDMA (dmaState state)
+    DMA.doHBlank (dmaState state)
 
 updateHardware :: Int -> ReaderT State IO ()
 updateHardware clocksPerCycle = do
@@ -187,8 +189,8 @@ keyUp state = Keypad.release (keypadState state)
 
 -- | Set a background palette.
 writeBgPalette :: State -> Int -> (Word32, Word32, Word32, Word32) -> IO ()
-writeBgPalette state = writeRGBPalette (vram state) False
+writeBgPalette state = VRAM.writeRGBPalette (vram state) False
 
 -- | Set a sprite palette.
 writeSpritePalette :: State -> Int -> (Word32, Word32, Word32, Word32) -> IO ()
-writeSpritePalette state = writeRGBPalette (vram state) True
+writeSpritePalette state = VRAM.writeRGBPalette (vram state) True

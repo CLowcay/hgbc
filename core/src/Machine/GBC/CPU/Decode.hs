@@ -12,11 +12,11 @@ module Machine.GBC.CPU.Decode
   )
 where
 
-import Data.Bits
+import Data.Bits (Bits (..))
 import qualified Data.Vector as V
-import Data.Word
-import Machine.GBC.CPU.ISA
-import Machine.GBC.Util
+import Data.Word (Word16, Word8)
+import Machine.GBC.CPU.ISA (ConditionCode (..), MonadSm83x (..), Register16 (..), Register8 (..), RegisterPushPop (..))
+import Machine.GBC.Util ((.<<.), (.>>.))
 
 class Monad m => MonadFetch m where
   nextByte :: m Word8

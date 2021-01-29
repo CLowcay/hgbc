@@ -6,7 +6,7 @@ module HGBC.Debugger.HTML.CPURegisters
 where
 
 import qualified Data.ByteString.Builder as BB
-import HGBC.Debugger.HTML.Elements
+import HGBC.Debugger.HTML.Elements (descField, field, table, td, th, tr, value)
 
 cpuRegisters :: BB.Builder
 cpuRegisters =

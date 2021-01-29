@@ -6,9 +6,9 @@ module Machine.GBC.Primitive.UnboxedRef
   )
 where
 
-import Control.Monad.IO.Class
-import Data.Primitive
-import GHC.Exts
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Primitive (MutablePrimArray, Prim, newPrimArray, readPrimArray, writePrimArray)
+import GHC.Exts (RealWorld)
 
 newtype UnboxedRef a = UnboxedRef (MutablePrimArray RealWorld a)
 

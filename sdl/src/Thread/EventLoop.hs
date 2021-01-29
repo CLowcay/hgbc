@@ -3,9 +3,9 @@ module Thread.EventLoop
   )
 where
 
-import Control.Concurrent
-import Control.Monad.Reader
-import Data.Maybe
+import Control.Concurrent (forkOS)
+import Control.Monad.Reader (void, when)
+import Data.Maybe (catMaybes)
 import qualified HGBC.Emulator as Emulator
 import qualified HGBC.Keymap as Keymap
 import qualified Machine.GBC.Emulator as Emulator

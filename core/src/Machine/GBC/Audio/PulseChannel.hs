@@ -7,17 +7,17 @@ module Machine.GBC.Audio.PulseChannel
   )
 where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.Audio.Common
-import Machine.GBC.Audio.Envelope
-import Machine.GBC.Audio.Length
-import Machine.GBC.Audio.Sweep
+import Control.Monad.Reader (unless, when)
+import Data.Bits (Bits (complement, (.&.), (.|.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word8)
+import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput, flagLength, flagTrigger, getFrequency, isEnvelopeClockingStep, isLengthClockingStep, isSweepClockingStep, newAudioPort, newAudioPortWithReadMask, updateStatus)
+import Machine.GBC.Audio.Envelope (Envelope, clockEnvelope, envelopeVolume, initEnvelope, newEnvelope)
+import Machine.GBC.Audio.Length (Length, clockLength, extraClocks, initLength, newLength, powerOffLength, reloadLength)
+import Machine.GBC.Audio.Sweep (Sweep, clockSweep, flagNegate, hasPerformedSweepCalculationInNegateMode, initSweep, newSweep)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util (isFlagSet, (.>>.))
 
 data PulseChannel = PulseChannel
   { output :: !(UnboxedRef Int),

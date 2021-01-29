@@ -42,11 +42,8 @@ module HGBC.Debugger.HTML.Elements
 where
 
 import qualified Data.ByteString.Builder as BB
-import Data.List hiding (head)
-import Prelude hiding
-  ( div,
-    head,
-  )
+import Data.List (intersperse)
+import Prelude hiding (div, head)
 
 html :: [BB.Builder] -> BB.Builder
 html contents = "<!DOCTYPE html><html>" <> mconcat contents <> "</html>"

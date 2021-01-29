@@ -7,37 +7,37 @@ module Main
   )
 where
 
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.Writer
+import Control.Monad.Except (MonadIO (liftIO), filterM, forever, runExceptT, unless, void)
+import Control.Monad.Reader (ReaderT (runReaderT))
+import Control.Monad.Writer (WriterT (runWriterT))
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as LB
-import Data.Char
-import Data.Functor
-import Data.IORef
-import Data.List
-import Data.Time
-import Data.Traversable
-import Data.Word
-import Foreign.Marshal.Alloc
-import Framework
+import Data.Char (isSpace)
+import Data.Functor ((<&>))
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.List (isInfixOf, isSuffixOf, sort, stripPrefix)
+import Data.Time (getCurrentTime)
+import Data.Traversable (for)
+import Data.Word (Word16)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Framework (Required (Optional, Required), SourceLink, TestResult (TestFailed, TestPassed), TestSuite, TestTree (TestCase, TestTree), checkResultsAndExit, generateReport, runTestSuite)
 import qualified Machine.GBC.CPU as CPU
 import qualified Machine.GBC.Color as Color
 import qualified Machine.GBC.Emulator as Emulator
-import Machine.GBC.Errors
+import Machine.GBC.Errors (Fault (InvalidInstruction))
 import qualified Machine.GBC.Graphics as Graphics
 import qualified Machine.GBC.Memory as Memory
 import qualified Machine.GBC.ROM as ROM
 import qualified Machine.GBC.Serial as Serial
 import Machine.GBC.Util (formatHex)
-import System.Directory
-import System.Environment
-import System.FilePath
-import System.IO.Temp
-import UnliftIO.Async
-import UnliftIO.Concurrent
-import UnliftIO.Exception
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, listDirectory)
+import System.Environment (lookupEnv)
+import System.FilePath (takeBaseName, takeExtension, (</>))
+import System.IO.Temp (withSystemTempDirectory)
+import UnliftIO.Async (Async, async, cancel)
+import UnliftIO.Concurrent (putMVar, takeMVar)
+import UnliftIO.Exception (Exception, bracket, catch, throwIO)
 
 main :: IO ()
 main = do

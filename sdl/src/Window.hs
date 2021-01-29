@@ -10,10 +10,10 @@ module Window
   )
 where
 
-import Control.Concurrent
-import Control.Exception
-import Control.Monad.IO.Class
-import Data.Int
+import Control.Concurrent (ThreadId, throwTo)
+import Control.Exception (Exception)
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Int (Int32)
 import qualified SDL
 import Prelude hiding (lookup)
 

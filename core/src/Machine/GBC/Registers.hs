@@ -71,7 +71,7 @@ module Machine.GBC.Registers
   )
 where
 
-import Data.Word
+import Data.Word (Word16)
 
 pattern P1 :: Word16
 pattern P1 = 0xFF00

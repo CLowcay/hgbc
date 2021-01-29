@@ -3,9 +3,9 @@ module Machine.GBC.Errors
   )
 where
 
-import Control.Exception
-import Data.Word
-import Machine.GBC.Util
+import Control.Exception (Exception (displayException))
+import Data.Word (Word16, Word8)
+import Machine.GBC.Util (formatHex)
 
 -- | A fault in the emulated hardware. On the real hardware these conditions
 -- lead to undefined behavior.

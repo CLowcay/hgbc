@@ -10,14 +10,14 @@ module Machine.GBC.Keypad
   )
 where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.CPU.Interrupts
-import Machine.GBC.Primitive
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Control.Monad.Reader (void, when)
+import Data.Bits (Bits (complement, testBit, (.&.), (.|.)))
+import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
+import Data.Word (Word16, Word8)
+import qualified Machine.GBC.CPU.Interrupts as Interrupt
+import Machine.GBC.Primitive (Port, newPort, readPort)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util ((.>>.))
 import Prelude hiding (init)
 
 -- | Create the initial keypad state.
@@ -66,7 +66,7 @@ refreshKeypad keypad portIF _ p1 = do
         (False, True) -> keypad' .>>. 4
         (True, True) -> 0xFF
         (False, False) -> (keypad' .&. 0x0F) .|. (keypad' .>>. 4)
-  when (0x0F .&. p1 .&. complement p1' /= 0) (raiseInterrupt portIF InterruptP1Low)
+  when (0x0F .&. p1 .&. complement p1' /= 0) (Interrupt.raise portIF Interrupt.P1Low)
   pure (0xC0 .|. p1')
 
 press :: State -> Key -> IO ()
@@ -88,4 +88,4 @@ updateKeypadState State {..} keypad = do
   void $ refreshKeypad keypad portIF p1 p1
 
 ports :: State -> [(Word16, Port)]
-ports State {..} = [(P1, portP1)]
+ports State {..} = [(R.P1, portP1)]

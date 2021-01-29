@@ -8,17 +8,17 @@ module Machine.GBC.Audio.WaveChannel
   )
 where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.Foldable
-import Data.IORef
+import Control.Monad.Reader (unless, when)
+import Data.Bits (Bits ((.&.)))
+import Data.Foldable (Foldable (toList))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
-import Data.Word
-import Machine.GBC.Audio.Common
-import Machine.GBC.Audio.Length
+import Data.Word (Word8)
+import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput, flagChannel3Enable, flagLength, flagTrigger, getFrequency, isLengthClockingStep, newAudioPortWithReadMask, updateStatus)
+import Machine.GBC.Audio.Length (Length, clockLength, extraClocks, initLength, newLength, powerOffLength, reloadLength)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util (isFlagSet, (.>>.))
 
 data WaveChannel = WaveChannel
   { output :: !(UnboxedRef Int),

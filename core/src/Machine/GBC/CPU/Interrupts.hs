@@ -1,62 +1,62 @@
 module Machine.GBC.CPU.Interrupts
   ( Interrupt (..),
-    flagInterrupt,
-    raiseInterrupt,
-    clearInterrupt,
-    pendingEnabledInterrupts,
-    getNextInterrupt,
+    flag,
+    raise,
+    clear,
+    getPending,
+    getNext,
   )
 where
 
-import Control.Monad.IO.Class
-import Data.Bits
-import Data.Word
+import Control.Monad.IO.Class (MonadIO)
+import Data.Bits (Bits (..), FiniteBits (..))
+import Data.Word (Word8)
 import Machine.GBC.Primitive
 
 data Interrupt
-  = InterruptVBlank
-  | InterruptLCDCStat
-  | InterruptTimerOverflow
-  | InterruptEndSerialTransfer
-  | InterruptP1Low
-  | InterruptCancelled
+  = VBlank
+  | LCDCStat
+  | TimerOverflow
+  | EndSerialTransfer
+  | P1Low
+  | Cancelled
   deriving (Eq, Ord, Show, Bounded, Enum)
 
-flagInterrupt :: Interrupt -> Word8
-flagInterrupt InterruptVBlank = 0x01
-flagInterrupt InterruptLCDCStat = 0x02
-flagInterrupt InterruptTimerOverflow = 0x04
-flagInterrupt InterruptEndSerialTransfer = 0x08
-flagInterrupt InterruptP1Low = 0x10
-flagInterrupt InterruptCancelled = 0
+flag :: Interrupt -> Word8
+flag VBlank = 0x01
+flag LCDCStat = 0x02
+flag TimerOverflow = 0x04
+flag EndSerialTransfer = 0x08
+flag P1Low = 0x10
+flag Cancelled = 0
 
-{-# INLINE raiseInterrupt #-}
-raiseInterrupt :: MonadIO m => Port -> Interrupt -> m ()
-raiseInterrupt portIF interrupt = do
+{-# INLINE raise #-}
+raise :: MonadIO m => Port -> Interrupt -> m ()
+raise portIF interrupt = do
   rif <- directReadPort portIF
-  directWritePort portIF (rif .|. flagInterrupt interrupt)
+  directWritePort portIF (rif .|. flag interrupt)
 
-{-# INLINE clearInterrupt #-}
-clearInterrupt :: MonadIO m => Port -> Interrupt -> m ()
-clearInterrupt portIF interrupt = do
+{-# INLINE clear #-}
+clear :: MonadIO m => Port -> Interrupt -> m ()
+clear portIF interrupt = do
   rif <- directReadPort portIF
-  directWritePort portIF (rif .&. complement (flagInterrupt interrupt))
+  directWritePort portIF (rif .&. complement (flag interrupt))
 
 -- | Get all of the pending interrupts that are ready to service.
-{-# INLINE pendingEnabledInterrupts #-}
-pendingEnabledInterrupts :: MonadIO m => Port -> Port -> m Word8
-pendingEnabledInterrupts portIF portIE = do
+{-# INLINE getPending #-}
+getPending :: MonadIO m => Port -> Port -> m Word8
+getPending portIF portIE = do
   interrupt <- directReadPort portIF
   enabled <- directReadPort portIE
   pure (interrupt .&. enabled .&. 0x1F)
 
 -- | Get the next interrupt to service.
-{-# INLINE getNextInterrupt #-}
-getNextInterrupt :: Word8 -> Interrupt
-getNextInterrupt pendingInterrupts = case countTrailingZeros pendingInterrupts of
-  0 -> InterruptVBlank
-  1 -> InterruptLCDCStat
-  2 -> InterruptTimerOverflow
-  3 -> InterruptEndSerialTransfer
-  4 -> InterruptP1Low
-  _ -> InterruptCancelled
+{-# INLINE getNext #-}
+getNext :: Word8 -> Interrupt
+getNext pendingInterrupts = case countTrailingZeros pendingInterrupts of
+  0 -> VBlank
+  1 -> LCDCStat
+  2 -> TimerOverflow
+  3 -> EndSerialTransfer
+  4 -> P1Low
+  _ -> Cancelled

@@ -9,13 +9,13 @@ module HGBC.Debugger.JSON
   )
 where
 
-import Data.Aeson
+import Data.Aeson (Encoding, KeyValue ((.=)), pairs)
 import qualified Data.Aeson.Encoding as JSON
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString.Short as SB
 import qualified Data.Text as T
-import Machine.GBC.Disassembler
+import Machine.GBC.Disassembler (Editable, Field (..), Instruction (Data, Instruction0, Instruction1, Instruction2), LongAddress (..), Parameter (..))
 import Machine.GBC.Util (formatHex)
 
 toLazyByteString :: Encoding -> LB.ByteString

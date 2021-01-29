@@ -39,15 +39,15 @@ module Machine.GBC.Primitive
   )
 where
 
-import Control.Monad
-import Control.Monad.IO.Class
-import Data.Bits
-import Data.IORef
-import Data.Primitive
-import Data.Word
-import Foreign.ForeignPtr
-import Foreign.Storable
-import Machine.GBC.Primitive.UnboxedRef
+import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Bits (Bits (..))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Primitive (Prim)
+import Data.Word (Word8)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrArray, withForeignPtr)
+import Foreign.Storable (Storable (peekElemOff, pokeElemOff))
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 
 -- | A reloading down counter.  Number of states is reload value + 1.
 data Counter = Counter

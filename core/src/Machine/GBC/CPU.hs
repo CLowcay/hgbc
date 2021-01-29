@@ -47,27 +47,28 @@ module Machine.GBC.CPU
 where
 
 import Control.Exception (throwIO)
-import Control.Monad.Reader
-import Data.Bits
-import Data.Foldable
-import Data.IORef
-import Data.Int
+import Control.Monad.Reader (MonadIO (..), ReaderT (ReaderT), asks, replicateM_, when)
+import Data.Bits (Bits (..))
+import Data.Foldable (for_)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int32, Int8)
 import qualified Data.Vector.Storable.Mutable as VSM
-import Data.Word
-import Foreign.Ptr
-import Foreign.Storable
+import Data.Word (Word16, Word32, Word8)
+import Foreign.Ptr (castPtr)
+import Foreign.Storable (Storable (..))
 import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.CPU.Backtrace as Backtrace
-import Machine.GBC.CPU.Decode
-import Machine.GBC.CPU.ISA
-import Machine.GBC.CPU.Interrupts
-import Machine.GBC.Errors
+import Machine.GBC.CPU.Decode (MonadFetch (..), decodeAndExecute)
+import Machine.GBC.CPU.ISA (ConditionCode (..), MonadSm83x (..), Register16 (..), Register8 (..), RegisterHalf (..), RegisterPushPop (..))
+import Machine.GBC.CPU.Interrupts (Interrupt)
+import qualified Machine.GBC.CPU.Interrupts as Interrupt
+import Machine.GBC.Errors (Fault (InvalidInstruction))
 import qualified Machine.GBC.Memory as Memory
-import Machine.GBC.Mode
+import Machine.GBC.Mode (EmulatorMode (DMG))
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
 
 -- | The register file.
@@ -87,31 +88,26 @@ data RegisterFile = RegisterFile
   deriving (Eq, Ord, Show)
 
 offsetF, offsetA, offsetC, offsetB :: Int
-offsetE, offsetD, offsetL, offsetH :: Int
 offsetF = 0
 offsetA = 1
 offsetC = 2
 offsetB = 3
 
+offsetE, offsetD, offsetL, offsetH :: Int
 offsetE = 4
-
 offsetD = 5
-
 offsetL = 6
-
 offsetH = 7
 
 offsetAF, offsetBC, offsetDE, offsetHL :: Int
-offsetPC, offsetSP, offsetHidden :: Int
 offsetAF = 0
 offsetBC = 1
 offsetDE = 2
 offsetHL = 3
 
+offsetPC, offsetSP, offsetHidden :: Int
 offsetSP = 4
-
 offsetPC = 5
-
 offsetHidden = 6
 
 instance Storable RegisterFile where
@@ -185,7 +181,7 @@ init portIF portIE modeRef = do
   pure State {..}
 
 ports :: State -> [(Word16, Port)]
-ports State {..} = [(KEY1, portKEY1)]
+ports State {..} = [(R.KEY1, portKEY1)]
 
 -- | Get the current cpu mode.
 {-# INLINEABLE getMode #-}
@@ -423,45 +419,45 @@ reset = do
   writeUnboxedRef callDepth 0
   Backtrace.reset backtrace
 
-  Memory.writeByte P1 0xFF
-  Memory.writeByte DIV 0
-  Memory.writeByte SC 0
-  Memory.writeByte SB 0
-  Memory.writeByte TIMA 0
-  Memory.writeByte TMA 0
-  Memory.writeByte TAC 0
-  Memory.writeByte NR10 0
-  Memory.writeByte NR11 0
-  Memory.writeByte NR12 0
-  Memory.writeByte NR13 0
-  Memory.writeByte NR14 0
-  Memory.writeByte NR21 0
-  Memory.writeByte NR22 0
-  Memory.writeByte NR23 0
-  Memory.writeByte NR24 0
-  Memory.writeByte NR30 0
-  Memory.writeByte NR31 0
-  Memory.writeByte NR32 0
-  Memory.writeByte NR33 0
-  Memory.writeByte NR34 0
-  Memory.writeByte NR41 0
-  Memory.writeByte NR42 0
-  Memory.writeByte NR43 0
-  Memory.writeByte NR44 0
-  Memory.writeByte NR50 0
-  Memory.writeByte NR51 0
-  Memory.writeByte NR52 0
-  Memory.writeByte LCDC 0
-  Memory.writeByte SCY 0
-  Memory.writeByte SCX 0
-  Memory.writeByte LYC 0
-  Memory.writeByte BGP 0
-  Memory.writeByte OBP0 0
-  Memory.writeByte OBP1 0
-  Memory.writeByte WY 0
-  Memory.writeByte WX 0
-  Memory.writeByte IE 0
-  Memory.writeByte IF 0
+  Memory.writeByte R.P1 0xFF
+  Memory.writeByte R.DIV 0
+  Memory.writeByte R.SC 0
+  Memory.writeByte R.SB 0
+  Memory.writeByte R.TIMA 0
+  Memory.writeByte R.TMA 0
+  Memory.writeByte R.TAC 0
+  Memory.writeByte R.NR10 0
+  Memory.writeByte R.NR11 0
+  Memory.writeByte R.NR12 0
+  Memory.writeByte R.NR13 0
+  Memory.writeByte R.NR14 0
+  Memory.writeByte R.NR21 0
+  Memory.writeByte R.NR22 0
+  Memory.writeByte R.NR23 0
+  Memory.writeByte R.NR24 0
+  Memory.writeByte R.NR30 0
+  Memory.writeByte R.NR31 0
+  Memory.writeByte R.NR32 0
+  Memory.writeByte R.NR33 0
+  Memory.writeByte R.NR34 0
+  Memory.writeByte R.NR41 0
+  Memory.writeByte R.NR42 0
+  Memory.writeByte R.NR43 0
+  Memory.writeByte R.NR44 0
+  Memory.writeByte R.NR50 0
+  Memory.writeByte R.NR51 0
+  Memory.writeByte R.NR52 0
+  Memory.writeByte R.LCDC 0
+  Memory.writeByte R.SCY 0
+  Memory.writeByte R.SCX 0
+  Memory.writeByte R.LYC 0
+  Memory.writeByte R.BGP 0
+  Memory.writeByte R.OBP0 0
+  Memory.writeByte R.OBP1 0
+  Memory.writeByte R.WY 0
+  Memory.writeByte R.WX 0
+  Memory.writeByte R.IE 0
+  Memory.writeByte R.IF 0
 
   -- Wave memory
   Memory.writeByte 0xFF30 0x00
@@ -496,20 +492,20 @@ reset = do
     setIME
     writePC 0x100
 
-    Memory.writeByte NR52 0xF1
-    Memory.writeByte NR11 0xBF
-    Memory.writeByte NR12 0x11
-    Memory.writeByte NR50 0x77
-    Memory.writeByte NR51 0xF3
-    Memory.writeByte NR14 0x80
-    Memory.writeByte NR12 0xF3
-    Memory.writeByte LCDC 0x91
-    Memory.writeByte BGP 0xFC
-    Memory.writeByte OBP0 0xFF
-    Memory.writeByte OBP1 0xFF
-    Memory.writeByte BCPS 0x88
-    Memory.writeByte OCPS 0x90
-    Memory.writeByte IF 0xE1
+    Memory.writeByte R.NR52 0xF1
+    Memory.writeByte R.NR11 0xBF
+    Memory.writeByte R.NR12 0x11
+    Memory.writeByte R.NR50 0x77
+    Memory.writeByte R.NR51 0xF3
+    Memory.writeByte R.NR14 0x80
+    Memory.writeByte R.NR12 0xF3
+    Memory.writeByte R.LCDC 0x91
+    Memory.writeByte R.BGP 0xFC
+    Memory.writeByte R.OBP0 0xFF
+    Memory.writeByte R.OBP1 0xFF
+    Memory.writeByte R.BCPS 0x88
+    Memory.writeByte R.OCPS 0x90
+    Memory.writeByte R.IF 0xE1
 
     for_ ([0xFF80 ..] `zip` atFF80) (uncurry Memory.writeByte)
 
@@ -562,12 +558,12 @@ flagSpeedSwitch :: Word8
 flagSpeedSwitch = 0x01
 
 interruptVector :: Interrupt -> Word16
-interruptVector InterruptVBlank = 0x40
-interruptVector InterruptLCDCStat = 0x48
-interruptVector InterruptTimerOverflow = 0x50
-interruptVector InterruptEndSerialTransfer = 0x58
-interruptVector InterruptP1Low = 0x60
-interruptVector InterruptCancelled = 0
+interruptVector Interrupt.VBlank = 0x40
+interruptVector Interrupt.LCDCStat = 0x48
+interruptVector Interrupt.TimerOverflow = 0x50
+interruptVector Interrupt.EndSerialTransfer = 0x58
+interruptVector Interrupt.P1Low = 0x60
+interruptVector Interrupt.Cancelled = 0
 
 -- | Fetch, decode, and execute a single instruction.
 {-# INLINEABLE step #-}
@@ -584,14 +580,14 @@ step = do
     ModeNormal -> do
       pc <- readPC
       byte <- Bus.read pc
-      interrupts <- pendingEnabledInterrupts portIF portIE
+      interrupts <- Interrupt.getPending portIF portIE
       if interrupts /= 0 && ime
         then handleInterrupt interrupts
         else do
           writePC (pc + 1)
           run (decodeAndExecute byte)
     ModeHalt -> do
-      interrupts <- pendingEnabledInterrupts portIF portIE
+      interrupts <- Interrupt.getPending portIF portIE
       if interrupts == 0
         then Bus.delay
         else do
@@ -607,7 +603,7 @@ step = do
                   run . decodeAndExecute =<< Bus.read =<< readPC
                 else run (decodeAndExecute =<< nextByte)
     ModeStop -> do
-      interrupts <- pendingEnabledInterrupts portIF portIE
+      interrupts <- Interrupt.getPending portIF portIE
       if interrupts == 0
         then Bus.delay
         else do
@@ -626,12 +622,12 @@ step = do
       ie <- directReadPort portIE
       Bus.write (sp - 2) =<< readRHalf RegPCL
 
-      let nextInterrupt = getNextInterrupt (interrupts .&. ie)
+      let nextInterrupt = Interrupt.getNext (interrupts .&. ie)
       let vector = interruptVector nextInterrupt
       callStackPushed vector
       writePC vector
       clearIME
-      clearInterrupt portIF nextInterrupt
+      Interrupt.clear portIF nextInterrupt
 
 {-# INLINE getCycleClocks #-}
 getCycleClocks :: Has env => ReaderT env IO Int
@@ -1194,7 +1190,7 @@ instance (Bus.Has env, Has env) => MonadSm83x (M env) where
   {-# INLINE halt #-}
   halt = M $ do
     State {..} <- asks forState
-    interrupts <- pendingEnabledInterrupts portIF portIE
+    interrupts <- Interrupt.getPending portIF portIE
     ime <- testIME
     when (not ime && interrupts /= 0) $ liftIO $ writeIORef haltBug True
     setMode ModeHalt

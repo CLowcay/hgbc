@@ -6,7 +6,7 @@ module HGBC.Debugger.HTML.LCDRegisters
 where
 
 import qualified Data.ByteString.Builder as BB
-import HGBC.Debugger.HTML.Elements
+import HGBC.Debugger.HTML.Elements (br, descField, enableDisable, field, fieldGroup, p, table, td, th, tr, ul, unused, value)
 
 lcdRegisters :: BB.Builder
 lcdRegisters =

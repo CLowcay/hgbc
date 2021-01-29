@@ -4,16 +4,16 @@
 
 module Machine.GBC.Audio.NoiseChannel where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.Audio.Common
-import Machine.GBC.Audio.Envelope
-import Machine.GBC.Audio.Length
+import Control.Monad.Reader (unless, when)
+import Data.Bits (Bits (testBit, (.&.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word16, Word8)
+import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput, flagChannel4Enable, flagLength, flagTrigger, isEnvelopeClockingStep, isLengthClockingStep, newAudioPortWithReadMask, updateStatus)
+import Machine.GBC.Audio.Envelope (Envelope, clockEnvelope, envelopeVolume, initEnvelope, newEnvelope)
+import Machine.GBC.Audio.Length (Length, clockLength, extraClocks, initLength, newLength, powerOffLength, reloadLength)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 
 data NoiseChannel = NoiseChannel
   { enable :: !(IORef Bool),

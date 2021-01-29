@@ -9,42 +9,39 @@ module HGBC.Debugger
   )
 where
 
-import Control.Concurrent
+import Control.Concurrent (forkIO, threadDelay)
 import qualified Control.Concurrent.Async as Async
-import Control.Monad
-import Control.Monad.Reader
+import Control.Monad (void)
+import Control.Monad.Reader (ReaderT (runReaderT))
 import qualified Data.Aeson.Encoding as JSON
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy.Char8 as LBC
-import Data.String
+import Data.String (IsString (fromString))
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.Lazy.Encoding as LT
 import qualified HGBC.Debugger.Breakpoints as Breakpoints
 import qualified HGBC.Debugger.Disassembly as Disassembly
-import HGBC.Debugger.HTML
+import HGBC.Debugger.HTML (debugHTML)
 import qualified HGBC.Debugger.JSON as JSON
 import qualified HGBC.Debugger.Labels as Labels
-import HGBC.Debugger.Logging
+import HGBC.Debugger.Logging (logError)
 import qualified HGBC.Debugger.Memory as Memory
 import qualified HGBC.Debugger.Resources as Resource
-import HGBC.Debugger.State
-import HGBC.Debugger.Status
+import HGBC.Debugger.State (DebugState (..), restoreBreakpoints, restoreLabels)
+import HGBC.Debugger.Status (getStatus)
 import qualified HGBC.Emulator as Emulator
-import HGBC.Errors
+import HGBC.Errors (FileParseErrors)
 import qualified HGBC.Events as Event
 import Machine.GBC.CPU (readPC)
-import Machine.GBC.Disassembler
+import Machine.GBC.Disassembler (LongAddress (LongAddress), disassembleROM)
 import qualified Machine.GBC.Emulator as Emulator
-import Machine.GBC.Memory
-  ( bootROMLength,
-    getBank,
-  )
+import Machine.GBC.Memory (bootROMLength, getBank)
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
-import Text.Read
+import Text.Read (readMaybe)
 
 -- | Start the debugger
 start :: Int -> Emulator.RuntimeConfig -> Emulator.State -> IO [FileParseErrors]

@@ -7,10 +7,10 @@ module HGBC.Config.Paths
   )
 where
 
-import Data.Functor
+import Data.Functor ((<&>))
 import qualified Machine.GBC.ROM as ROM
-import System.Directory
-import System.FilePath
+import System.Directory (getAppUserDataDirectory)
+import System.FilePath (takeBaseName, (</>))
 
 base :: IO FilePath
 base = getAppUserDataDirectory "hgbc"

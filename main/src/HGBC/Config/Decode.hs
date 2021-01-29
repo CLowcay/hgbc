@@ -7,14 +7,14 @@ module HGBC.Config.Decode
   )
 where
 
-import Control.Monad
-import Data.Bits
+import Control.Monad (when)
+import Data.Bits (Bits (..))
 import qualified Data.Text as T
 import qualified Data.Text.Read as T
-import Data.Word
+import Data.Word (Word32)
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Mode
-import Machine.GBC.Util
+import Machine.GBC.Mode (EmulatorMode (..))
+import Machine.GBC.Util ((.<<.), (.>>.))
 
 decodeMode :: T.Text -> Either String (Maybe EmulatorMode)
 decodeMode "auto" = Right Nothing

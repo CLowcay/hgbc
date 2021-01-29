@@ -6,17 +6,21 @@ module Machine.GBC.MBC.RTC
 where
 
 import Control.Exception
-import Control.Monad
-import Data.Bits
-import Data.IORef
-import Data.Int
-import Data.Time.Clock.System
-import Data.Word
-import Machine.GBC.MBC.Interface
-import Machine.GBC.Util
-import System.Directory
-import System.IO
-import Text.Read
+  ( Exception (displayException),
+    IOException,
+    try,
+  )
+import Control.Monad (unless, when)
+import Data.Bits (Bits (..))
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Int (Int64)
+import Data.Time.Clock.System (SystemTime (systemSeconds), getSystemTime)
+import Data.Word (Word8)
+import Machine.GBC.MBC.Interface (RTC (..), RTCRegister (DaysHigh, DaysLow, Hours, Minutes, Seconds))
+import Machine.GBC.Util (isFlagSet)
+import System.Directory (doesFileExist)
+import System.IO (hPutStrLn, stderr)
+import Text.Read (readMaybe)
 
 flagHalt :: Word8
 flagHalt = 0x40

@@ -9,14 +9,14 @@ module HGBC.Debugger.Labels
 where
 
 import Control.Exception (catch)
-import Control.Monad
-import Data.Char
+import Control.Monad (when)
+import Data.Char (isSpace)
 import qualified Data.HashMap.Strict as HM
-import Data.IORef
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import qualified Data.Text as T
-import HGBC.Debugger.State
+import HGBC.Debugger.State (DebugState (labelsRef), saveLabels)
 import qualified HGBC.Events as Event
-import Machine.GBC.Disassembler
+import Machine.GBC.Disassembler (Labels, LongAddress)
 
 -- | Add some new labels.
 addFromList :: DebugState -> Event.Channel -> Labels -> IO ()

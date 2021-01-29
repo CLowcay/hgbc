@@ -10,14 +10,14 @@ module Machine.GBC.Audio.Sweep
   )
 where
 
-import Control.Monad
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.Audio.Common
+import Control.Monad (void, when)
+import Data.Bits (Bits ((.&.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word8)
+import Machine.GBC.Audio.Common (updateFrequency)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util (isFlagSet, (.>>.))
 
 data Sweep = Sweep
   { enable :: !(IORef Bool),

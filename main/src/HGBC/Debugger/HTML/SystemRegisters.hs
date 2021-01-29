@@ -6,8 +6,8 @@ module HGBC.Debugger.HTML.SystemRegisters
 where
 
 import qualified Data.ByteString.Builder as BB
-import Data.Functor
-import HGBC.Debugger.HTML.Elements
+import Data.Functor ((<&>))
+import HGBC.Debugger.HTML.Elements (br, descField, enableDisable, field, fieldGroup, p, table, td, th, tr, ul, unused, value)
 
 systemRegisters :: BB.Builder
 systemRegisters =

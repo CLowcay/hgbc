@@ -11,11 +11,11 @@ module Machine.GBC.Audio.Length
   )
 where
 
-import Control.Monad
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.Audio.Common
+import Control.Monad (unless, when)
+import Data.Bits (Bits (..))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word8)
+import Machine.GBC.Audio.Common (FrameSequencerOutput, lastStepClockedLength)
 import Machine.GBC.Primitive
 
 data Length = Length
@@ -42,7 +42,7 @@ initLength Length {..} frameSequencer enabled = do
   -- Quirk: If we are enabling the length counter, and it is currently 0, and
   -- the last frame sequencer step clocked the length, then clock the length
   -- again.
-  when (enabled && (lastStepClockedLength frameSequencer) && v == 0) $
+  when (enabled && lastStepClockedLength frameSequencer && v == 0) $
     updateCounter counter 1 (pure 0)
 
 powerOffLength :: Length -> IO ()

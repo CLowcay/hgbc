@@ -11,26 +11,30 @@ module HGBC.Debugger.State
   )
 where
 
-import Control.Exception hiding (handle)
-import Control.Monad
-import Data.Bifunctor
+import Control.Exception
+  ( Exception (displayException),
+    IOException,
+    bracket,
+    try,
+  )
+import Control.Monad (when)
+import Data.Bifunctor (Bifunctor (second))
 import qualified Data.ByteString.Lazy as LB
-import Data.Either
-import Data.Foldable
-import Data.Functor
+import Data.Either (partitionEithers)
+import Data.Foldable (for_)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashTable.IO as H
-import Data.IORef
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import qualified Data.Text as T
-import Data.Time.Clock
+import Data.Time.Clock (diffUTCTime)
 import qualified HGBC.Config.Paths as Path
 import qualified HGBC.Debugger.SymFile as Sym
-import HGBC.Errors
-import Machine.GBC.Disassembler
-import System.Directory
-import System.FilePath
-import System.IO
-import Text.Read
+import HGBC.Errors (FileParseErrors)
+import Machine.GBC.Disassembler (Disassembly, LongAddress (..), initialLabels)
+import System.Directory (copyFile, createDirectoryIfMissing, doesFileExist, getModificationTime, removeFile, renamePath)
+import System.FilePath (takeBaseName, takeDirectory, (-<.>), (</>))
+import System.IO (Handle, IOMode (ReadMode), hClose, hGetContents, hPutStrLn, openTempFile, withFile)
+import Text.Read (readMaybe)
 import Prelude hiding (init)
 
 data DebugState = DebugState

@@ -6,12 +6,12 @@ module Machine.GBC.MBC.MBC5
   )
 where
 
-import Control.Monad
-import Data.Bits
-import Data.IORef
+import Control.Monad (when)
+import Data.Bits (Bits (..))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Vector.Storable.Mutable as VSM
-import Machine.GBC.MBC.Interface
-import Machine.GBC.Util
+import Machine.GBC.MBC.Interface (MBC (..), RAMAllocator)
+import Machine.GBC.Util ((.<<.))
 
 mbc5 :: Int -> Int -> RAMAllocator -> IO MBC
 mbc5 bankMask ramMask ramAllocator = do

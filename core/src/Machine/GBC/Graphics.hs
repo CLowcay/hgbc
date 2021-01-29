@@ -16,22 +16,39 @@ module Machine.GBC.Graphics
   )
 where
 
-import Control.Concurrent.MVar
-import Control.Monad.Reader
-import Data.Bits
-import Data.Functor
-import Data.IORef
-import Data.Int
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Monad.Reader (when)
+import Data.Bits (Bits (complement, testBit, (.&.), (.|.)))
+import Data.Functor ((<&>))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int8)
 import qualified Data.Vector.Unboxed.Mutable as VUM
-import Data.Word
-import Foreign.Ptr
-import Foreign.Storable
-import Machine.GBC.CPU.Interrupts
-import Machine.GBC.Graphics.VRAM
-import Machine.GBC.Mode
+import Data.Word (Word16, Word8)
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
+import Foreign.Storable (Storable (pokeElemOff))
+import qualified Machine.GBC.CPU.Interrupts as Interrupt
+import Machine.GBC.Graphics.VRAM (VRAM)
+import qualified Machine.GBC.Graphics.VRAM as VRAM
+import Machine.GBC.Mode (EmulatorMode (..), cgbOnlyPort)
 import Machine.GBC.Primitive
-import Machine.GBC.Registers
-import Machine.GBC.Util
+  ( Port,
+    StateCycle,
+    UpdateResult (HasChangedTo),
+    alwaysUpdate,
+    directReadPort,
+    directWritePort,
+    getStateCycle,
+    getUpdateResult,
+    neverUpdate,
+    newPort,
+    newStateCycle,
+    readPort,
+    resetStateCycle,
+    updateStateCycle,
+    writePort,
+  )
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
 
 -- | The current status of the graphics system.
@@ -137,21 +154,21 @@ init vram modeRef frameBufferBytes portIF = mdo
   portWY <- newPort 0x00 0xFF alwaysUpdate
   portWX <- newPort 0x00 0xFF alwaysUpdate
   portBCPS <- newPort 0x40 0xBF $
-    \_ bcps' -> bcps' <$ (directWritePort portBCPD =<< readPalette vram False bcps')
+    \_ bcps' -> bcps' <$ (directWritePort portBCPD =<< VRAM.readPalette vram False bcps')
   portBCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ bcpd' ->
     bcpd' <$ do
       bcps <- readPort portBCPS
-      writePalette vram False bcps bcpd'
+      VRAM.writePalette vram False bcps bcpd'
       when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
   portOCPS <- newPort 0x40 0xBF $
-    \_ ocps' -> ocps' <$ (directWritePort portOCPD =<< readPalette vram True ocps')
+    \_ ocps' -> ocps' <$ (directWritePort portOCPD =<< VRAM.readPalette vram True ocps')
   portOCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ ocpd' ->
     ocpd' <$ do
       ocps <- readPort portOCPS
-      writePalette vram True ocps ocpd'
+      VRAM.writePalette vram True ocps ocpd'
       when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
   portVBK <- newPort 0xFE 0x01 $
-    \_ vbk' -> vbk' <$ setVRAMBank vram (if vbk' .&. 1 == 0 then 0 else 0x2000)
+    \_ vbk' -> vbk' <$ VRAM.setBank vram (if vbk' .&. 1 == 0 then 0 else 0x2000)
 
   assemblySpace <- VUM.replicate 168 (0, (0, 0, False))
   priorityBuffer <- VUM.replicate 168 0
@@ -160,22 +177,22 @@ init vram modeRef frameBufferBytes portIF = mdo
 
 ports :: State -> [(Word16, Port)]
 ports State {..} =
-  [ (LCDC, portLCDC),
-    (STAT, portSTAT),
-    (SCY, portSCY),
-    (SCX, portSCX),
-    (LY, portLY),
-    (LYC, portLYC),
-    (BGP, portBGP),
-    (OBP0, portOBP0),
-    (OBP1, portOBP1),
-    (WY, portWY),
-    (WX, portWX),
-    (BCPS, portBCPS),
-    (BCPD, portBCPD),
-    (OCPS, portOCPS),
-    (OCPD, portOCPD),
-    (VBK, portVBK)
+  [ (R.LCDC, portLCDC),
+    (R.STAT, portSTAT),
+    (R.SCY, portSCY),
+    (R.SCX, portSCX),
+    (R.LY, portLY),
+    (R.LYC, portLYC),
+    (R.BGP, portBGP),
+    (R.OBP0, portOBP0),
+    (R.OBP1, portOBP1),
+    (R.WY, portWY),
+    (R.WX, portWX),
+    (R.BCPS, portBCPS),
+    (R.BCPD, portBCPD),
+    (R.OCPS, portOCPS),
+    (R.OCPD, portOCPD),
+    (R.VBK, portVBK)
   ]
 
 -- | Make a new Graphics sync object.
@@ -260,7 +277,7 @@ updateStatSignal signalRef mode stat = do
 checkStatInterrupt :: Port -> Port -> IORef Bool -> Word8 -> Word8 -> Mode -> IO ()
 checkStatInterrupt portIF portSTAT signalRef ly lyc mode = do
   raise <- updateStatSignal signalRef mode =<< checkLY portSTAT ly lyc
-  when raise $ raiseInterrupt portIF InterruptLCDCStat
+  when raise $ Interrupt.raise portIF Interrupt.LCDCStat
 
 data BusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
 
@@ -278,20 +295,20 @@ step graphicsState@State {..} graphicsSync clockAdvance = do
         stat <- directReadPort portSTAT
         directWritePort portSTAT (modifyBits maskMode (modeBits mode') stat)
 
-        when (mode' == ScanOAM) $ setOAMAccessible vram False
-        when (mode' == ReadVRAM) $ setVRAMAccessible vram False
+        when (mode' == ScanOAM) $ VRAM.setOAMAccessible vram False
+        when (mode' == ReadVRAM) $ VRAM.setAccessible vram False
 
         -- Raise interrupts
         lyc <- directReadPort portLYC
         checkStatInterrupt portIF portSTAT statSignal line' lyc mode'
-        when (mode' == VBlank) $ raiseInterrupt portIF InterruptVBlank
+        when (mode' == VBlank) $ Interrupt.raise portIF Interrupt.VBlank
 
         when (mode' == HBlank) $ do
           let outputBase = frameBufferBytes `plusPtr` (fromIntegral line' * 640)
           emulatorMode <- readIORef modeRef
           renderLine graphicsState emulatorMode line' outputBase
-          setOAMAccessible vram True
-          setVRAMAccessible vram True
+          VRAM.setOAMAccessible vram True
+          VRAM.setAccessible vram True
 
         when (mode' == VBlank) $ do
           putMVar (signalWindow graphicsSync) ()
@@ -370,11 +387,11 @@ renderLine State {..} mode line outputBase = do
           if outPos >= stopOffset
             then pure ()
             else do
-              tile <- readTile vram tileBase inPos
+              tile <- VRAM.readTile vram tileBase inPos
               tileAttrs <-
                 if mode == DMG
                   then pure dmgBackgroundTileAttrs
-                  else readTileAttrs vram tileBase inPos
+                  else VRAM.readTileAttrs vram tileBase inPos
               let hflip = isFlagSet flagHorizontalFlip tileAttrs
               let vflip = isFlagSet flagVerticalFlip tileAttrs
               let tileDataBase = if tile > 127 then 0 else fontOffset
@@ -384,8 +401,8 @@ renderLine State {..} mode line outputBase = do
                       else (fromIntegral tile * 16) + (yOffset * 2)
               (byte0, byte1) <-
                 if isFlagSet flagBank tileAttrs
-                  then readBankedTileData vram (tileDataBase + fontLineOffset)
-                  else readTileData vram (tileDataBase + fontLineOffset)
+                  then VRAM.readBankedTileData vram (tileDataBase + fontLineOffset)
+                  else VRAM.readTileData vram (tileDataBase + fontLineOffset)
               outPos' <- pixelMachine byte0 byte1 (getBackgroundBlendInfo tileAttrs) hflip 7 outPos
               go ((inPos + 1) .&. 0x1F) outPos' -- wrap inPos back to 0 when it gets to the end of the line
     {-# INLINE decodePixel #-}
@@ -418,13 +435,13 @@ renderLine State {..} mode line outputBase = do
               go (offset + 1) (if spriteRendered then spritesRendered + 1 else spritesRendered)
 
     doSprite !h !offset = do
-      (y, x) <- readSpritePosition vram offset
+      (y, x) <- VRAM.readSpritePosition vram offset
       let spriteVisible = x /= 0 && line + 16 >= y && line + 16 < y + h
       if not spriteVisible
         then pure False
         else do
           when (x < 168) $ do
-            (rawCode, attrs) <- readSpriteAttributes vram offset
+            (rawCode, attrs) <- VRAM.readSpriteAttributes vram offset
             let code = if h == 16 then rawCode .&. 0xFE else rawCode
             let vflip = isFlagSet flagVerticalFlip attrs
             let hflip = isFlagSet flagHorizontalFlip attrs
@@ -436,8 +453,8 @@ renderLine State {..} mode line outputBase = do
             let xOffset = fromIntegral x - 8
             (byte0, byte1) <-
               if mode == CGB && isFlagSet flagBank attrs
-                then readBankedTileData vram fontLineOffset
-                else readTileData vram fontLineOffset
+                then VRAM.readBankedTileData vram fontLineOffset
+                else VRAM.readTileData vram fontLineOffset
 
             let priority = if mode == CGB then 0 else fromIntegral xOffset
             blendSprite priority hflip blendInfo byte0 byte1 xOffset
@@ -482,7 +499,7 @@ renderLine State {..} mode line outputBase = do
                   x -> error ("Framebuffer corrupted " <> show x <> " at " <> show offset)
             let mappedIndex = (paletteData .>>. (fromIntegral index * 2)) .&. 0x03
             color <-
-              readRGBPalette
+              VRAM.readRGBPalette
                 vram
                 (layer > 0)
                 (if layer == 2 then 4 .|. mappedIndex else mappedIndex)
@@ -495,6 +512,6 @@ renderLine State {..} mode line outputBase = do
       where
         go !offset = do
           (index, (layer, palette, _)) <- VUM.unsafeRead assemblySpace offset
-          color <- readRGBPalette vram (layer > 0) (index .|. palette)
+          color <- VRAM.readRGBPalette vram (layer > 0) (index .|. palette)
           pokeElemOff (castPtr outputBase) offset color
           if offset >= 159 then pure () else go (offset + 1)

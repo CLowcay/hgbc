@@ -8,15 +8,15 @@ module Machine.GBC.Timer
   )
 where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.IORef
-import Data.Word
-import Machine.GBC.CPU.Interrupts
+import Control.Monad.Reader (when)
+import Data.Bits (Bits (complement, testBit, (.&.), (.|.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word16, Word8)
+import qualified Machine.GBC.CPU.Interrupts as Interrupt
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util ((.<<.), (.>>.))
 import Prelude hiding (init)
 
 -- | The TIMA register behaves differently for 2 cycles after it overflows, so
@@ -75,7 +75,7 @@ init clockAudio portKEY1 portIF = do
   pure State {..}
 
 ports :: State -> [(Word16, Port)]
-ports State {..} = [(DIV, portDIV), (TIMA, portTIMA), (TMA, portTMA), (TAC, portTAC)]
+ports State {..} = [(R.DIV, portDIV), (R.TIMA, portTIMA), (R.TMA, portTMA), (R.TAC, portTAC)]
 
 allTimaBits :: Word16
 allTimaBits = 0x02A8
@@ -124,7 +124,7 @@ update State {..} = do
           directWritePort portTIMA 0
         else directWritePort portTIMA (tima + 1)
     TIMAOverflow -> do
-      raiseInterrupt portIF InterruptTimerOverflow
+      Interrupt.raise portIF Interrupt.TimerOverflow
       writeIORef timaStateRef TIMAReload
       directWritePort portTIMA =<< directReadPort portTMA
     TIMAReload -> do

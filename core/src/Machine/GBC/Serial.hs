@@ -11,18 +11,18 @@ module Machine.GBC.Serial
   )
 where
 
-import Control.Concurrent.MVar
-import Control.Monad
-import Data.Bits
-import Data.Functor
-import Data.IORef
-import Data.Word
-import Machine.GBC.CPU.Interrupts
-import Machine.GBC.Mode
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Monad (unless, when)
+import Data.Bits (Bits (rotateL, testBit, (.&.), (.|.)))
+import Data.Functor ()
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word16, Word8)
+import qualified Machine.GBC.CPU.Interrupts as Interrupt
+import Machine.GBC.Mode (EmulatorMode (DMG))
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util ((.<<.))
 import Prelude hiding (init)
 
 data Sync = Sync
@@ -85,7 +85,7 @@ init sync portIF modeRef = do
   pure State {..}
 
 ports :: State -> [(Word16, Port)]
-ports State {..} = [(SB, portSB), (SC, portSC)]
+ports State {..} = [(R.SB, portSB), (R.SC, portSC)]
 
 -- | Notify an incoming passive transfer
 notifyIncoming :: State -> Int -> Word8 -> IO ()
@@ -123,6 +123,6 @@ update State {..} = do
       when (counter' == 0) $ do
         sc <- directReadPort portSC
         directWritePort portSC (sc .&. 0x7F)
-        raiseInterrupt portIF InterruptEndSerialTransfer
+        Interrupt.raise portIF Interrupt.EndSerialTransfer
         writeIORef transferActiveRef False
       pure counter'

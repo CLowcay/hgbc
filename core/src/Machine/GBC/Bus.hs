@@ -3,8 +3,8 @@ module Machine.GBC.Bus
   )
 where
 
-import Control.Monad.Reader
-import Data.Word
+import Control.Monad.Reader (ReaderT)
+import Data.Word (Word16, Word8)
 
 class Has env where
   -- | Do one read cycle.

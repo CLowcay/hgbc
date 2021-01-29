@@ -30,33 +30,33 @@ module Machine.GBC.Disassembler
   )
 where
 
-import Control.Category hiding ((.))
-import Control.Monad.Reader
-import Control.Monad.State.Strict
-import Data.Bifunctor
-import Data.Bits
+import Control.Category ((>>>))
+import Control.Monad.Reader (MonadIO (liftIO), ReaderT (runReaderT), asks, foldM)
+import Control.Monad.State.Strict (MonadState (get, put), StateT (runStateT), evalStateT, gets)
+import Data.Bifunctor (Bifunctor (bimap, first))
+import Data.Bits (Bits ((.&.), (.|.)))
 import qualified Data.ByteString.Short as SB
-import Data.Char
-import Data.Foldable
-import Data.Function
-import Data.Functor
-import Data.Hashable
-import Data.Int
+import Data.Char (isAlphaNum)
+import Data.Foldable (foldl')
+import Data.Function ((&))
+import Data.Functor ((<&>))
+import Data.Hashable (Hashable (hashWithSalt))
+import Data.Int (Int8)
 import qualified Data.IntMap.Lazy as IM
 import Data.List (intersperse)
-import Data.Maybe
-import Data.String
+import Data.Maybe (catMaybes)
+import Data.String (IsString (fromString))
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Vector.Storable as VS
-import Data.Word
-import Machine.GBC.CPU.Decode
-import Machine.GBC.CPU.ISA
-import Machine.GBC.Disassembler.LabelGenerator
+import Data.Word (Word16, Word8)
+import Machine.GBC.CPU.Decode (MonadFetch (..), decodeAndExecute)
+import Machine.GBC.CPU.ISA (ConditionCode (..), MonadSm83x (..), Register16 (..), Register8 (..), RegisterPushPop (..))
+import Machine.GBC.Disassembler.LabelGenerator (nextGlobalLabel, nextLocalLabel)
 import qualified Machine.GBC.Memory as Memory
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (formatHex, (.<<.), (.>>.))
 import Prelude hiding (lookup)
 
 data LongAddress
@@ -366,72 +366,72 @@ initialLabels =
     (LongAddress 0 0x58, ("int58_serial", False)),
     (LongAddress 0 0x60, ("int60_keypad", False)),
     (LongAddress 0 0x100, ("rom_header", False)),
-    (LongAddress 0 P1, ("P1", False)),
-    (LongAddress 0 SB, ("SB", False)),
-    (LongAddress 0 SC, ("SC", False)),
-    (LongAddress 0 DIV, ("DIV", False)),
-    (LongAddress 0 TIMA, ("TIMA", False)),
-    (LongAddress 0 TMA, ("TMA", False)),
-    (LongAddress 0 TAC, ("TAC", False)),
-    (LongAddress 0 NR10, ("NR10", False)),
-    (LongAddress 0 NR11, ("NR11", False)),
-    (LongAddress 0 NR12, ("NR12", False)),
-    (LongAddress 0 NR13, ("NR13", False)),
-    (LongAddress 0 NR14, ("NR14", False)),
-    (LongAddress 0 NR20, ("NR20", False)),
-    (LongAddress 0 NR21, ("NR21", False)),
-    (LongAddress 0 NR22, ("NR22", False)),
-    (LongAddress 0 NR23, ("NR23", False)),
-    (LongAddress 0 NR24, ("NR24", False)),
-    (LongAddress 0 NR30, ("NR30", False)),
-    (LongAddress 0 NR31, ("NR31", False)),
-    (LongAddress 0 NR32, ("NR32", False)),
-    (LongAddress 0 NR33, ("NR33", False)),
-    (LongAddress 0 NR34, ("NR34", False)),
-    (LongAddress 0 NR40, ("NR40", False)),
-    (LongAddress 0 NR41, ("NR41", False)),
-    (LongAddress 0 NR42, ("NR42", False)),
-    (LongAddress 0 NR43, ("NR43", False)),
-    (LongAddress 0 NR44, ("NR44", False)),
-    (LongAddress 0 NR50, ("NR50", False)),
-    (LongAddress 0 NR51, ("NR51", False)),
-    (LongAddress 0 NR52, ("NR52", False)),
-    (LongAddress 0 IF, ("IF", False)),
-    (LongAddress 0 LCDC, ("LCDC", False)),
-    (LongAddress 0 STAT, ("STAT", False)),
-    (LongAddress 0 SCY, ("SCY", False)),
-    (LongAddress 0 SCX, ("SCX", False)),
-    (LongAddress 0 LY, ("LY", False)),
-    (LongAddress 0 LYC, ("LYC", False)),
-    (LongAddress 0 DMA, ("DMA", False)),
-    (LongAddress 0 BGP, ("BGP", False)),
-    (LongAddress 0 OBP0, ("OBP0", False)),
-    (LongAddress 0 OBP1, ("OBP1", False)),
-    (LongAddress 0 WY, ("WY", False)),
-    (LongAddress 0 WX, ("WX", False)),
-    (LongAddress 0 R4C, ("R4C", False)),
-    (LongAddress 0 KEY1, ("KEY1", False)),
-    (LongAddress 0 VBK, ("VBK", False)),
-    (LongAddress 0 BLCK, ("BLCK", False)),
-    (LongAddress 0 HDMA1, ("HDMA1", False)),
-    (LongAddress 0 HDMA2, ("HDMA2", False)),
-    (LongAddress 0 HDMA3, ("HDMA3", False)),
-    (LongAddress 0 HDMA4, ("HDMA4", False)),
-    (LongAddress 0 HDMA5, ("HDMA5", False)),
-    (LongAddress 0 RP, ("RP", False)),
-    (LongAddress 0 BCPS, ("BCPS", False)),
-    (LongAddress 0 BCPD, ("BCPD", False)),
-    (LongAddress 0 OCPS, ("OCPS", False)),
-    (LongAddress 0 OCPD, ("OCPD", False)),
-    (LongAddress 0 R6C, ("R6C", False)),
-    (LongAddress 0 SVBK, ("SVBK", False)),
-    (LongAddress 0 R72, ("R72", False)),
-    (LongAddress 0 R73, ("R73", False)),
-    (LongAddress 0 R74, ("R74", False)),
-    (LongAddress 0 R75, ("R75", False)),
-    (LongAddress 0 PCM12, ("PCM12", False)),
-    (LongAddress 0 PCM34, ("PCM34", False)),
-    (LongAddress 0 IE, ("IE", False))
+    (LongAddress 0 R.P1, ("P1", False)),
+    (LongAddress 0 R.SB, ("SB", False)),
+    (LongAddress 0 R.SC, ("SC", False)),
+    (LongAddress 0 R.DIV, ("DIV", False)),
+    (LongAddress 0 R.TIMA, ("TIMA", False)),
+    (LongAddress 0 R.TMA, ("TMA", False)),
+    (LongAddress 0 R.TAC, ("TAC", False)),
+    (LongAddress 0 R.NR10, ("NR10", False)),
+    (LongAddress 0 R.NR11, ("NR11", False)),
+    (LongAddress 0 R.NR12, ("NR12", False)),
+    (LongAddress 0 R.NR13, ("NR13", False)),
+    (LongAddress 0 R.NR14, ("NR14", False)),
+    (LongAddress 0 R.NR20, ("NR20", False)),
+    (LongAddress 0 R.NR21, ("NR21", False)),
+    (LongAddress 0 R.NR22, ("NR22", False)),
+    (LongAddress 0 R.NR23, ("NR23", False)),
+    (LongAddress 0 R.NR24, ("NR24", False)),
+    (LongAddress 0 R.NR30, ("NR30", False)),
+    (LongAddress 0 R.NR31, ("NR31", False)),
+    (LongAddress 0 R.NR32, ("NR32", False)),
+    (LongAddress 0 R.NR33, ("NR33", False)),
+    (LongAddress 0 R.NR34, ("NR34", False)),
+    (LongAddress 0 R.NR40, ("NR40", False)),
+    (LongAddress 0 R.NR41, ("NR41", False)),
+    (LongAddress 0 R.NR42, ("NR42", False)),
+    (LongAddress 0 R.NR43, ("NR43", False)),
+    (LongAddress 0 R.NR44, ("NR44", False)),
+    (LongAddress 0 R.NR50, ("NR50", False)),
+    (LongAddress 0 R.NR51, ("NR51", False)),
+    (LongAddress 0 R.NR52, ("NR52", False)),
+    (LongAddress 0 R.IF, ("IF", False)),
+    (LongAddress 0 R.LCDC, ("LCDC", False)),
+    (LongAddress 0 R.STAT, ("STAT", False)),
+    (LongAddress 0 R.SCY, ("SCY", False)),
+    (LongAddress 0 R.SCX, ("SCX", False)),
+    (LongAddress 0 R.LY, ("LY", False)),
+    (LongAddress 0 R.LYC, ("LYC", False)),
+    (LongAddress 0 R.DMA, ("DMA", False)),
+    (LongAddress 0 R.BGP, ("BGP", False)),
+    (LongAddress 0 R.OBP0, ("OBP0", False)),
+    (LongAddress 0 R.OBP1, ("OBP1", False)),
+    (LongAddress 0 R.WY, ("WY", False)),
+    (LongAddress 0 R.WX, ("WX", False)),
+    (LongAddress 0 R.R4C, ("R4C", False)),
+    (LongAddress 0 R.KEY1, ("KEY1", False)),
+    (LongAddress 0 R.VBK, ("VBK", False)),
+    (LongAddress 0 R.BLCK, ("BLCK", False)),
+    (LongAddress 0 R.HDMA1, ("HDMA1", False)),
+    (LongAddress 0 R.HDMA2, ("HDMA2", False)),
+    (LongAddress 0 R.HDMA3, ("HDMA3", False)),
+    (LongAddress 0 R.HDMA4, ("HDMA4", False)),
+    (LongAddress 0 R.HDMA5, ("HDMA5", False)),
+    (LongAddress 0 R.RP, ("RP", False)),
+    (LongAddress 0 R.BCPS, ("BCPS", False)),
+    (LongAddress 0 R.BCPD, ("BCPD", False)),
+    (LongAddress 0 R.OCPS, ("OCPS", False)),
+    (LongAddress 0 R.OCPD, ("OCPD", False)),
+    (LongAddress 0 R.R6C, ("R6C", False)),
+    (LongAddress 0 R.SVBK, ("SVBK", False)),
+    (LongAddress 0 R.R72, ("R72", False)),
+    (LongAddress 0 R.R73, ("R73", False)),
+    (LongAddress 0 R.R74, ("R74", False)),
+    (LongAddress 0 R.R75, ("R75", False)),
+    (LongAddress 0 R.PCM12, ("PCM12", False)),
+    (LongAddress 0 R.PCM34, ("PCM34", False)),
+    (LongAddress 0 R.IE, ("IE", False))
   ]
     <> [(LongAddress 0 (0xFE00 + i * 4), ("OBJ" <> T.pack (show i), False)) | i <- [0 .. 39]]
 

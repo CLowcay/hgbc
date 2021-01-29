@@ -2,11 +2,11 @@
 
 module Machine.GBC.Graphics.VRAM
   ( VRAM,
-    initVRAM,
-    setVRAMAccessible,
+    init,
+    setAccessible,
     setOAMAccessible,
-    getVRAMBank,
-    setVRAMBank,
+    getBank,
+    setBank,
     writePalette,
     readPalette,
     readRGBPalette,
@@ -20,20 +20,21 @@ module Machine.GBC.Graphics.VRAM
     readOAM,
     writeOAM,
     writeOAMDirect,
-    readVRAM,
-    readVRAMBankOffset,
-    writeVRAM,
+    read,
+    readBankOffset,
+    write,
   )
 where
 
-import Control.Monad
-import Data.Bits
-import Data.IORef
+import Control.Monad (when)
+import Data.Bits (Bits ((.&.), (.|.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector.Storable.Mutable as VSM
-import Data.Word
+import Data.Word (Word16, Word32, Word8)
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.Util ((.<<.), (.>>.))
+import Prelude hiding (init, read)
 
 data VRAM = VRAM
   { vram :: !(VSM.IOVector Word8),
@@ -43,14 +44,14 @@ data VRAM = VRAM
     oamAccessible :: !(IORef Bool),
     vramAccessible :: !(IORef Bool),
     vramBank :: !(UnboxedRef Int),
-    colorFunction :: !(Color.Correction)
+    colorFunction :: !Color.Correction
   }
 
 totalPaletteEntries :: Int
 totalPaletteEntries = 8 * 4 * 2 -- 2 sets of 8 palettes with 4 colors each.
 
-initVRAM :: Color.Correction -> IO VRAM
-initVRAM colorFunction = do
+init :: Color.Correction -> IO VRAM
+init colorFunction = do
   vram <- VSM.new 0x4000
   oam <- VSM.new 160
   oamAccessible <- newIORef True
@@ -60,21 +61,21 @@ initVRAM colorFunction = do
   rgbPalettes <- VSM.replicate totalPaletteEntries 0xFFFFFFFF
   pure VRAM {..}
 
-{-# INLINE setVRAMAccessible #-}
-setVRAMAccessible :: VRAM -> Bool -> IO ()
-setVRAMAccessible VRAM {..} = writeIORef vramAccessible
+{-# INLINE setAccessible #-}
+setAccessible :: VRAM -> Bool -> IO ()
+setAccessible VRAM {..} = writeIORef vramAccessible
 
 {-# INLINE setOAMAccessible #-}
 setOAMAccessible :: VRAM -> Bool -> IO ()
 setOAMAccessible VRAM {..} = writeIORef oamAccessible
 
-{-# INLINE getVRAMBank #-}
-getVRAMBank :: VRAM -> IO Int
-getVRAMBank VRAM {..} = readUnboxedRef vramBank
+{-# INLINE getBank #-}
+getBank :: VRAM -> IO Int
+getBank VRAM {..} = readUnboxedRef vramBank
 
-{-# INLINE setVRAMBank #-}
-setVRAMBank :: VRAM -> Int -> IO ()
-setVRAMBank VRAM {..} = writeUnboxedRef vramBank
+{-# INLINE setBank #-}
+setBank :: VRAM -> Int -> IO ()
+setBank VRAM {..} = writeUnboxedRef vramBank
 
 -- | Get the byte offset into palette memory given the value of a cps register.
 paletteByte :: Bool -> Word8 -> Int
@@ -180,9 +181,9 @@ writeOAM VRAM {..} addr value = do
 writeOAMDirect :: VRAM -> Word16 -> Word8 -> IO ()
 writeOAMDirect VRAM {..} addr = VSM.unsafeWrite oam (fromIntegral addr)
 
-{-# INLINE readVRAM #-}
-readVRAM :: VRAM -> Word16 -> IO Word8
-readVRAM VRAM {..} addr = do
+{-# INLINE read #-}
+read :: VRAM -> Word16 -> IO Word8
+read VRAM {..} addr = do
   isAccessible <- readIORef vramAccessible
   if not isAccessible
     then pure 0xFF
@@ -190,16 +191,16 @@ readVRAM VRAM {..} addr = do
       bankOffset <- readUnboxedRef vramBank
       VSM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
 
-readVRAMBankOffset :: VRAM -> Int -> Word16 -> IO Word8
-readVRAMBankOffset VRAM {..} bankOffset addr = do
+readBankOffset :: VRAM -> Int -> Word16 -> IO Word8
+readBankOffset VRAM {..} bankOffset addr = do
   isAccessible <- readIORef vramAccessible
   if not isAccessible
     then pure 0xFF
     else VSM.unsafeRead vram (fromIntegral (addr - 0x8000) + bankOffset)
 
-{-# INLINE writeVRAM #-}
-writeVRAM :: VRAM -> Word16 -> Word8 -> IO ()
-writeVRAM VRAM {..} addr value = do
+{-# INLINE write #-}
+write :: VRAM -> Word16 -> Word8 -> IO ()
+write VRAM {..} addr value = do
   isAccessible <- readIORef vramAccessible
   if not isAccessible
     then pure ()

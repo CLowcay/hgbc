@@ -13,13 +13,13 @@ module Machine.GBC.MBC
 where
 
 import qualified Data.Vector.Storable.Mutable as VSM
-import Machine.GBC.MBC.Interface
-import Machine.GBC.MBC.MBC1
-import Machine.GBC.MBC.MBC2
-import Machine.GBC.MBC.MBC3
-import Machine.GBC.MBC.MBC5
+import Machine.GBC.MBC.Interface (MBC (..), RAMAllocator, RTC (..), RTCRegister (..))
+import Machine.GBC.MBC.MBC1 (mbc1)
+import Machine.GBC.MBC.MBC2 (mbc2)
+import Machine.GBC.MBC.MBC3 (mbc3)
+import Machine.GBC.MBC.MBC5 (mbc5)
 import qualified Machine.GBC.MBC.RTC as RTC
-import System.IO.MMap
+import System.IO.MMap (Mode (ReadWriteEx), mmapFileForeignPtr)
 
 -- | Simulate a cartridge with no memory bank controller.
 nullMBC :: IO MBC

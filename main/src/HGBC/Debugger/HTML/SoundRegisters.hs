@@ -6,7 +6,7 @@ module HGBC.Debugger.HTML.SoundRegisters
 where
 
 import qualified Data.ByteString.Builder as BB
-import HGBC.Debugger.HTML.Elements
+import HGBC.Debugger.HTML.Elements (br, descField, enableDisable, field, fieldGroup, p, table, td, tdspan, th, tr, ul, unused, value)
 
 soundRegisters :: BB.Builder
 soundRegisters =

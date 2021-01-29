@@ -6,19 +6,19 @@ module HGBC.Debugger.ROM
 where
 
 import qualified Data.ByteString.Char8 as BC
-import Machine.GBC.ROM
+import qualified Machine.GBC.ROM as ROM
 import Machine.GBC.Util (formatHex)
 
-dumpHeader :: Header -> IO ()
-dumpHeader Header {..} = do
+dumpHeader :: ROM.Header -> IO ()
+dumpHeader ROM.Header {..} = do
   putStrLn $
     take 16 (BC.unpack gameTitle ++ repeat ' ')
       ++ " "
       ++ BC.unpack gameCode
       ++ " "
       ++ case destination of
-        Japan -> " (JAPAN)"
-        Overseas -> " (INTERNATIONAL)"
+        ROM.Japan -> " (JAPAN)"
+        ROM.Overseas -> " (INTERNATIONAL)"
 
   putStrLn ("Version: " ++ show maskROMVersion)
   putStrLn
@@ -28,25 +28,25 @@ dumpHeader Header {..} = do
 
   putStr $
     "Console support: " ++ case cgbSupport of
-      CGBIncompatible -> "GB"
-      CGBCompatible -> "GB+CGB"
-      CGBExclusive -> "CGB"
+      ROM.CGBIncompatible -> "GB"
+      ROM.CGBCompatible -> "GB+CGB"
+      ROM.CGBExclusive -> "CGB"
   putStrLn $ case sgbSupport of
-    GBOnly -> ""
-    UsesSGB -> "+SGB"
+    ROM.GBOnly -> ""
+    ROM.UsesSGB -> "+SGB"
 
   let cartridge =
-        "Cartridge: " ++ case mbcType cartridgeType of
+        "Cartridge: " ++ case ROM.mbcType cartridgeType of
           Nothing -> "No MBC"
-          Just MBC1 -> "MBC1"
-          Just MBC2 -> "MBC2"
-          Just MBC3 -> "MBC3"
-          Just MBC3RTC -> "MBC3+RTC"
-          Just MBC5 -> "MBC5"
+          Just ROM.MBC1 -> "MBC1"
+          Just ROM.MBC2 -> "MBC2"
+          Just ROM.MBC3 -> "MBC3"
+          Just ROM.MBC3RTC -> "MBC3+RTC"
+          Just ROM.MBC5 -> "MBC5"
   putStrLn
     ( cartridge
-        ++ (if hasSRAM cartridgeType then "+SRAM" else "")
-        ++ (if hasBackupBattery cartridgeType then "+Battery" else "")
+        ++ (if ROM.hasSRAM cartridgeType then "+SRAM" else "")
+        ++ (if ROM.hasBackupBattery cartridgeType then "+Battery" else "")
         ++ " ("
         ++ formatByteCount romSize
         ++ " ROM"

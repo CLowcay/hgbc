@@ -10,12 +10,12 @@ module Machine.GBC.CPU.Backtrace
   )
 where
 
-import Control.Monad
-import Control.Monad.IO.Class
-import Data.Bits
+import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Bits (Bits (..))
 import qualified Data.Vector.Unboxed.Mutable as VUM
-import Data.Word
-import Machine.GBC.Primitive.UnboxedRef
+import Data.Word (Word16)
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 
 data Backtrace = Backtrace
   { trace :: !(VUM.IOVector (Word16, Word16)),

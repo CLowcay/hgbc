@@ -23,33 +23,35 @@ module Machine.GBC.Memory
 where
 
 import Control.Exception (throwIO)
-import Control.Monad.Reader
-import Data.Bifunctor
-import Data.Bits
+import Control.Monad.Reader (MonadIO (liftIO), ReaderT, asks, when)
+import Data.Bifunctor (Bifunctor (first))
+import Data.Bits (Bits ((.&.), (.|.)))
 import qualified Data.ByteString as B
-import Data.Functor
-import Data.IORef
-import Data.Maybe
+import Data.Functor ((<&>))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import qualified Data.Vector.Storable.Mutable as VSM
-import Data.Word
-import Machine.GBC.Errors
-import Machine.GBC.Graphics.VRAM
-import Machine.GBC.Mode
+import Data.Word (Word16, Word8)
+import Machine.GBC.Errors (Fault (InvalidRead, InvalidWrite))
+import Machine.GBC.Graphics.VRAM (VRAM)
+import qualified Machine.GBC.Graphics.VRAM as VRAM
+import Machine.GBC.Mode (EmulatorMode (DMG), cgbOnlyPort)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.ROM
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import Machine.GBC.ROM (ROM)
+import qualified Machine.GBC.ROM as ROM
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
 
 -- | The gameboy memory.
 data State = State
-  { mbc :: !MBC,
+  { mbc :: !ROM.MBC,
     mode0 :: !EmulatorMode,
     modeRef :: !(IORef EmulatorMode),
-    header :: !Header,
+    header :: !ROM.Header,
     rom0 :: !(IORef (VS.Vector Word8)), -- The first 8kb of ROM. Can be switched between cartridge ROM and boot ROM.
     rom :: !(VS.Vector Word8), -- All of cartrige ROM.
     bootROMLength :: Int,
@@ -108,11 +110,11 @@ initForROM ::
   IORef EmulatorMode ->
   IO State
 initForROM boot romInfo vram ports portIE modeRef = do
-  mbc <- getMBC romInfo
+  mbc <- ROM.getMBC romInfo
   init
     boot
-    (VS.fromList (B.unpack (romContent romInfo)))
-    (romHeader romInfo)
+    (VS.fromList (B.unpack (ROM.romContent romInfo)))
+    (ROM.romHeader romInfo)
     mbc
     vram
     ports
@@ -122,8 +124,8 @@ initForROM boot romInfo vram ports portIE modeRef = do
 init ::
   Maybe (VS.Vector Word8) ->
   VS.Vector Word8 ->
-  Header ->
-  MBC ->
+  ROM.Header ->
+  ROM.MBC ->
   VRAM ->
   [(Word16, Port)] ->
   Port ->
@@ -184,17 +186,17 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
 
   let ports =
         V.accum
-          (flip const)
+          (\_ x -> x)
           (V.replicate 128 emptyPort)
           ( first portOffset
-              <$> ( (BLCK, portBLCK) :
-                    (SVBK, portSVBK) :
-                    (R4C, portR4C) :
-                    (R6C, portR6C) :
-                    (R72, r72) :
-                    (R73, r73) :
-                    (R74, r74) :
-                    (R75, r75) :
+              <$> ( (R.BLCK, portBLCK) :
+                    (R.SVBK, portSVBK) :
+                    (R.R4C, portR4C) :
+                    (R.R6C, portR6C) :
+                    (R.R72, r72) :
+                    (R.R73, r73) :
+                    (R.R74, r74) :
+                    (R.R75, r75) :
                     rawPorts
                   )
           )
@@ -203,7 +205,7 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   pure State {..}
 
 -- | Get the ROM header.
-getROMHeader :: State -> Header
+getROMHeader :: State -> ROM.Header
 getROMHeader State {..} = header
 
 -- | Get all of the ROM bytes.
@@ -229,12 +231,12 @@ getBank address = do
         then do
           lockout <- readIORef bootROMLockout
           pure (if lockout then 0 else 0xFFFF)
-        else lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
-    1 -> lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
-    2 -> highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
-    3 -> highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
-    4 -> getVRAMBank vram <&> \o -> fromIntegral (o .>>. 13)
-    5 -> ramBankOffset mbc <&> \o -> fromIntegral (o .>>. 13)
+        else ROM.lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    1 -> ROM.lowBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    2 -> ROM.highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    3 -> ROM.highBankOffset mbc <&> \o -> fromIntegral (o .>>. 14)
+    4 -> VRAM.getBank vram <&> \o -> fromIntegral (o .>>. 13)
+    5 -> ROM.ramBankOffset mbc <&> \o -> fromIntegral (o .>>. 13)
     6 ->
       if address < 0xD000
         then pure 0
@@ -248,7 +250,7 @@ getBank address = do
 -- | Get the status of the cartridge RAM gate (True for enabled, False for
 -- disabled).
 getRamGate :: Has env => ReaderT env IO Bool
-getRamGate = liftIO . ramGate . mbc =<< asks forState
+getRamGate = liftIO . ROM.ramGate . mbc =<< asks forState
 
 -- | Read a byte from a specific memory bank.
 readByteLong :: Has env => Word16 -> Word16 -> ReaderT env IO Word8
@@ -264,8 +266,8 @@ readByteLong bank addr = do
     1 -> pure (rom VS.! offsetWithBank 14 0)
     2 -> pure (rom VS.! offsetWithBank 14 0x4000)
     3 -> pure (rom VS.! offsetWithBank 14 0x4000)
-    4 -> readVRAMBankOffset vram (fromIntegral bank .<<. 13) addr
-    5 -> readRAMBankOffset mbc (fromIntegral bank .<<. 13) (addr - 0xA000)
+    4 -> VRAM.readBankOffset vram (fromIntegral bank .<<. 13) addr
+    5 -> ROM.readRAMBankOffset mbc (fromIntegral bank .<<. 13) (addr - 0xA000)
     6
       | addr < 0xD000 -> VSM.read memRam (offset 0xC000)
       | otherwise -> VSM.read memRam (offsetWithBank 12 0xC000)
@@ -273,11 +275,11 @@ readByteLong bank addr = do
       | addr < 0xF000 -> VSM.read memRam (offset 0xE000)
       | addr < 0xFE00 -> VSM.unsafeRead memRam (offsetWithBank 12 0xE000)
       | addr < 0xFEA0 -> do
-        value <- readOAM vram addr
+        value <- VRAM.readOAM vram addr
         pure (fromIntegral value)
       | addr < 0xFF00 -> pure 0xFF
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
-      | addr == IE -> liftIO $ readPort portIE
+      | addr == R.IE -> liftIO $ readPort portIE
       | otherwise -> VSM.read memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address " ++ show x)
   where
@@ -292,19 +294,19 @@ readByte addr = do
   liftIO $ case addr .>>. 13 of
     0 -> do
       content <- readIORef rom0
-      bank <- lowBankOffset mbc
+      bank <- ROM.lowBankOffset mbc
       pure (content `VS.unsafeIndex` (bank + fromIntegral addr))
     1 -> do
-      bank <- lowBankOffset mbc
+      bank <- ROM.lowBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + fromIntegral addr))
     2 -> do
-      bank <- highBankOffset mbc
+      bank <- ROM.highBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + offset 0x4000))
     3 -> do
-      bank <- highBankOffset mbc
+      bank <- ROM.highBankOffset mbc
       pure (rom `VS.unsafeIndex` (bank + offset 0x4000))
-    4 -> readVRAM vram addr
-    5 -> readRAM mbc (addr - 0xA000)
+    4 -> VRAM.read vram addr
+    5 -> ROM.readRAM mbc (addr - 0xA000)
     6
       | addr < 0xD000 -> VSM.unsafeRead memRam (offset 0xC000)
       | otherwise -> do
@@ -316,13 +318,13 @@ readByte addr = do
         bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeRead memRam (bank + offset 0xE000)
       | addr < 0xFEA0 -> do
-        value <- readOAM vram addr
+        value <- VRAM.readOAM vram addr
         pure (fromIntegral value)
       | addr < 0xFF00 -> liftIO $ do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
       | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
-      | addr == IE -> liftIO $ readPort portIE
+      | addr == R.IE -> liftIO $ readPort portIE
       | otherwise -> VSM.unsafeRead memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address " ++ show x)
   where
@@ -333,12 +335,12 @@ writeByte :: Has env => Word16 -> Word8 -> ReaderT env IO ()
 writeByte addr value = do
   State {..} <- asks forState
   liftIO $ case addr .>>. 13 of
-    0 -> writeROM mbc addr value
-    1 -> writeROM mbc addr value
-    2 -> writeROM mbc addr value
-    3 -> writeROM mbc addr value
-    4 -> writeVRAM vram addr value
-    5 -> writeRAM mbc (addr - 0xA000) value
+    0 -> ROM.writeROM mbc addr value
+    1 -> ROM.writeROM mbc addr value
+    2 -> ROM.writeROM mbc addr value
+    3 -> ROM.writeROM mbc addr value
+    4 -> VRAM.write vram addr value
+    5 -> ROM.writeRAM mbc (addr - 0xA000) value
     6
       | addr < 0xD000 -> VSM.unsafeWrite memRam (offset 0xC000) value
       | otherwise -> do
@@ -349,12 +351,12 @@ writeByte addr value = do
       | addr < 0xFE00 -> do
         bank <- readUnboxedRef internalRamBankOffset
         VSM.unsafeWrite memRam (bank + offset 0xE000) value
-      | addr < 0xFEA0 -> writeOAM vram addr value
+      | addr < 0xFEA0 -> VRAM.writeOAM vram addr value
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
       | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
-      | addr == IE -> liftIO $ writePort portIE value
+      | addr == R.IE -> liftIO $ writePort portIE value
       | otherwise -> VSM.unsafeWrite memHigh (offset 0xFF80) value
     x -> error ("Impossible coarse write address " ++ show x)
   where

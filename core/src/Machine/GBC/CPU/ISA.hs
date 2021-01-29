@@ -10,8 +10,8 @@ module Machine.GBC.CPU.ISA
   )
 where
 
-import Data.Int
-import Data.Word
+import Data.Int (Int8)
+import Data.Word (Word16, Word8)
 
 -- | An 8-bit register
 data Register8 = RegA | RegB | RegC | RegD | RegE | RegH | RegL deriving (Eq, Ord, Bounded, Enum)

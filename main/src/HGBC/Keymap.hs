@@ -12,9 +12,9 @@ module HGBC.Keymap
   )
 where
 
-import Data.Either
-import Data.Foldable
-import Data.Functor
+import Data.Either (partitionEithers)
+import Data.Foldable (Foldable (toList))
+import Data.Functor ((<&>))
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T

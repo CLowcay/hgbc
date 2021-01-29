@@ -6,9 +6,9 @@ module Machine.GBC.Disassembler.LabelGenerator
   )
 where
 
-import Data.IORef
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
-import System.IO.Unsafe
+import System.IO.Unsafe (unsafePerformIO)
 
 {-# NOINLINE globalCounter #-}
 globalCounter :: IORef Int

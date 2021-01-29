@@ -9,10 +9,10 @@ where
 
 import Control.Exception (catch)
 import qualified Data.HashTable.IO as H
-import Data.Maybe
-import HGBC.Debugger.State
+import Data.Maybe (fromMaybe)
+import HGBC.Debugger.State (DebugState (breakpoints), saveBreakpoints)
 import qualified HGBC.Events as Event
-import Machine.GBC.Disassembler
+import Machine.GBC.Disassembler (LongAddress)
 
 getAsList :: DebugState -> IO [(LongAddress, Bool)]
 getAsList debugState = H.toList (breakpoints debugState)

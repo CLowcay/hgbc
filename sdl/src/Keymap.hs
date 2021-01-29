@@ -7,10 +7,10 @@ module Keymap
   )
 where
 
-import Control.Applicative
+import Control.Applicative (Alternative ((<|>)))
 import qualified Data.Map as M
 import qualified Data.Text as T
-import HGBC.Keymap
+import HGBC.Keymap (Key (GBCKey, Pause, Quit), Keymap (..), Modifier (..))
 import qualified Machine.GBC.Keypad as Keypad
 import qualified SDL
 

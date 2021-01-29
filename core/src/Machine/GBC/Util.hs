@@ -7,8 +7,8 @@ module Machine.GBC.Util
   )
 where
 
-import Data.Bits
-import Data.Word
+import Data.Bits (Bits (..), FiniteBits (..))
+import Data.Word (Word8)
 
 infixl 8 .<<.
 

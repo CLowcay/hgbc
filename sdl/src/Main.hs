@@ -4,26 +4,26 @@ module Main
 where
 
 import qualified Audio
-import Control.Concurrent
+import Control.Concurrent (forkIO)
 import Control.Exception (displayException)
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Data.Foldable
+import Control.Monad.Except (MonadIO (liftIO), forever, runExceptT, void, when)
+import Control.Monad.Reader (ReaderT (runReaderT))
+import Control.Monad.Writer (WriterT (runWriterT))
+import Data.Foldable (for_)
 import qualified HGBC.Config as Config
 import qualified HGBC.Config.CommandLine as CommandLine
 import qualified HGBC.Debugger as Debugger
 import qualified HGBC.Debugger.ROM as ROM
 import qualified HGBC.Emulator as Emulator
 import qualified HGBC.Events as Event
-import Keymap
+import Keymap (decodeScancode, defaultKeymap)
 import qualified Machine.GBC.CPU as CPU
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
 import Machine.GBC.Memory (getROMHeader)
 import qualified Machine.GBC.Memory as Memory
 import Machine.GBC.Util (formatHex)
-import Numeric
+import Numeric (showFFloat)
 import qualified SDL
 import qualified Thread.EventLoop as EventLoop
 import qualified Thread.LCD as LCD

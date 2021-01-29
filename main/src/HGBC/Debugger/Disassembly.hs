@@ -12,12 +12,12 @@ import qualified Data.Aeson.Encoding as JSON
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy.Char8 as LBC
 import qualified Data.HashMap.Strict as HM
-import Data.IORef
-import Data.String
+import Data.IORef (readIORef, writeIORef)
+import Data.String (IsString (fromString))
 import qualified Data.Text.Lazy as LT
 import qualified HGBC.Debugger.JSON as JSON
-import HGBC.Debugger.State
-import Machine.GBC.Disassembler
+import HGBC.Debugger.State (DebugState (disassemblyRef, labelsRef, romFileName))
+import Machine.GBC.Disassembler (Disassembly, LongAddress, generateOutput, lookupN)
 
 get :: DebugState -> IO Disassembly
 get debugState = readIORef (disassemblyRef debugState)

@@ -8,14 +8,7 @@ module Thread.LCD
   )
 where
 
-import Control.Concurrent
-  ( forkOS,
-    newEmptyMVar,
-    putMVar,
-    takeMVar,
-    tryPutMVar,
-    tryTakeMVar,
-  )
+import Control.Concurrent (forkOS, newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Control.Exception (mask, try)
 import Control.Monad (join, void)
 import Control.Monad.IO.Class (MonadIO)
@@ -32,11 +25,7 @@ import qualified Graphics.GL.Core44 as GL
 import qualified HGBC.Config
 import qualified Machine.GBC.Graphics as Graphics
 import qualified SDL
-import SDL.Extras
-  ( DisplayIndex,
-    getCurrentDisplayMode,
-    getWindowDisplayIndex,
-  )
+import SDL.Extras (DisplayIndex, getCurrentDisplayMode, getWindowDisplayIndex)
 import qualified SDL.Raw
 import System.FilePath (takeFileName)
 import qualified Window

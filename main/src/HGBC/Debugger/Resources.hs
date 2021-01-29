@@ -20,7 +20,7 @@ module HGBC.Debugger.Resources
 where
 
 import qualified Data.ByteString.Lazy as LB
-import Data.FileEmbed
+import Data.FileEmbed (embedOneFileOf)
 
 svgRun :: LB.ByteString
 svgRun = LB.fromStrict $(embedOneFileOf ["data/play.svg", "../data/play.svg"])

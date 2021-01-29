@@ -57,37 +57,37 @@ module GLUtils
   )
 where
 
-import Control.Exception
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Resource
-import Data.Bits
+import Control.Exception (Exception, throwIO)
+import Control.Monad (void, when)
+import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Trans.Resource (MonadUnliftIO, allocate, runResourceT, unprotect)
+import Data.Bits (Bits (..))
 import qualified Data.ByteString as B
-import Data.Foldable
-import Data.StateVar
-import Foreign.ForeignPtr
-import Foreign.Marshal.Alloc
-import Foreign.Marshal.Array
-import Foreign.Ptr
-import Foreign.Storable
-import Graphics.GL.Core44
+import Data.Foldable (traverse_)
+import Data.StateVar (StateVar, makeStateVar)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrArray, withForeignPtr)
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Array (pokeArray, withArray)
+import Foreign.Ptr (IntPtr, Ptr, intPtrToPtr, nullPtr)
+import Foreign.Storable (Storable (peek, poke, sizeOf))
+import qualified Graphics.GL.Core44 as Raw
 
 data OpenGLError = OpenGLError String !B.ByteString deriving (Eq, Ord, Show, Exception)
 
 -- | Types that wrap OpenGL enums.
 class OpenGLEnum a where
-  toOpenGLEnum :: a -> GLenum
+  toOpenGLEnum :: a -> Raw.GLenum
 
 -- | Types that can be used as GLSL uniforms.
 class UniformAccess a where
-  getUniform :: MonadIO m => GLuint -> GLint -> m a
-  setUniform :: MonadIO m => GLint -> a -> m ()
+  getUniform :: MonadIO m => Raw.GLuint -> Raw.GLint -> m a
+  setUniform :: MonadIO m => Raw.GLint -> a -> m ()
 
-instance UniformAccess GLint where
+instance UniformAccess Raw.GLint where
   {-# INLINE getUniform #-}
-  getUniform program uniform = capture (glGetUniformiv program uniform)
+  getUniform program uniform = capture (Raw.glGetUniformiv program uniform)
   {-# INLINE setUniform #-}
-  setUniform = glUniform1i
+  setUniform = Raw.glUniform1i
 
 -- | Matrix types.
 class GLmatrix a where
@@ -111,40 +111,40 @@ instance UniformAccess GLmatrix4 where
   {-# INLINE getUniform #-}
   getUniform program uniform = do
     fptr <- liftIO (mallocForeignPtrArray 16)
-    liftIO (withForeignPtr fptr (glGetUniformfv program uniform))
+    liftIO (withForeignPtr fptr (Raw.glGetUniformfv program uniform))
     pure (GLmatrix4 fptr)
   {-# INLINE setUniform #-}
   setUniform uniform (GLmatrix4 fptr) =
-    liftIO (withForeignPtr fptr (glUniformMatrix4fv uniform 1 GL_FALSE))
+    liftIO (withForeignPtr fptr (Raw.glUniformMatrix4fv uniform 1 Raw.GL_FALSE))
 
 -- | Get a 'StateVar' that links to a uniform.
 {-# INLINE linkUniform #-}
 linkUniform :: (UniformAccess a, MonadIO m) => Program -> B.ByteString -> m (StateVar a)
 linkUniform (Program program) uniform = liftIO $ do
-  uniformLocation <- B.useAsCString uniform (glGetUniformLocation program)
+  uniformLocation <- B.useAsCString uniform (Raw.glGetUniformLocation program)
   pure (makeStateVar (getUniform program uniformLocation) (setUniform uniformLocation))
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
 {-# INLINEABLE linkTextureBuffer #-}
 linkTextureBuffer :: MonadIO m => BufferObject -> m ()
-linkTextureBuffer (BufferObject buffer) = glTexBuffer GL_TEXTURE_BUFFER GL_R8UI buffer
+linkTextureBuffer (BufferObject buffer) = Raw.glTexBuffer Raw.GL_TEXTURE_BUFFER Raw.GL_R8UI buffer
 
 -- | Link the currently bound texture buffer to the currently buffer texture.
 {-# INLINEABLE linkTextureBufferRange #-}
-linkTextureBufferRange :: MonadIO m => BufferObject -> GLintptr -> GLsizeiptr -> m ()
-linkTextureBufferRange (BufferObject buffer) = glTexBufferRange GL_TEXTURE_BUFFER GL_R8UI buffer
+linkTextureBufferRange :: MonadIO m => BufferObject -> Raw.GLintptr -> Raw.GLsizeiptr -> m ()
+linkTextureBufferRange (BufferObject buffer) = Raw.glTexBufferRange Raw.GL_TEXTURE_BUFFER Raw.GL_R8UI buffer
 
 -- | A vertex array object.
-newtype VertexArrayObject = VertexArrayObject GLuint deriving (Eq, Show)
+newtype VertexArrayObject = VertexArrayObject Raw.GLuint deriving (Eq, Show)
 
 -- | Create a new vertex array object.
 genVertexArrayObject :: IO VertexArrayObject
-genVertexArrayObject = VertexArrayObject <$> capture (glGenVertexArrays 1)
+genVertexArrayObject = VertexArrayObject <$> capture (Raw.glGenVertexArrays 1)
 
 -- | Bind a vertex array object
 {-# INLINE bindVertexArrayObject #-}
 bindVertexArrayObject :: MonadIO m => VertexArrayObject -> m ()
-bindVertexArrayObject (VertexArrayObject vao) = glBindVertexArray vao
+bindVertexArrayObject (VertexArrayObject vao) = Raw.glBindVertexArray vao
 
 -- | How to convert and normalize vertex attribute elements.
 data IntegerHandling
@@ -154,7 +154,7 @@ data IntegerHandling
   deriving (Eq, Ord, Show, Bounded, Enum)
 
 -- | Number of components in a vertex attribute.
-type NumComponents = GLint
+type NumComponents = Raw.GLint
 
 -- | Element data type of a vertex attribute.
 data ElementDataType
@@ -171,16 +171,16 @@ data ElementDataType
   deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum ElementDataType where
-  toOpenGLEnum Bytes = GL_BYTE
-  toOpenGLEnum Shorts = GL_SHORT
-  toOpenGLEnum Ints = GL_INT
-  toOpenGLEnum UnsignedBytes = GL_UNSIGNED_BYTE
-  toOpenGLEnum UnsignedShorts = GL_UNSIGNED_SHORT
-  toOpenGLEnum UnsignedInts = GL_UNSIGNED_INT
-  toOpenGLEnum Floats = GL_FLOAT
-  toOpenGLEnum HalfFloats = GL_HALF_FLOAT
-  toOpenGLEnum Doubles = GL_DOUBLE
-  toOpenGLEnum Fixeds = GL_FIXED
+  toOpenGLEnum Bytes = Raw.GL_BYTE
+  toOpenGLEnum Shorts = Raw.GL_SHORT
+  toOpenGLEnum Ints = Raw.GL_INT
+  toOpenGLEnum UnsignedBytes = Raw.GL_UNSIGNED_BYTE
+  toOpenGLEnum UnsignedShorts = Raw.GL_UNSIGNED_SHORT
+  toOpenGLEnum UnsignedInts = Raw.GL_UNSIGNED_INT
+  toOpenGLEnum Floats = Raw.GL_FLOAT
+  toOpenGLEnum HalfFloats = Raw.GL_HALF_FLOAT
+  toOpenGLEnum Doubles = Raw.GL_DOUBLE
+  toOpenGLEnum Fixeds = Raw.GL_FIXED
 
 data AttributeDivisor = PerVertex | PerInstance deriving (Eq, Ord, Show, Bounded, Enum)
 
@@ -189,20 +189,20 @@ data Attribute = Attribute !B.ByteString !NumComponents !ElementDataType !Attrib
 
 type Offset = IntPtr
 
-type Stride = GLsizei
+type Stride = Raw.GLsizei
 
 -- | Set the offset and stride of an 'Attribute' in the current vertex buffer.
 {-# INLINEABLE linkAttribute #-}
 linkAttribute :: Program -> Attribute -> Offset -> Stride -> IO ()
 linkAttribute (Program program) (Attribute name numComponents elementType divisor integerHandling) offset stride =
   do
-    attribute <- fromIntegral <$> B.useAsCString name (glGetAttribLocation program)
-    glEnableVertexAttribArray attribute
+    attribute <- fromIntegral <$> B.useAsCString name (Raw.glGetAttribLocation program)
+    Raw.glEnableVertexAttribArray attribute
     case integerHandling of
-      NormalizeToFloat -> vertexAttribPointerFloat attribute GL_TRUE
-      ConvertToFloat -> vertexAttribPointerFloat attribute GL_FALSE
+      NormalizeToFloat -> vertexAttribPointerFloat attribute Raw.GL_TRUE
+      ConvertToFloat -> vertexAttribPointerFloat attribute Raw.GL_FALSE
       KeepInteger ->
-        glVertexAttribIPointer
+        Raw.glVertexAttribIPointer
           attribute
           numComponents
           (toOpenGLEnum elementType)
@@ -212,9 +212,9 @@ linkAttribute (Program program) (Attribute name numComponents elementType diviso
   where
     handleDivisor attribute = case divisor of
       PerVertex -> pure ()
-      PerInstance -> glVertexAttribDivisor attribute 1
+      PerInstance -> Raw.glVertexAttribDivisor attribute 1
     vertexAttribPointerFloat attribute normalize =
-      glVertexAttribPointer
+      Raw.glVertexAttribPointer
         attribute
         numComponents
         (toOpenGLEnum elementType)
@@ -223,7 +223,7 @@ linkAttribute (Program program) (Attribute name numComponents elementType diviso
         (intPtrToPtr offset)
 
 -- | A buffer of some sort.
-newtype BufferObject = BufferObject GLuint deriving (Eq, Show)
+newtype BufferObject = BufferObject Raw.GLuint deriving (Eq, Show)
 
 -- | The buffer types that we can bind.
 data BufferTarget
@@ -236,21 +236,21 @@ data BufferTarget
 
 -- | Get the OpenGL enum for a 'BufferTarget'.
 instance OpenGLEnum BufferTarget where
-  toOpenGLEnum ArrayBuffer = GL_ARRAY_BUFFER
-  toOpenGLEnum ElementArrayBuffer = GL_ELEMENT_ARRAY_BUFFER
-  toOpenGLEnum TextureBufferBuffer = GL_TEXTURE_BUFFER
-  toOpenGLEnum UniformBuffer = GL_UNIFORM_BUFFER
-  toOpenGLEnum PixelUpload = GL_PIXEL_UNPACK_BUFFER
+  toOpenGLEnum ArrayBuffer = Raw.GL_ARRAY_BUFFER
+  toOpenGLEnum ElementArrayBuffer = Raw.GL_ELEMENT_ARRAY_BUFFER
+  toOpenGLEnum TextureBufferBuffer = Raw.GL_TEXTURE_BUFFER
+  toOpenGLEnum UniformBuffer = Raw.GL_UNIFORM_BUFFER
+  toOpenGLEnum PixelUpload = Raw.GL_PIXEL_UNPACK_BUFFER
 
 -- | Generate an empty buffer object.
 {-# INLINE genBuffer #-}
 genBuffer :: MonadIO m => m BufferObject
-genBuffer = BufferObject <$> capture (glGenBuffers 1)
+genBuffer = BufferObject <$> capture (Raw.glGenBuffers 1)
 
 -- | Bind a buffer.
 {-# INLINE bindBuffer #-}
 bindBuffer :: MonadIO m => BufferTarget -> BufferObject -> m ()
-bindBuffer target (BufferObject bo) = glBindBuffer (toOpenGLEnum target) bo
+bindBuffer target (BufferObject bo) = Raw.glBindBuffer (toOpenGLEnum target) bo
 
 -- | Create and initialize a vertex buffer.
 {-# INLINEABLE makeVertexBuffer #-}
@@ -259,18 +259,18 @@ makeVertexBuffer = makeBuffer ArrayBuffer
 
 -- | Create and initialize an element buffer.
 {-# INLINEABLE makeElementBuffer #-}
-makeElementBuffer :: MonadIO m => [GLuint] -> m BufferObject
+makeElementBuffer :: MonadIO m => [Raw.GLuint] -> m BufferObject
 makeElementBuffer = makeBuffer ElementArrayBuffer
 
 -- | Make a static buffer.
 {-# INLINE makeBuffer #-}
 makeBuffer :: forall m a. (MonadIO m, Storable a) => BufferTarget -> [a] -> m BufferObject
 makeBuffer bufferTarget vdata = do
-  bo <- capture (glGenBuffers 1)
-  glBindBuffer target bo
+  bo <- capture (Raw.glGenBuffers 1)
+  Raw.glBindBuffer target bo
   liftIO . withArray vdata $ \pData -> do
     let bufferSize = fromIntegral (length vdata * sizeOf (undefined :: a))
-    glBufferData target bufferSize pData GL_STATIC_DRAW
+    Raw.glBufferData target bufferSize pData Raw.GL_STATIC_DRAW
     pure (BufferObject bo)
   where
     target = toOpenGLEnum bufferTarget
@@ -286,42 +286,42 @@ data BufferUpdateStrategy
 -- | Allocate and bind a coherent writeable persistent buffer.
 {-# INLINEABLE makeWritablePersistentBuffer #-}
 makeWritablePersistentBuffer ::
-  MonadIO m => BufferUpdateStrategy -> BufferTarget -> GLsizeiptr -> m (BufferObject, Ptr a)
+  MonadIO m => BufferUpdateStrategy -> BufferTarget -> Raw.GLsizeiptr -> m (BufferObject, Ptr a)
 makeWritablePersistentBuffer updateStrategy bufferTarget size = do
-  bo <- capture (glGenBuffers 1)
-  glBindBuffer target bo
-  glBufferStorage target size nullPtr storageFlags
-  ptr <- glMapBufferRange target 0 size mapFlags
+  bo <- capture (Raw.glGenBuffers 1)
+  Raw.glBindBuffer target bo
+  Raw.glBufferStorage target size nullPtr storageFlags
+  ptr <- Raw.glMapBufferRange target 0 size mapFlags
   pure (BufferObject bo, ptr)
   where
     target = toOpenGLEnum bufferTarget
-    baseFlags = GL_MAP_WRITE_BIT .|. GL_MAP_PERSISTENT_BIT
+    baseFlags = Raw.GL_MAP_WRITE_BIT .|. Raw.GL_MAP_PERSISTENT_BIT
     (storageFlags, mapFlags) = case updateStrategy of
-      Coherent -> (baseFlags .|. GL_MAP_COHERENT_BIT, baseFlags .|. GL_MAP_COHERENT_BIT)
-      ExplicitFlush -> (baseFlags, baseFlags .|. GL_MAP_FLUSH_EXPLICIT_BIT)
+      Coherent -> (baseFlags .|. Raw.GL_MAP_COHERENT_BIT, baseFlags .|. Raw.GL_MAP_COHERENT_BIT)
+      ExplicitFlush -> (baseFlags, baseFlags .|. Raw.GL_MAP_FLUSH_EXPLICIT_BIT)
 
 -- | Bind a buffer to a buffer-backed uniform.
 {-# INLINEABLE linkUniformBuffer #-}
-linkUniformBuffer :: MonadIO m => Program -> B.ByteString -> BufferObject -> GLuint -> m ()
+linkUniformBuffer :: MonadIO m => Program -> B.ByteString -> BufferObject -> Raw.GLuint -> m ()
 linkUniformBuffer (Program program) uniform (BufferObject buffer) bindingLocation = do
-  glBindBufferBase GL_UNIFORM_BUFFER bindingLocation buffer
-  uniformBlockIndex <- liftIO (B.useAsCString uniform (glGetUniformBlockIndex program))
-  glUniformBlockBinding program uniformBlockIndex bindingLocation
+  Raw.glBindBufferBase Raw.GL_UNIFORM_BUFFER bindingLocation buffer
+  uniformBlockIndex <- liftIO (B.useAsCString uniform (Raw.glGetUniformBlockIndex program))
+  Raw.glUniformBlockBinding program uniformBlockIndex bindingLocation
 
 -- | An OpenGL texture unit.
-newtype TextureUnit = TextureUnit GLint deriving (Eq, Show)
+newtype TextureUnit = TextureUnit Raw.GLint deriving (Eq, Show)
 
 instance UniformAccess TextureUnit where
-  getUniform program uniform = TextureUnit <$> capture (glGetUniformiv program uniform)
-  setUniform uniform (TextureUnit unit) = glUniform1i uniform unit
+  getUniform program uniform = TextureUnit <$> capture (Raw.glGetUniformiv program uniform)
+  setUniform uniform (TextureUnit unit) = Raw.glUniform1i uniform unit
 
 -- | Set the active texture unit.
 {-# INLINE activeTextureUnit #-}
 activeTextureUnit :: MonadIO m => TextureUnit -> m ()
-activeTextureUnit (TextureUnit tu) = glActiveTexture (GL_TEXTURE0 + fromIntegral tu)
+activeTextureUnit (TextureUnit tu) = Raw.glActiveTexture (Raw.GL_TEXTURE0 + fromIntegral tu)
 
 -- | An OpenGL texture.
-newtype Texture = Texture GLuint deriving (Eq, Show)
+newtype Texture = Texture Raw.GLuint deriving (Eq, Show)
 
 -- | An OpenGL texture target.
 data TextureTarget
@@ -332,19 +332,19 @@ data TextureTarget
   deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum TextureTarget where
-  toOpenGLEnum Texture1D = GL_TEXTURE_1D
-  toOpenGLEnum Texture2D = GL_TEXTURE_2D
-  toOpenGLEnum Texture3D = GL_TEXTURE_3D
-  toOpenGLEnum TextureBuffer = GL_TEXTURE_BUFFER
+  toOpenGLEnum Texture1D = Raw.GL_TEXTURE_1D
+  toOpenGLEnum Texture2D = Raw.GL_TEXTURE_2D
+  toOpenGLEnum Texture3D = Raw.GL_TEXTURE_3D
+  toOpenGLEnum TextureBuffer = Raw.GL_TEXTURE_BUFFER
 
 -- | Make a new texture.
 {-# INLINE genTexture #-}
 genTexture :: MonadIO m => m Texture
-genTexture = Texture <$> capture (glGenTextures 1)
+genTexture = Texture <$> capture (Raw.glGenTextures 1)
 
 {-# INLINE bindTexture #-}
 bindTexture :: MonadIO m => TextureTarget -> Texture -> m ()
-bindTexture target (Texture texture) = glBindTexture (toOpenGLEnum target) texture
+bindTexture target (Texture texture) = Raw.glBindTexture (toOpenGLEnum target) texture
 
 -- | A shader type.
 data ShaderType
@@ -357,34 +357,34 @@ data ShaderType
   deriving (Eq, Ord, Show, Bounded, Enum)
 
 instance OpenGLEnum ShaderType where
-  toOpenGLEnum ComputeShader = GL_COMPUTE_SHADER
-  toOpenGLEnum VertexShader = GL_VERTEX_SHADER
-  toOpenGLEnum TessControlShader = GL_TESS_CONTROL_SHADER
-  toOpenGLEnum TessEvaluationShader = GL_TESS_EVALUATION_SHADER
-  toOpenGLEnum GeometryShader = GL_GEOMETRY_SHADER
-  toOpenGLEnum FragmentShader = GL_FRAGMENT_SHADER
+  toOpenGLEnum ComputeShader = Raw.GL_COMPUTE_SHADER
+  toOpenGLEnum VertexShader = Raw.GL_VERTEX_SHADER
+  toOpenGLEnum TessControlShader = Raw.GL_TESS_CONTROL_SHADER
+  toOpenGLEnum TessEvaluationShader = Raw.GL_TESS_EVALUATION_SHADER
+  toOpenGLEnum GeometryShader = Raw.GL_GEOMETRY_SHADER
+  toOpenGLEnum FragmentShader = Raw.GL_FRAGMENT_SHADER
 
 -- A shader program.
-newtype Program = Program GLuint deriving (Eq, Show)
+newtype Program = Program Raw.GLuint deriving (Eq, Show)
 
 -- | Use a program.
 {-# INLINE useProgram #-}
 useProgram :: MonadIO m => Program -> m ()
-useProgram (Program program) = glUseProgram program
+useProgram (Program program) = Raw.glUseProgram program
 
 -- | Compile and link a set of shaders.
 {-# INLINEABLE compileShaders #-}
 compileShaders :: MonadUnliftIO m => [(ShaderType, B.ByteString)] -> m Program
 compileShaders shaders = runResourceT $ do
-  (programKey, program) <- allocate glCreateProgram glDeleteProgram
+  (programKey, program) <- allocate Raw.glCreateProgram Raw.glDeleteProgram
   traverse_ (loadShader program) shaders
-  glLinkProgram program
+  Raw.glLinkProgram program
 
-  isLinked <- capture (glGetProgramiv program GL_LINK_STATUS)
+  isLinked <- capture (Raw.glGetProgramiv program Raw.GL_LINK_STATUS)
   when (isLinked == 0) . liftIO $ do
-    logLength <- capture (glGetProgramiv program GL_INFO_LOG_LENGTH)
+    logLength <- capture (Raw.glGetProgramiv program Raw.GL_INFO_LOG_LENGTH)
     message <- allocaBytes (fromIntegral logLength) $ \ptr -> do
-      glGetProgramInfoLog program (fromIntegral logLength) nullPtr ptr
+      Raw.glGetProgramInfoLog program (fromIntegral logLength) nullPtr ptr
       B.packCString ptr
     throwIO (OpenGLError "Program linkage failed" message)
 
@@ -392,21 +392,21 @@ compileShaders shaders = runResourceT $ do
   pure (Program program)
   where
     loadShader program (shaderType, source) = do
-      (_, shader) <- allocate (glCreateShader (toOpenGLEnum shaderType)) glDeleteShader
+      (_, shader) <- allocate (Raw.glCreateShader (toOpenGLEnum shaderType)) Raw.glDeleteShader
       liftIO . B.useAsCString source $ \pSource -> alloca $ \ppSource -> do
         poke ppSource pSource
-        glShaderSource shader 1 ppSource nullPtr
-      glCompileShader shader
+        Raw.glShaderSource shader 1 ppSource nullPtr
+      Raw.glCompileShader shader
 
-      compilePassed <- capture (glGetShaderiv shader GL_COMPILE_STATUS)
+      compilePassed <- capture (Raw.glGetShaderiv shader Raw.GL_COMPILE_STATUS)
       when (compilePassed == 0) . liftIO $ do
-        logLength <- capture (glGetShaderiv shader GL_INFO_LOG_LENGTH)
+        logLength <- capture (Raw.glGetShaderiv shader Raw.GL_INFO_LOG_LENGTH)
         message <- allocaBytes (fromIntegral logLength) $ \ptr -> do
-          glGetShaderInfoLog shader (fromIntegral logLength) nullPtr ptr
+          Raw.glGetShaderInfoLog shader (fromIntegral logLength) nullPtr ptr
           B.packCString ptr
         throwIO (OpenGLError "Shader compilation failed" message)
 
-      void (allocate (shader <$ glAttachShader program shader) (glDetachShader program))
+      void (allocate (shader <$ Raw.glAttachShader program shader) (Raw.glDetachShader program))
       pure shader
 
 -- | Utility to deal with foreign functions that use pointers to return values.

@@ -8,27 +8,28 @@ module Machine.GBC.CPUSpec
   )
 where
 
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Reader
-import Data.Bits
-import Data.Foldable
-import Data.IORef
+import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
+import Data.Bits (Bits (..))
+import Data.Foldable (for_, traverse_)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Vector.Storable as VS
-import Data.Word
+import Data.Word (Word16, Word32, Word8)
 import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.CPU as CPU
-import Machine.GBC.CPU.ISA
+import Machine.GBC.CPU.ISA (ConditionCode (..), MonadSm83x (..), Register16 (..), Register8 (..), RegisterPushPop (..))
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Graphics.VRAM
-import Machine.GBC.MBC
+import Machine.GBC.Graphics.VRAM ()
+import qualified Machine.GBC.Graphics.VRAM as VRAM
+import Machine.GBC.MBC (nullMBC)
 import qualified Machine.GBC.Memory as Memory
-import Machine.GBC.Mode
-import Machine.GBC.Primitive
-import Machine.GBC.ROM
-import Machine.GBC.Registers
-import Machine.GBC.Util
-import Test.Hspec
+import Machine.GBC.Mode (EmulatorMode (CGB))
+import Machine.GBC.Primitive (alwaysUpdate, newPort)
+import qualified Machine.GBC.ROM as ROM
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util (formatHex, (.<<.), (.>>.))
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 spec :: Spec
 spec = do
@@ -47,22 +48,22 @@ romSizeInBytes = 32 * 1024 * 1024
 
 blankROM = VS.replicate romSizeInBytes 0
 
-blankHeader :: Header
+blankHeader :: ROM.Header
 blankHeader =
-  Header
-    { startAddress = 0,
-      nintendoCharacterData = "",
-      gameTitle = "",
-      gameCode = "",
-      cgbSupport = CGBCompatible,
-      makerCode = "",
-      sgbSupport = GBOnly,
-      cartridgeType = CartridgeType Nothing False False,
-      romSize = romSizeInBytes,
-      externalRAM = 0,
-      destination = Overseas,
-      oldLicenseCode = 0,
-      maskROMVersion = 0
+  ROM.Header
+    { ROM.startAddress = 0,
+      ROM.nintendoCharacterData = "",
+      ROM.gameTitle = "",
+      ROM.gameCode = "",
+      ROM.cgbSupport = ROM.CGBCompatible,
+      ROM.makerCode = "",
+      ROM.sgbSupport = ROM.GBOnly,
+      ROM.cartridgeType = ROM.CartridgeType Nothing False False,
+      ROM.romSize = romSizeInBytes,
+      ROM.externalRAM = 0,
+      ROM.destination = ROM.Overseas,
+      ROM.oldLicenseCode = 0,
+      ROM.maskROMVersion = 0
     }
 
 data CPUTestState = CPUTestState
@@ -93,7 +94,7 @@ instance Bus.Has CPUTestState where
 
 withNewCPU :: CPU.M CPUTestState () -> IO ()
 withNewCPU computation = mdo
-  vram <- initVRAM (Color.correction Color.NoCorrection)
+  vram <- VRAM.init (Color.correction Color.NoCorrection)
   portIF <- newPort 0x00 0x1F alwaysUpdate
   portIE <- newPort 0x00 0xFF alwaysUpdate
   mbc <- nullMBC
@@ -105,7 +106,7 @@ withNewCPU computation = mdo
       blankHeader
       mbc
       vram
-      ((IF, portIF) : CPU.ports cpu)
+      ((R.IF, portIF) : CPU.ports cpu)
       portIE
       modeRef
   extraCycles <- newIORef 0
@@ -1778,8 +1779,8 @@ miscellaneous = do
           withIME True $
             do
               CPU.M $ do
-                Memory.writeByte IE 1
-                Memory.writeByte IF 1
+                Memory.writeByte R.IE 1
+                Memory.writeByte R.IF 1
               halt
               expectExtraCycles 0
               expectMode CPU.ModeHalt
@@ -1791,8 +1792,8 @@ miscellaneous = do
               alteringFlags (CPU.flagZ .|. CPU.flagN .|. CPU.flagH) $
                 do
                   CPU.M $ do
-                    Memory.writeByte IE 1
-                    Memory.writeByte IF 1
+                    Memory.writeByte R.IE 1
+                    Memory.writeByte R.IF 1
                     Memory.writeByte 0xC000 0x3C -- INC A
                   halt
                   expectExtraCycles 0
@@ -1812,16 +1813,16 @@ miscellaneous = do
     it "Switches speed mode" $
       withNewCPU $
         alteringCPUCycleClocks $ do
-          KEY1 `atAddressShouldBe` 0x7E
-          CPU.M $ Memory.writeByte KEY1 1
-          KEY1 `atAddressShouldBe` 0x7F
+          R.KEY1 `atAddressShouldBe` 0x7E
+          CPU.M $ Memory.writeByte R.KEY1 1
+          R.KEY1 `atAddressShouldBe` 0x7F
           stop
-          KEY1 `atAddressShouldBe` 0xFE
+          R.KEY1 `atAddressShouldBe` 0xFE
           expectCPUCycleClocks 2
-          CPU.M $ Memory.writeByte KEY1 1
-          KEY1 `atAddressShouldBe` 0xFF
+          CPU.M $ Memory.writeByte R.KEY1 1
+          R.KEY1 `atAddressShouldBe` 0xFF
           stop
-          KEY1 `atAddressShouldBe` 0x7E
+          R.KEY1 `atAddressShouldBe` 0x7E
           expectCPUCycleClocks 4
 
 bcd :: Spec
@@ -1905,8 +1906,8 @@ interrupts = do
                             | mode /= CPU.ModeNormal && pending && enabled = Wakeup
                             | otherwise = Ignore
 
-                      CPU.M $ Memory.writeByte IF (if pending then bit vector else 0)
-                      CPU.M $ Memory.writeByte IE (if enabled then bit vector else 0)
+                      CPU.M $ Memory.writeByte R.IF (if pending then bit vector else 0)
+                      CPU.M $ Memory.writeByte R.IE (if enabled then bit vector else 0)
                       CPU.M CPU.step
 
                       expectExtraCycles $ case behavior of
@@ -1919,22 +1920,22 @@ interrupts = do
                           RegSP `register16ShouldBe` 0xFFEE
                           0xFFEE `atAddressShouldBe` 0x01
                           0xFFEF `atAddressShouldBe` 0x40
-                          IF `atAddressShouldBe` 0
-                          IE `atAddressShouldBe` (bit vector)
+                          R.IF `atAddressShouldBe` 0
+                          R.IE `atAddressShouldBe` bit vector
                           expectPC (fromIntegral vector * 8 + 0x40)
                           expectMode CPU.ModeNormal
                           expectIME False
                         Wakeup -> do
                           RegSP `register16ShouldBe` 0xFFF0
-                          IF `atAddressShouldBe` (if pending then bit vector else 0)
-                          IE `atAddressShouldBe` (if enabled then bit vector else 0)
+                          R.IF `atAddressShouldBe` (if pending then bit vector else 0)
+                          R.IE `atAddressShouldBe` (if enabled then bit vector else 0)
                           expectPC 0x4002
                           expectMode CPU.ModeNormal
                           expectIME ime
                         Ignore -> do
                           RegSP `register16ShouldBe` 0xFFF0
-                          IF `atAddressShouldBe` (if pending then bit vector else 0)
-                          IE `atAddressShouldBe` (if enabled then bit vector else 0)
+                          R.IF `atAddressShouldBe` (if pending then bit vector else 0)
+                          R.IE `atAddressShouldBe` (if enabled then bit vector else 0)
                           expectPC (if mode == CPU.ModeNormal then 0x4002 else 0x4001)
                           expectMode mode
                           expectIME ime
@@ -1948,8 +1949,8 @@ interrupts = do
               withPC 0x4001 $
                 do
                   CPU.M $ do
-                    Memory.writeByte IF (bit vector)
-                    Memory.writeByte IE (bit vector)
+                    Memory.writeByte R.IF (bit vector)
+                    Memory.writeByte R.IE (bit vector)
                     CPU.step
                   expectExtraCycles 1
                   expectMode CPU.ModeNormal
@@ -1966,15 +1967,15 @@ interrupts = do
                 withPC 0x4001 $
                   do
                     CPU.M $ do
-                      Memory.writeByte IF (bit l .|. bit r)
-                      Memory.writeByte IE (bit l .|. bit r)
+                      Memory.writeByte R.IF (bit l .|. bit r)
+                      Memory.writeByte R.IE (bit l .|. bit r)
                       CPU.step
                     expectExtraCycles isrClocks
                     RegSP `register16ShouldBe` 0xFFEE
                     0xFFEE `atAddressShouldBe` 0x01
                     0xFFEF `atAddressShouldBe` 0x40
-                    IF `atAddressShouldBe` (bit r)
-                    IE `atAddressShouldBe` (bit l .|. bit r)
+                    R.IF `atAddressShouldBe` bit r
+                    R.IE `atAddressShouldBe` (bit l .|. bit r)
                     expectPC (fromIntegral l * 8 + 0x40)
                     expectMode CPU.ModeNormal
                     expectIME False

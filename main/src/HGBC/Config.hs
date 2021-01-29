@@ -8,23 +8,20 @@ module HGBC.Config
   )
 where
 
-import Control.Monad
+import Control.Monad (unless)
 import qualified Data.ByteString as B
-import Data.FileEmbed
-import Data.Functor.Identity
-import Data.Maybe
+import Data.FileEmbed (embedOneFileOf)
+import Data.Functor.Identity (Identity)
+import Data.Maybe (fromMaybe)
 import qualified HGBC.Config.CommandLine as CommandLine
-import HGBC.Config.File
+import HGBC.Config.File (Config (..), parseFile)
 import qualified HGBC.Config.Paths as Paths
-import HGBC.Errors
-import HGBC.Keymap
-  ( Keymap,
-    ScancodeDecoder,
-  )
+import HGBC.Errors (FileParseErrors)
+import HGBC.Keymap (Keymap, ScancodeDecoder)
 import qualified Machine.GBC.Color as Color
 import qualified Machine.GBC.ROM as ROM
-import System.Directory
-import System.FilePath
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.FilePath (takeDirectory, (</>))
 
 -- | Configure HGBC.
 load ::

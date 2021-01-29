@@ -6,22 +6,21 @@ module Machine.GBC.EmulatorSpec
 where
 
 import qualified Data.ByteString as B
-import Data.List
-import Foreign.Ptr
+import Data.List (nub, sort)
+import Foreign.Ptr (nullPtr)
 import qualified Machine.GBC.Audio as Audio
 import qualified Machine.GBC.CPU as CPU
 import qualified Machine.GBC.Color as Color
 import qualified Machine.GBC.DMA as DMA
-import Machine.GBC.Emulator
+import Machine.GBC.Emulator (State (..))
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
 import qualified Machine.GBC.Keypad as Keypad
-import Machine.GBC.ROM
 import qualified Machine.GBC.ROM as ROM
-import Machine.GBC.Registers
+import qualified Machine.GBC.Registers as R
 import qualified Machine.GBC.Serial as Serial
 import qualified Machine.GBC.Timer as Timer
-import Test.Hspec
+import Test.Hspec (Spec, describe, it, shouldBe)
 
 blankROM :: ROM.ROM
 blankROM = ROM.ROM paths (blankHeader size) (B.replicate size 0)
@@ -29,22 +28,22 @@ blankROM = ROM.ROM paths (blankHeader size) (B.replicate size 0)
     paths = ROM.Paths "testRom" "testRom.sav" "testRom.rtc"
     size = 32 * 1024 * 1024
 
-blankHeader :: Int -> Header
+blankHeader :: Int -> ROM.Header
 blankHeader romSize =
-  Header
-    { startAddress = 0,
-      nintendoCharacterData = "",
-      gameTitle = "",
-      gameCode = "",
-      cgbSupport = CGBCompatible,
-      makerCode = "",
-      sgbSupport = GBOnly,
-      cartridgeType = CartridgeType Nothing False False,
-      romSize = romSize,
-      externalRAM = 0,
-      destination = Overseas,
-      oldLicenseCode = 0,
-      maskROMVersion = 0
+  ROM.Header
+    { ROM.startAddress = 0,
+      ROM.nintendoCharacterData = "",
+      ROM.gameTitle = "",
+      ROM.gameCode = "",
+      ROM.cgbSupport = ROM.CGBCompatible,
+      ROM.makerCode = "",
+      ROM.sgbSupport = ROM.GBOnly,
+      ROM.cartridgeType = ROM.CartridgeType Nothing False False,
+      ROM.romSize = romSize,
+      ROM.externalRAM = 0,
+      ROM.destination = ROM.Overseas,
+      ROM.oldLicenseCode = 0,
+      ROM.maskROMVersion = 0
     }
 
 spec :: Spec
@@ -73,59 +72,59 @@ spec = describe "allPorts" $
     sort (fst <$> allPorts)
       `shouldBe` sort
         ( [0xFF30 .. 0xFF3F]
-            ++ [ P1,
-                 SB,
-                 SC,
-                 DIV,
-                 TIMA,
-                 TMA,
-                 TAC,
-                 NR10,
-                 NR11,
-                 NR12,
-                 NR13,
-                 NR14,
-                 NR20,
-                 NR21,
-                 NR22,
-                 NR23,
-                 NR24,
-                 NR30,
-                 NR31,
-                 NR32,
-                 NR33,
-                 NR34,
-                 NR41,
-                 NR42,
-                 NR43,
-                 NR44,
-                 NR50,
-                 NR51,
-                 NR52,
-                 LCDC,
-                 STAT,
-                 SCY,
-                 SCX,
-                 LY,
-                 LYC,
-                 DMA,
-                 BGP,
-                 OBP0,
-                 OBP1,
-                 WY,
-                 WX,
-                 KEY1,
-                 VBK,
-                 HDMA1,
-                 HDMA2,
-                 HDMA3,
-                 HDMA4,
-                 HDMA5,
-                 BCPS,
-                 BCPD,
-                 OCPS,
-                 OCPD,
-                 PCM12,
-                 PCM34
+            ++ [ R.P1,
+                 R.SB,
+                 R.SC,
+                 R.DIV,
+                 R.TIMA,
+                 R.TMA,
+                 R.TAC,
+                 R.NR10,
+                 R.NR11,
+                 R.NR12,
+                 R.NR13,
+                 R.NR14,
+                 R.NR20,
+                 R.NR21,
+                 R.NR22,
+                 R.NR23,
+                 R.NR24,
+                 R.NR30,
+                 R.NR31,
+                 R.NR32,
+                 R.NR33,
+                 R.NR34,
+                 R.NR41,
+                 R.NR42,
+                 R.NR43,
+                 R.NR44,
+                 R.NR50,
+                 R.NR51,
+                 R.NR52,
+                 R.LCDC,
+                 R.STAT,
+                 R.SCY,
+                 R.SCX,
+                 R.LY,
+                 R.LYC,
+                 R.DMA,
+                 R.BGP,
+                 R.OBP0,
+                 R.OBP1,
+                 R.WY,
+                 R.WX,
+                 R.KEY1,
+                 R.VBK,
+                 R.HDMA1,
+                 R.HDMA2,
+                 R.HDMA3,
+                 R.HDMA4,
+                 R.HDMA5,
+                 R.BCPS,
+                 R.BCPD,
+                 R.OCPS,
+                 R.OCPD,
+                 R.PCM12,
+                 R.PCM34
                ]
         )

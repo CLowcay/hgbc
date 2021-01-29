@@ -17,14 +17,15 @@ module Machine.GBC.ROM
   )
 where
 
-import Control.Monad
-import Control.Monad.Except
-import Control.Monad.Writer.Lazy
-import Data.Binary.Get
+import Control.Monad (when)
+import Control.Monad.Except (ExceptT, liftEither)
+import Control.Monad.Writer.Lazy (MonadWriter (tell), WriterT)
+import Data.Binary.Get (Get, getByteString, getWord16le, getWord8, runGetOrFail, skip)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
-import Data.Word
-import Machine.GBC.MBC
+import Data.Word (Word16, Word8)
+import Machine.GBC.MBC (MBC)
+import qualified Machine.GBC.MBC as MBC
 
 data ROM = ROM
   { romPaths :: Paths,
@@ -214,13 +215,13 @@ getMBC :: ROM -> IO MBC
 getMBC ROM {..} =
   let Paths {..} = romPaths
       cType = cartridgeType romHeader
-      allocator = if hasBackupBattery cType then savedRAM romSaveFile else volatileRAM
+      allocator = if hasBackupBattery cType then MBC.savedRAM romSaveFile else MBC.volatileRAM
       bankMask = (romSize romHeader `div` 0x4000) - 1
       ramMask = (externalRAM romHeader `div` 0x2000) - 1
    in case mbcType cType of
-        Nothing -> nullMBC
-        Just MBC1 -> mbc1 bankMask ramMask (looksLikeMulticart romContent) allocator
-        Just MBC2 -> mbc2 bankMask allocator
-        Just MBC3 -> mbc3 bankMask ramMask allocator nullRTC
-        Just MBC3RTC -> mbc3 bankMask ramMask allocator =<< savedRTC romRTCFile
-        Just MBC5 -> mbc5 bankMask ramMask allocator
+        Nothing -> MBC.nullMBC
+        Just MBC1 -> MBC.mbc1 bankMask ramMask (looksLikeMulticart romContent) allocator
+        Just MBC2 -> MBC.mbc2 bankMask allocator
+        Just MBC3 -> MBC.mbc3 bankMask ramMask allocator MBC.nullRTC
+        Just MBC3RTC -> MBC.mbc3 bankMask ramMask allocator =<< MBC.savedRTC romRTCFile
+        Just MBC5 -> MBC.mbc5 bankMask ramMask allocator

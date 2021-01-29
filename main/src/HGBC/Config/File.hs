@@ -12,21 +12,21 @@ module HGBC.Config.File
   )
 where
 
-import Control.Monad.Identity
-import Data.Bifunctor
+import Control.Monad.Identity (Identity)
+import Data.Bifunctor (Bifunctor (bimap, first))
 import qualified Data.ByteString as B
-import Data.Either
+import Data.Either (partitionEithers)
 import qualified Data.HashMap.Strict as HM
-import Data.Monoid
+import Data.Monoid (Last (Last, getLast))
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Vector as V
-import Data.Word
-import HGBC.Config.Decode
+import Data.Word (Word32)
+import HGBC.Config.Decode (decodeColor, decodeColorCorrection, decodeMode)
 import qualified HGBC.Keymap as Keymap
 import qualified Machine.GBC.Color as Color
-import Machine.GBC.Mode
+import Machine.GBC.Mode (EmulatorMode)
 import qualified Text.Toml as Toml
 import qualified Text.Toml.Types as Toml
 

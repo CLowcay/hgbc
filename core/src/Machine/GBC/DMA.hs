@@ -7,25 +7,25 @@ module Machine.GBC.DMA
     init,
     ports,
     update,
-    doPendingHDMA,
-    doHBlankHDMA,
+    doPending,
+    doHBlank,
     makeHDMASource,
     makeHDMADestination,
   )
 where
 
-import Control.Monad.Reader
-import Data.Bits
-import Data.IORef
-import Data.Word
+import Control.Monad.Reader (MonadIO (liftIO), ReaderT, when)
+import Data.Bits (Bits ((.&.), (.|.)))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word16, Word8)
 import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.Graphics.VRAM as VRAM
 import qualified Machine.GBC.Memory as Memory
-import Machine.GBC.Mode
+import Machine.GBC.Mode (EmulatorMode, cgbOnlyPort)
 import Machine.GBC.Primitive
-import Machine.GBC.Primitive.UnboxedRef
-import Machine.GBC.Registers
-import Machine.GBC.Util
+import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
+import qualified Machine.GBC.Registers as R
+import Machine.GBC.Util ((.<<.))
 import Prelude hiding (init)
 
 data PendingDMA = Pending !Word8 | None deriving (Eq, Ord, Show)
@@ -48,12 +48,12 @@ data State = State
 
 ports :: State -> [(Word16, Port)]
 ports State {..} =
-  [ (DMA, portDMA),
-    (HDMA1, portHDMA1),
-    (HDMA2, portHDMA2),
-    (HDMA3, portHDMA3),
-    (HDMA4, portHDMA4),
-    (HDMA5, portHDMA5)
+  [ (R.DMA, portDMA),
+    (R.HDMA1, portHDMA1),
+    (R.HDMA2, portHDMA2),
+    (R.HDMA3, portHDMA3),
+    (R.HDMA4, portHDMA4),
+    (R.HDMA5, portHDMA5)
   ]
 
 oamBytes :: Word16
@@ -121,8 +121,8 @@ update State {..} = do
 
 -- | Perform any pending HDMA actions for this emulation cycle, and return the
 -- number of clocks to stall the CPU.
-doPendingHDMA :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
-doPendingHDMA State {..} = do
+doPending :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
+doPending State {..} = do
   maybeHDMA <- liftIO $ readIORef pendingHDMA
   case maybeHDMA of
     None -> pure ()
@@ -140,8 +140,8 @@ doPendingHDMA State {..} = do
 
 -- | Notify the DMA controller that the LCD has entered the HBlank state. Return
 -- the number of clock cycles to stall the CPU.
-doHBlankHDMA :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
-doHBlankHDMA State {..} = do
+doHBlank :: (Memory.Has env, Bus.Has env) => State -> ReaderT env IO ()
+doHBlank State {..} = do
   isActive <- liftIO $ readIORef hdmaActive
   when isActive $ do
     source <- readUnboxedRef hdmaSource

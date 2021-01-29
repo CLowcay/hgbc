@@ -6,19 +6,19 @@ module Audio
   )
 where
 
-import Control.Monad
-import Control.Monad.IO.Class
-import Data.Bits
-import Data.Word
-import Foreign.C.Types
-import Foreign.Marshal.Alloc
-import Foreign.Marshal.Array
-import Foreign.Ptr
-import Foreign.Storable
+import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO)
+import Data.Bits (Bits ((.&.)))
+import Data.Word (Word16, Word8)
+import Foreign.C.Types (CInt)
+import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Array (pokeArray)
+import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Storable (Storable (poke, pokeElemOff))
 import qualified Machine.GBC.Audio as Audio
 import qualified Machine.GBC.Emulator as Emulator
-import Machine.GBC.Primitive
-import Machine.GBC.Util
+import Machine.GBC.Primitive 
+import Machine.GBC.Util ((.>>.))
 import qualified SDL.Raw
 
 newtype Audio = Audio SDL.Raw.AudioDeviceID
