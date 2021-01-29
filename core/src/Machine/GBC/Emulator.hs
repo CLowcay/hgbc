@@ -33,7 +33,7 @@ import qualified Machine.GBC.Graphics.VRAM as VRAM
 import qualified Machine.GBC.Keypad as Keypad
 import qualified Machine.GBC.Memory as Memory
 import Machine.GBC.Mode (EmulatorMode (..))
-import Machine.GBC.Primitive (alwaysUpdate, newPort)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.ROM (ROM)
 import qualified Machine.GBC.ROM as ROM
@@ -93,8 +93,8 @@ init bootROM rom requestedMode colorCorrection serialSync graphicsSync frameBuff
   VRAM.writeRGBPalette vram True 1 (0xffffffff, 0xaaaaaaff, 0x555555ff, 0x000000ff)
 
   modeRef <- newIORef mode
-  portIF <- newPort 0xE0 0x1F alwaysUpdate
-  portIE <- newPort 0x00 0xFF alwaysUpdate
+  portIF <- Port.new 0xE0 0x1F Port.alwaysUpdate
+  portIE <- Port.new 0x00 0xFF Port.alwaysUpdate
 
   cpu <- CPU.init portIF portIE modeRef
   dmaState <- DMA.init vram modeRef

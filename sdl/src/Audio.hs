@@ -17,7 +17,8 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (poke, pokeElemOff))
 import qualified Machine.GBC.Audio as Audio
 import qualified Machine.GBC.Emulator as Emulator
-import Machine.GBC.Primitive 
+import Machine.GBC.Primitive.RingBuffer (RingBuffer)
+import qualified Machine.GBC.Primitive.RingBuffer as RingBuffer
 import Machine.GBC.Util ((.>>.))
 import qualified SDL.Raw
 
@@ -59,11 +60,11 @@ desiredAudioSpec callback =
 -- | Callback to copy from the GBC output buffer to the SDL audio buffer.
 audioCallback :: RingBuffer Word16 -> Ptr () -> Ptr Word8 -> CInt -> IO ()
 audioCallback buffer _ stream len = do
-  size <- readableSize buffer
+  size <- RingBuffer.readableSize buffer
   if size == 0
     then pokeArray stream (replicate (fromIntegral len) 128)
     else void $
-      foldBuffer buffer (fromIntegral len `div` 2) 0 $ \i sample ->
+      RingBuffer.fold buffer (fromIntegral len `div` 2) 0 $ \i sample ->
         let left = fromIntegral (sample .&. 0x00FF)
             right = fromIntegral (sample .>>. 8)
          in do

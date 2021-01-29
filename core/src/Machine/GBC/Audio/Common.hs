@@ -23,7 +23,8 @@ where
 
 import Data.Bits (Bits (..))
 import Data.Word (Word8)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Util (isFlagSet, (.<<.))
 
 flagTrigger, flagLength :: Word8
@@ -73,9 +74,9 @@ updateFrequency :: Port -> Port -> Int -> IO ()
 updateFrequency port3 port4 frequency = do
   let lsb = fromIntegral (frequency .&. 0xFF)
   let msb = fromIntegral ((frequency `unsafeShiftR` 8) .&. 0x07)
-  register4 <- directReadPort port4
-  directWritePort port3 lsb
-  directWritePort port4 ((register4 .&. 0xF8) .|. msb)
+  register4 <- Port.readDirect port4
+  Port.writeDirect port3 lsb
+  Port.writeDirect port4 ((register4 .&. 0xF8) .|. msb)
 
 flagMasterPower,
   flagChannel1Enable,
@@ -91,8 +92,8 @@ flagMasterPower = 0x80
 
 updateStatus :: Port -> Word8 -> Bool -> IO ()
 updateStatus port52 flag enabled = do
-  register52 <- directReadPort port52
-  directWritePort port52 (if enabled then register52 .|. flag else register52 .&. complement flag)
+  register52 <- Port.readDirect port52
+  Port.writeDirect port52 (if enabled then register52 .|. flag else register52 .&. complement flag)
 
 -- | Create a new port.
 newAudioPort ::
@@ -104,8 +105,8 @@ newAudioPort ::
   -- | Action to handle writes.  Paramters are oldValue -> newValue -> valueToWrite.
   (Word8 -> Word8 -> IO Word8) ->
   IO Port
-newAudioPort port52 value0 portWriteMask portNotify = newPort value0 portWriteMask $ \old new -> do
-  nr52 <- directReadPort port52
+newAudioPort port52 value0 portWriteMask portNotify = Port.new value0 portWriteMask $ \old new -> do
+  nr52 <- Port.readDirect port52
   if isFlagSet flagMasterPower nr52 then portNotify old new else pure old
 
 -- | Create a new port.
@@ -121,6 +122,6 @@ newAudioPortWithReadMask ::
   (Word8 -> Word8 -> IO Word8) ->
   IO Port
 newAudioPortWithReadMask port52 value0 portReadMask portWriteMask portNotify =
-  newPortWithReadMask value0 portReadMask portWriteMask $ \old new -> do
-    nr52 <- directReadPort port52
+  Port.newWithReadMask value0 portReadMask portWriteMask $ \old new -> do
+    nr52 <- Port.readDirect port52
     if isFlagSet flagMasterPower nr52 then portNotify old new else pure old

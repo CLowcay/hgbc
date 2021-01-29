@@ -23,7 +23,7 @@ import Machine.GBC.CPU.ISA (Register16 (RegSP), Register8 (RegB, RegC, RegD, Reg
 import qualified Machine.GBC.Emulator as Emulator
 import qualified Machine.GBC.Graphics as Graphics
 import Machine.GBC.Memory (getBank, getRamGate, readByte)
-import Machine.GBC.Primitive (directReadPort)
+import qualified Machine.GBC.Primitive.Port as Port
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util (formatHex, isFlagSet, (.>>.))
 import Prelude hiding (div)
@@ -83,10 +83,10 @@ getStatus emulatorState =
             field "lyc" formatHex <$> readByte R.LYC,
             cgbPalette "bcps" <$> readByte R.BCPS,
             field "bcpd" formatHex
-              <$> liftIO (directReadPort (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
+              <$> liftIO (Port.readDirect (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
             cgbPalette "ocps" <$> readByte R.OCPS,
             field "ocpd" formatHex
-              <$> liftIO (directReadPort (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
+              <$> liftIO (Port.readDirect (Graphics.portBCPD (Emulator.graphicsState emulatorState))),
             audio1,
             audio2,
             audio3,
@@ -96,22 +96,22 @@ getStatus emulatorState =
             nr52,
             nibbles "pcm12" <$> readByte R.PCM12,
             nibbles "pcm34" <$> readByte R.PCM34,
-            field "wave0" formatHex <$> liftIO (directReadPort (waveTable V.! 0x0)),
-            field "wave1" formatHex <$> liftIO (directReadPort (waveTable V.! 0x1)),
-            field "wave2" formatHex <$> liftIO (directReadPort (waveTable V.! 0x2)),
-            field "wave3" formatHex <$> liftIO (directReadPort (waveTable V.! 0x3)),
-            field "wave4" formatHex <$> liftIO (directReadPort (waveTable V.! 0x4)),
-            field "wave5" formatHex <$> liftIO (directReadPort (waveTable V.! 0x5)),
-            field "wave6" formatHex <$> liftIO (directReadPort (waveTable V.! 0x6)),
-            field "wave7" formatHex <$> liftIO (directReadPort (waveTable V.! 0x7)),
-            field "wave8" formatHex <$> liftIO (directReadPort (waveTable V.! 0x8)),
-            field "wave9" formatHex <$> liftIO (directReadPort (waveTable V.! 0x9)),
-            field "waveA" formatHex <$> liftIO (directReadPort (waveTable V.! 0xA)),
-            field "waveB" formatHex <$> liftIO (directReadPort (waveTable V.! 0xB)),
-            field "waveC" formatHex <$> liftIO (directReadPort (waveTable V.! 0xC)),
-            field "waveD" formatHex <$> liftIO (directReadPort (waveTable V.! 0xD)),
-            field "waveE" formatHex <$> liftIO (directReadPort (waveTable V.! 0xE)),
-            field "waveF" formatHex <$> liftIO (directReadPort (waveTable V.! 0xF))
+            field "wave0" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x0)),
+            field "wave1" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x1)),
+            field "wave2" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x2)),
+            field "wave3" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x3)),
+            field "wave4" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x4)),
+            field "wave5" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x5)),
+            field "wave6" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x6)),
+            field "wave7" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x7)),
+            field "wave8" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x8)),
+            field "wave9" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0x9)),
+            field "waveA" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xA)),
+            field "waveB" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xB)),
+            field "waveC" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xC)),
+            field "waveD" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xD)),
+            field "waveE" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xE)),
+            field "waveF" formatHex <$> liftIO (Port.readDirect (waveTable V.! 0xF))
           ]
     field label decoder = pure . (label .=) . decoder
     rAF = do

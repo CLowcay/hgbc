@@ -16,7 +16,12 @@ import qualified Data.Vector as V
 import Data.Word (Word8)
 import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput, flagChannel3Enable, flagLength, flagTrigger, getFrequency, isLengthClockingStep, newAudioPortWithReadMask, updateStatus)
 import Machine.GBC.Audio.Length (Length, clockLength, extraClocks, initLength, newLength, powerOffLength, reloadLength)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
+import Machine.GBC.Primitive.StateCycle (StateCycle)
+import qualified Machine.GBC.Primitive.StateCycle as StateCycle
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.Util (isFlagSet, (.>>.))
 
@@ -49,21 +54,21 @@ newWaveChannel port52 frameSequencer = mdo
     reloadLength lengthCounter register1
     pure register1
 
-  port2 <- newAudioPortWithReadMask port52 0xFF 0x9F 0x60 alwaysUpdate
+  port2 <- newAudioPortWithReadMask port52 0xFF 0x9F 0x60 Port.alwaysUpdate
 
-  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF alwaysUpdate
+  port3 <- newAudioPortWithReadMask port52 0xFF 0xFF 0xFF Port.alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC7 $ \previous register4 -> do
-    frame <- getStateCycle frameSequencer
+    frame <- StateCycle.getState frameSequencer
     when
       (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
       (extraClocks lengthCounter frame (disableIO port52 output enable))
 
     when (isFlagSet flagTrigger register4) $ do
-      register0 <- directReadPort port0
-      register3 <- directReadPort port3
+      register0 <- Port.readDirect port0
+      register3 <- Port.readDirect port3
       initLength lengthCounter frame (isFlagSet flagLength register4)
-      reloadCounter frequencyCounter (6 + getTimerPeriod (getFrequency register3 register4))
+      Counter.reload frequencyCounter (6 + getTimerPeriod (getFrequency register3 register4))
       writeUnboxedRef sample 0
       let enabled = isFlagSet flagMasterEnable register0
       writeIORef enable enabled
@@ -78,7 +83,7 @@ newWaveChannel port52 frameSequencer = mdo
           then pure v
           else do
             i <- readUnboxedRef sample
-            directReadPort (portWaveTable V.! (i .>>. 1))
+            Port.readDirect (portWaveTable V.! (i .>>. 1))
 
   let writeWaveMemory old v = do
         isEnabled <- readIORef enable
@@ -86,12 +91,12 @@ newWaveChannel port52 frameSequencer = mdo
           then pure v
           else do
             i <- readUnboxedRef sample
-            directWritePort (portWaveTable V.! (i .>>. 1)) v
+            Port.writeDirect (portWaveTable V.! (i .>>. 1)) v
             pure old
 
-  portWaveTable <- V.replicateM 16 (newPortWithReadAction 0x00 0xFF readWaveMemory writeWaveMemory)
+  portWaveTable <- V.replicateM 16 (Port.newWithReadAction 0x00 0xFF readWaveMemory writeWaveMemory)
 
-  frequencyCounter <- newCounter 0x7FF
+  frequencyCounter <- Counter.new 0x7FF
   sample <- newUnboxedRef 0
   sampleBuffer <- newUnboxedRef 0
   lengthCounter <- newLength 0xFF
@@ -113,46 +118,46 @@ instance Channel WaveChannel where
       ++ ([22 ..] `zip` toList portWaveTable)
 
   powerOff WaveChannel {..} = do
-    directWritePort port0 0
-    directWritePort port1 0
-    directWritePort port2 0
-    directWritePort port3 0
-    directWritePort port4 0
+    Port.writeDirect port0 0
+    Port.writeDirect port1 0
+    Port.writeDirect port2 0
+    Port.writeDirect port3 0
+    Port.writeDirect port4 0
     powerOffLength lengthCounter
     writeUnboxedRef sampleBuffer 0
 
   frameSequencerClock WaveChannel {..} step = do
-    register4 <- directReadPort port4
+    register4 <- Port.readDirect port4
     when (isLengthClockingStep step && isFlagSet flagLength register4) $
       clockLength lengthCounter (disableIO port52 output enable)
 
   masterClock channel@WaveChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
     when isEnabled $
-      updateCounter frequencyCounter clockAdvance $ do
+      Counter.update frequencyCounter clockAdvance $ do
         i0 <- readUnboxedRef sample
         let i = (i0 + 1) .&. 0x1F
         writeUnboxedRef sample i
-        sampleByte <- directReadPort (portWaveTable V.! (i .>>. 1))
+        sampleByte <- Port.readDirect (portWaveTable V.! (i .>>. 1))
         writeUnboxedRef sampleBuffer sampleByte
         generateOutput channel sampleByte i
 
-        register3 <- directReadPort port3
-        register4 <- directReadPort port4
+        register3 <- Port.readDirect port3
+        register4 <- Port.readDirect port4
         pure (getTimerPeriod (getFrequency register3 register4))
 
   directReadPorts WaveChannel {..} =
     (,,,,)
-      <$> directReadPort port0
-      <*> directReadPort port1
-      <*> directReadPort port2
-      <*> directReadPort port3
-      <*> directReadPort port4
+      <$> Port.readDirect port0
+      <*> Port.readDirect port1
+      <*> Port.readDirect port2
+      <*> Port.readDirect port3
+      <*> Port.readDirect port4
 
 {-# INLINE generateOutput #-}
 generateOutput :: WaveChannel -> Word8 -> Int -> IO ()
 generateOutput WaveChannel {..} sampleByte i = do
-  register2 <- directReadPort port2
+  register2 <- Port.readDirect port2
   let volume = getVolume register2
   let rawSampleValue = if i .&. 1 == 0 then sampleByte .>>. 4 else sampleByte .&. 0x0F
   let sampleValue = if volume == 0 then 0 else rawSampleValue .>>. (fromIntegral volume - 1)

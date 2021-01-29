@@ -13,7 +13,8 @@ import Data.Bits (Bits (complement, testBit, (.&.), (.|.)))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word16, Word8)
 import qualified Machine.GBC.CPU.Interrupts as Interrupt
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util ((.<<.), (.>>.))
@@ -52,7 +53,7 @@ init clockAudio portKEY1 portIF = do
   lastEdgeRef <- newUnboxedRef 0
   timaStateRef <- newIORef TIMANormal
   portDIV <-
-    newPortWithReadAction
+    Port.newWithReadAction
       0x00
       0x00
       ( \_ -> do
@@ -60,15 +61,15 @@ init clockAudio portKEY1 portIF = do
           pure (fromIntegral (c .>>. 8))
       )
       (\v _ -> v <$ writeUnboxedRef systemDIV 1)
-  portTIMA <- newPort 0x00 0xFF $ \_ v' ->
+  portTIMA <- Port.new 0x00 0xFF $ \_ v' ->
     v' <$ do
       timaState <- readIORef timaStateRef
       when (timaState == TIMAOverflow) $ writeIORef timaStateRef TIMANormal
-  portTMA <- newPort 0x00 0xFF $ \_ v' ->
+  portTMA <- Port.new 0x00 0xFF $ \_ v' ->
     v' <$ do
       timaState <- readIORef timaStateRef
-      when (timaState == TIMAReload) $ directWritePort portTIMA v'
-  portTAC <- newPort 0xF8 0x07 $ \_ v' ->
+      when (timaState == TIMAReload) $ Port.writeDirect portTIMA v'
+  portTAC <- Port.new 0xF8 0x07 $ \_ v' ->
     v' <$ do
       edgeMask <- readUnboxedRef edgeMaskRef
       writeUnboxedRef edgeMaskRef ((edgeMask .&. complement allTimaBits) .|. decodeTimaMask v')
@@ -101,7 +102,7 @@ allAudioFrameBits = 0x3000
 
 update :: State -> IO ()
 update State {..} = do
-  key1 <- directReadPort portKEY1
+  key1 <- Port.readDirect portKEY1
   let doubleSpeed = fromIntegral (key1 .>>. 7)
   let audioFrameMask = 0x1000 .<<. doubleSpeed
 
@@ -109,7 +110,7 @@ update State {..} = do
   let systemDIV1 = systemDIV0 + 4
   writeUnboxedRef systemDIV systemDIV1
 
-  tac <- directReadPort portTAC
+  tac <- Port.readDirect portTAC
   edgeMask <- readUnboxedRef edgeMaskRef
   let edge' = if timerStarted tac then edgeMask .&. systemDIV1 else 0
 
@@ -117,19 +118,19 @@ update State {..} = do
   timaState <- readIORef timaStateRef
   case timaState of
     TIMANormal -> when (fallingEdge allTimaBits edge edge') $ do
-      tima <- directReadPort portTIMA
+      tima <- Port.readDirect portTIMA
       if tima == 0xFF
         then do
           writeIORef timaStateRef TIMAOverflow
-          directWritePort portTIMA 0
-        else directWritePort portTIMA (tima + 1)
+          Port.writeDirect portTIMA 0
+        else Port.writeDirect portTIMA (tima + 1)
     TIMAOverflow -> do
       Interrupt.raise portIF Interrupt.TimerOverflow
       writeIORef timaStateRef TIMAReload
-      directWritePort portTIMA =<< directReadPort portTMA
+      Port.writeDirect portTIMA =<< Port.readDirect portTMA
     TIMAReload -> do
       writeIORef timaStateRef TIMANormal
-      directWritePort portTIMA =<< directReadPort portTMA
+      Port.writeDirect portTIMA =<< Port.readDirect portTMA
 
   let edge'' = edge' .|. (audioFrameMask .&. systemDIV1)
   writeUnboxedRef lastEdgeRef edge''

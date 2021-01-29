@@ -13,7 +13,8 @@ import Control.Monad (unless)
 import Data.Bits (Bits (..))
 import Data.Word (Word8)
 import Machine.GBC.Audio.Common (FrameSequencerOutput, nextStepWillClockEnvelope)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.Util (isFlagSet, (.>>.))
 
@@ -29,7 +30,7 @@ newEnvelope = do
   volumeRef <- newUnboxedRef 0
   volumeDeltaRef <- newUnboxedRef 1
   envelopePeriodRef <- newUnboxedRef 0
-  envelopeCounter <- newCounter 7
+  envelopeCounter <- Counter.new 7
   pure Envelope {..}
 
 initEnvelope :: Envelope -> Word8 -> FrameSequencerOutput -> IO ()
@@ -37,7 +38,7 @@ initEnvelope Envelope {..} register step = do
   let envelopePeriod = getEnvelopePeriod register
   -- Quirk: If the next frame sequencer step will clock the envelope, then init
   -- it to one greater than what it should be.
-  reloadCounter
+  Counter.reload
     envelopeCounter
     (if nextStepWillClockEnvelope step then envelopePeriod + 1 else envelopePeriod)
   writeUnboxedRef envelopePeriodRef envelopePeriod
@@ -48,7 +49,7 @@ clockEnvelope :: Envelope -> IO ()
 clockEnvelope Envelope {..} = do
   envelopePeriod <- readUnboxedRef envelopePeriodRef
   unless (envelopePeriod == 0) $
-    updateCounter envelopeCounter 1 $ do
+    Counter.update envelopeCounter 1 $ do
       volume <- readUnboxedRef volumeRef
       volumeDelta <- readUnboxedRef volumeDeltaRef
       writeUnboxedRef volumeRef $ ((volume + volumeDelta) `min` 15) `max` 0

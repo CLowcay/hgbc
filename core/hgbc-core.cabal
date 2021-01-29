@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 542d95d229aa28502599fce9a8b1853cbec147321ef3401667fe43d365e2e794
+-- hash: c6d843d4e2f228917bae8b3a3252c3184a9939f907ed03d7a65cb6b6305cd185
 
 name:           hgbc-core
 version:        0.1.0.0
@@ -57,7 +57,11 @@ library
       Machine.GBC.MBC.RTC
       Machine.GBC.Memory
       Machine.GBC.Mode
-      Machine.GBC.Primitive
+      Machine.GBC.Primitive.Counter
+      Machine.GBC.Primitive.LinearFeedbackShiftRegister
+      Machine.GBC.Primitive.Port
+      Machine.GBC.Primitive.RingBuffer
+      Machine.GBC.Primitive.StateCycle
       Machine.GBC.Primitive.UnboxedRef
       Machine.GBC.Registers
       Machine.GBC.ROM

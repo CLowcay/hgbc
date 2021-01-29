@@ -6,14 +6,15 @@ where
 
 import Data.IORef (IORef, readIORef)
 import Data.Word (Word8)
-import Machine.GBC.Primitive (Port, newPortWithReadAction)
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 
 data EmulatorMode = DMG | CGB deriving (Eq, Ord, Show, Bounded, Enum)
 
 cgbOnlyPort ::
   IORef EmulatorMode -> Word8 -> Word8 -> (Word8 -> Word8 -> IO Word8) -> IO Port
 cgbOnlyPort modeRef v0 writeMask writeFunction =
-  newPortWithReadAction
+  Port.newWithReadAction
     v0
     writeMask
     ( \v -> do

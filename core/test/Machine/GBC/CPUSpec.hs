@@ -25,7 +25,7 @@ import qualified Machine.GBC.Graphics.VRAM as VRAM
 import Machine.GBC.MBC (nullMBC)
 import qualified Machine.GBC.Memory as Memory
 import Machine.GBC.Mode (EmulatorMode (CGB))
-import Machine.GBC.Primitive (alwaysUpdate, newPort)
+import qualified Machine.GBC.Primitive.Port as Port
 import qualified Machine.GBC.ROM as ROM
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util (formatHex, (.<<.), (.>>.))
@@ -95,8 +95,8 @@ instance Bus.Has CPUTestState where
 withNewCPU :: CPU.M CPUTestState () -> IO ()
 withNewCPU computation = mdo
   vram <- VRAM.init (Color.correction Color.NoCorrection)
-  portIF <- newPort 0x00 0x1F alwaysUpdate
-  portIE <- newPort 0x00 0xFF alwaysUpdate
+  portIF <- Port.new 0x00 0x1F Port.alwaysUpdate
+  portIE <- Port.new 0x00 0xFF Port.alwaysUpdate
   mbc <- nullMBC
   modeRef <- newIORef CGB
   mem <-

@@ -20,7 +20,14 @@ import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput (..), flagCh
 import Machine.GBC.Audio.NoiseChannel (NoiseChannel, newNoiseChannel)
 import Machine.GBC.Audio.PulseChannel (PulseChannel, newPulseChannel)
 import Machine.GBC.Audio.WaveChannel (WaveChannel, newWaveChannel)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
+import Machine.GBC.Primitive.RingBuffer (RingBuffer)
+import qualified Machine.GBC.Primitive.RingBuffer as RingBuffer
+import Machine.GBC.Primitive.StateCycle (StateCycle)
+import qualified Machine.GBC.Primitive.StateCycle as StateCycle
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
@@ -45,19 +52,19 @@ frameSequencerStates = (FrameSequencerOutput <$> (7 : [0 .. 6])) <&> (,1)
 
 init :: IO State
 init = mdo
-  audioOut <- newRingBuffer 12
+  audioOut <- RingBuffer.new 12
 
-  sampler <- newCounter 0xFF
-  frameSequencer <- newStateCycle frameSequencerStates
+  sampler <- Counter.new 0xFF
+  frameSequencer <- StateCycle.new frameSequencerStates
 
   channel1 <- newPulseChannel True port52 frameSequencer flagChannel1Enable
   channel2 <- newPulseChannel False port52 frameSequencer flagChannel2Enable
   channel3 <- newWaveChannel port52 frameSequencer
   channel4 <- newNoiseChannel port52 frameSequencer
 
-  port50 <- newAudioPort port52 0xFF 0xFF alwaysUpdate
-  port51 <- newAudioPort port52 0xFF 0xFF alwaysUpdate
-  port52 <- newPortWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
+  port50 <- newAudioPort port52 0xFF 0xFF Port.alwaysUpdate
+  port51 <- newAudioPort port52 0xFF 0xFF Port.alwaysUpdate
+  port52 <- Port.newWithReadMask 0xFF 0x70 0x80 $ \register52 register52' -> do
     let masterPower = isFlagSet flagMasterPower register52
     let masterPower' = isFlagSet flagMasterPower register52'
     if not masterPower' && masterPower
@@ -66,14 +73,14 @@ init = mdo
         powerOff channel2
         powerOff channel3
         powerOff channel4
-        directWritePort port50 0
-        directWritePort port51 0
-        resetStateCycle frameSequencer frameSequencerStates
+        Port.writeDirect port50 0
+        Port.writeDirect port51 0
+        StateCycle.reset frameSequencer frameSequencerStates
         pure (register52' .&. 0xF0)
       else pure register52'
 
-  portPCM12 <- newPort 0x00 0x00 neverUpdate
-  portPCM34 <- newPort 0x00 0x00 neverUpdate
+  portPCM12 <- Port.new 0x00 0x00 Port.neverUpdate
+  portPCM34 <- Port.new 0x00 0x00 Port.neverUpdate
 
   pure State {..}
 
@@ -103,10 +110,10 @@ mixOutputChannel (v1, v2, v3, v4) channelFlags =
 
 clockFrameSequencer :: State -> IO ()
 clockFrameSequencer State {..} = do
-  register52 <- directReadPort port52
+  register52 <- Port.readDirect port52
   when (isFlagSet flagMasterPower register52) $
     void $
-      updateStateCycle frameSequencer 1 $
+      StateCycle.update frameSequencer 1 $
         \state -> do
           frameSequencerClock channel1 state
           frameSequencerClock channel2 state
@@ -115,23 +122,23 @@ clockFrameSequencer State {..} = do
 
 step :: State -> Int -> IO ()
 step State {..} clockAdvance = do
-  register52 <- directReadPort port52
+  register52 <- Port.readDirect port52
   when (isFlagSet flagMasterPower register52) $ do
     masterClock channel1 clockAdvance
     masterClock channel2 clockAdvance
     masterClock channel3 clockAdvance
     masterClock channel4 clockAdvance
 
-    updateCounter sampler clockAdvance $ do
+    Counter.update sampler clockAdvance $ do
       v1 <- getOutput channel1
       v2 <- getOutput channel2
       v3 <- getOutput channel3
       v4 <- getOutput channel4
-      directWritePort portPCM12 (fromIntegral v1 .|. fromIntegral (v2 .<<. 4))
-      directWritePort portPCM34 (fromIntegral v3 .|. fromIntegral (v4 .<<. 4))
+      Port.writeDirect portPCM12 (fromIntegral v1 .|. fromIntegral (v2 .<<. 4))
+      Port.writeDirect portPCM34 (fromIntegral v3 .|. fromIntegral (v4 .<<. 4))
 
-      register50 <- directReadPort port50
-      register51 <- directReadPort port51
+      register50 <- Port.readDirect port50
+      register51 <- Port.readDirect port51
       let volumeLeft = 8 - (register50 .>>. 4 .&. 0x07)
       let volumeRight = 8 - (register50 .&. 0x07)
       let left = register51 .>>. 4
@@ -140,5 +147,5 @@ step State {..} clockAdvance = do
       let leftSample = mixOutputChannel (v1, v2, v3, v4) left `div` volumeLeft
       let rightSample = mixOutputChannel (v1, v2, v3, v4) right `div` volumeRight
       let stereo = fromIntegral leftSample .|. (fromIntegral rightSample .<<. 8)
-      writeBuffer audioOut stereo
+      RingBuffer.write audioOut stereo
       pure samplePeriod

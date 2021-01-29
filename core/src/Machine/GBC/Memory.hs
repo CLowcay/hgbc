@@ -38,7 +38,8 @@ import Machine.GBC.Errors (Fault (InvalidRead, InvalidWrite))
 import Machine.GBC.Graphics.VRAM (VRAM)
 import qualified Machine.GBC.Graphics.VRAM as VRAM
 import Machine.GBC.Mode (EmulatorMode (DMG), cgbOnlyPort)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.ROM (ROM)
 import qualified Machine.GBC.ROM as ROM
@@ -90,14 +91,14 @@ resetAndBoot pseudoBootROM = do
   liftIO $ do
     writeIORef modeRef mode0
     writeIORef bootROMLockout False
-    writePort portSVBK 0
-    directWritePort portBLCK 0xFE
-    directWritePort portR4C 0
-    writePort portR6C 0
+    Port.write portSVBK 0
+    Port.writeDirect portBLCK 0xFE
+    Port.writeDirect portR4C 0
+    Port.write portR6C 0
   case bootROM of
     Nothing -> do
       pseudoBootROM
-      writePort portBLCK 1
+      Port.write portBLCK 1
     Just content -> liftIO $ writeIORef rom0 content
 
 -- | The initial memory state.
@@ -146,7 +147,7 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   memHigh <- VSM.new 0x80
   rom0 <- newIORef $ fromMaybe rom bootROM
 
-  emptyPort <- newPort 0xFF 0x00 neverUpdate
+  emptyPort <- Port.new 0xFF 0x00 Port.neverUpdate
   internalRamBankOffset <- newUnboxedRef 0
 
   -- SVBK: RAM bank.
@@ -159,30 +160,30 @@ init boot rom header mbc vram rawPorts portIE modeRef = do
   -- the LCD.
   bootROMLockout <- newIORef False
   portR4C <-
-    newPortWithReadAction
+    Port.newWithReadAction
       0x00
       0xFF
       ( \a -> do
           lockout <- readIORef bootROMLockout
           pure (if lockout then 0xFF else a)
       )
-      alwaysUpdate
+      Port.alwaysUpdate
 
   -- BLCK: BIOS lockout.
-  portBLCK <- newPort 0xFE 0x01 $ \oldValue newValue -> do
+  portBLCK <- Port.new 0xFE 0x01 $ \oldValue newValue -> do
     when (isFlagSet 1 newValue) $ do
-      lcdMode <- directReadPort portR4C
+      lcdMode <- Port.readDirect portR4C
       when (lcdMode == 4) (writeIORef modeRef DMG)
       writeIORef rom0 rom
       writeIORef bootROMLockout True
     pure (newValue .|. oldValue)
 
   -- Undocumented registers
-  portR6C <- cgbOnlyPort modeRef 0xFE 0x01 alwaysUpdate
-  r72 <- newPort 0x00 0xFF alwaysUpdate
-  r73 <- newPort 0x00 0xFF alwaysUpdate
-  r74 <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
-  r75 <- newPort 0x8F 0x70 alwaysUpdate
+  portR6C <- cgbOnlyPort modeRef 0xFE 0x01 Port.alwaysUpdate
+  r72 <- Port.new 0x00 0xFF Port.alwaysUpdate
+  r73 <- Port.new 0x00 0xFF Port.alwaysUpdate
+  r74 <- cgbOnlyPort modeRef 0x00 0xFF Port.alwaysUpdate
+  r75 <- Port.new 0x8F 0x70 Port.alwaysUpdate
 
   let ports =
         V.accum
@@ -278,8 +279,8 @@ readByteLong bank addr = do
         value <- VRAM.readOAM vram addr
         pure (fromIntegral value)
       | addr < 0xFF00 -> pure 0xFF
-      | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
-      | addr == R.IE -> liftIO $ readPort portIE
+      | addr < 0xFF80 -> liftIO $ Port.read (ports V.! offset 0xFF00)
+      | addr == R.IE -> liftIO $ Port.read portIE
       | otherwise -> VSM.read memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address " ++ show x)
   where
@@ -323,8 +324,8 @@ readByte addr = do
       | addr < 0xFF00 -> liftIO $ do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidRead (addr + 0xE000)) else pure 0xFF
-      | addr < 0xFF80 -> liftIO $ readPort (ports V.! offset 0xFF00)
-      | addr == R.IE -> liftIO $ readPort portIE
+      | addr < 0xFF80 -> liftIO $ Port.read (ports V.! offset 0xFF00)
+      | addr == R.IE -> liftIO $ Port.read portIE
       | otherwise -> VSM.unsafeRead memHigh (offset 0xFF80)
     x -> error ("Impossible coarse read address " ++ show x)
   where
@@ -355,8 +356,8 @@ writeByte addr value = do
       | addr < 0xFF00 -> do
         check <- readIORef checkRAMAccess
         if check then throwIO (InvalidWrite (addr + 0xE000)) else pure ()
-      | addr < 0xFF80 -> writePort (ports V.! offset 0xFF00) value
-      | addr == R.IE -> liftIO $ writePort portIE value
+      | addr < 0xFF80 -> Port.write (ports V.! offset 0xFF00) value
+      | addr == R.IE -> liftIO $ Port.write portIE value
       | otherwise -> VSM.unsafeWrite memHigh (offset 0xFF80) value
     x -> error ("Impossible coarse write address " ++ show x)
   where

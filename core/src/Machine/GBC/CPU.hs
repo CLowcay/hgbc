@@ -65,7 +65,8 @@ import qualified Machine.GBC.CPU.Interrupts as Interrupt
 import Machine.GBC.Errors (Fault (InvalidInstruction))
 import qualified Machine.GBC.Memory as Memory
 import Machine.GBC.Mode (EmulatorMode (DMG))
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
@@ -165,14 +166,14 @@ init portIF portIE modeRef = do
   cpuType <- readIORef modeRef
   registers <- VSM.new 1
   portKEY1 <-
-    newPortWithReadAction
+    Port.newWithReadAction
       0x7E
       0x01
       ( \key1 -> do
           mode <- readIORef modeRef
           if mode == DMG then pure 0xFF else pure key1
       )
-      alwaysUpdate
+      Port.alwaysUpdate
   cpuMode <- newIORef ModeNormal
   cycleClocks <- newUnboxedRef 4
   callDepth <- newUnboxedRef 0
@@ -412,7 +413,7 @@ reset = do
   setIME
   writePC 0
 
-  directWritePort portKEY1 0x7E
+  Port.writeDirect portKEY1 0x7E
   liftIO $ writeIORef cpuMode ModeNormal
   liftIO $ writeIORef haltBug False
   writeUnboxedRef cycleClocks 4
@@ -619,7 +620,7 @@ step = do
       sp <- readR16 RegSP
       writeR16 RegSP (sp - 2)
       Bus.write (sp - 1) =<< readRHalf RegPCH
-      ie <- directReadPort portIE
+      ie <- Port.readDirect portIE
       Bus.write (sp - 2) =<< readRHalf RegPCL
 
       let nextInterrupt = Interrupt.getNext (interrupts .&. ie)
@@ -1198,15 +1199,15 @@ instance (Bus.Has env, Has env) => MonadSm83x (M env) where
   {-# INLINE stop #-}
   stop = M $ do
     State {..} <- asks forState
-    key1 <- directReadPort portKEY1
+    key1 <- Port.readDirect portKEY1
     if isFlagSet flagSpeedSwitch key1
       then
         if isFlagSet flagDoubleSpeed key1
           then do
-            directWritePort portKEY1 0x7E
+            Port.writeDirect portKEY1 0x7E
             writeUnboxedRef cycleClocks 4
           else do
-            directWritePort portKEY1 (flagDoubleSpeed .|. 0x7E)
+            Port.writeDirect portKEY1 (flagDoubleSpeed .|. 0x7E)
             writeUnboxedRef cycleClocks 2
       else setMode ModeStop
 

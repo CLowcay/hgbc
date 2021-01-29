@@ -11,7 +11,14 @@ import Data.Word (Word16, Word8)
 import Machine.GBC.Audio.Common (Channel (..), FrameSequencerOutput, flagChannel4Enable, flagLength, flagTrigger, isEnvelopeClockingStep, isLengthClockingStep, newAudioPortWithReadMask, updateStatus)
 import Machine.GBC.Audio.Envelope (Envelope, clockEnvelope, envelopeVolume, initEnvelope, newEnvelope)
 import Machine.GBC.Audio.Length (Length, clockLength, extraClocks, initLength, newLength, powerOffLength, reloadLength)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
+import Machine.GBC.Primitive.LinearFeedbackShiftRegister (LinearFeedbackShiftRegister)
+import qualified Machine.GBC.Primitive.LinearFeedbackShiftRegister as LinearFeedbackShiftRegister
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
+import Machine.GBC.Primitive.StateCycle (StateCycle)
+import qualified Machine.GBC.Primitive.StateCycle as StateCycle
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 
@@ -46,30 +53,30 @@ newNoiseChannel port52 frameSequencer = mdo
     writeIORef dacEnable isDacEnabled
     pure register2
 
-  port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF alwaysUpdate
+  port3 <- newAudioPortWithReadMask port52 0xFF 0x00 0xFF Port.alwaysUpdate
 
   port4 <- newAudioPortWithReadMask port52 0xFF 0xBF 0xC0 $ \previous register4 -> do
-    frame <- getStateCycle frameSequencer
+    frame <- StateCycle.getState frameSequencer
     when
       (isFlagSet flagLength register4 && not (isFlagSet flagLength previous))
       (extraClocks lengthCounter frame (disableIO port52 output enable))
 
     when (isFlagSet flagTrigger register4) $ do
-      register2 <- directReadPort port2
-      register3 <- directReadPort port3
+      register2 <- Port.readDirect port2
+      register3 <- Port.readDirect port3
       isDacEnabled <- readIORef dacEnable
       writeIORef enable isDacEnabled
       updateStatus port52 flagChannel4Enable isDacEnabled
       initLength lengthCounter frame (isFlagSet flagLength register4)
       initEnvelope envelope register2 frame
-      initLinearFeedbackShiftRegister 0xFFFF lfsr
-      reloadCounter frequencyCounter (6 + timerPeriod register3)
+      LinearFeedbackShiftRegister.init 0xFFFF lfsr
+      Counter.reload frequencyCounter (6 + timerPeriod register3)
     pure register4
 
   lengthCounter <- newLength 0x3F
   envelope <- newEnvelope
-  frequencyCounter <- newCounter 0x7FF
-  lfsr <- newLinearFeedbackShiftRegister
+  frequencyCounter <- Counter.new 0x7FF
+  lfsr <- LinearFeedbackShiftRegister.new
   pure NoiseChannel {..}
 
 disableIO :: Port -> UnboxedRef Int -> IORef Bool -> IO ()
@@ -85,14 +92,14 @@ instance Channel NoiseChannel where
   getPorts NoiseChannel {..} = [(1, port1), (2, port2), (3, port3), (4, port4)]
 
   powerOff NoiseChannel {..} = do
-    directWritePort port1 0
-    writePort port2 0
-    directWritePort port3 0
-    directWritePort port4 0
+    Port.writeDirect port1 0
+    Port.write port2 0
+    Port.writeDirect port3 0
+    Port.writeDirect port4 0
     powerOffLength lengthCounter
 
   frameSequencerClock NoiseChannel {..} step = do
-    register4 <- directReadPort port4
+    register4 <- Port.readDirect port4
     when (isFlagSet flagLength register4 && isLengthClockingStep step) $
       clockLength lengthCounter (disableIO port52 output enable)
     when (isEnvelopeClockingStep step) $ clockEnvelope envelope
@@ -100,23 +107,23 @@ instance Channel NoiseChannel where
   masterClock NoiseChannel {..} clockAdvance = do
     isEnabled <- readIORef enable
     when isEnabled $
-      updateCounter frequencyCounter clockAdvance $ do
-        register3 <- directReadPort port3
+      Counter.update frequencyCounter clockAdvance $ do
+        register3 <- Port.readDirect port3
         -- Quirk: If the shift clock is 14 or 15, then do not clock the LFSR.
         registerOut <-
           if shiftClock register3 >= 14
-            then currentBit lfsr
-            else nextBit lfsr (widthMask register3)
+            then LinearFeedbackShiftRegister.currentBit lfsr
+            else LinearFeedbackShiftRegister.nextBit lfsr (widthMask register3)
         sample <- envelopeVolume envelope
         writeUnboxedRef output (if registerOut .&. 1 == 0 then sample else 0)
         pure (timerPeriod register3)
 
   directReadPorts NoiseChannel {..} =
     (0,,,,)
-      <$> directReadPort port1
-      <*> directReadPort port2
-      <*> directReadPort port3
-      <*> directReadPort port4
+      <$> Port.readDirect port1
+      <*> Port.readDirect port2
+      <*> Port.readDirect port3
+      <*> Port.readDirect port4
 
 widthMask :: Word8 -> Word16
 widthMask register3 = if register3 `testBit` 3 then 0x0040 else 0x4000

@@ -22,7 +22,8 @@ import qualified Machine.GBC.Bus as Bus
 import qualified Machine.GBC.Graphics.VRAM as VRAM
 import qualified Machine.GBC.Memory as Memory
 import Machine.GBC.Mode (EmulatorMode, cgbOnlyPort)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util ((.<<.))
@@ -69,22 +70,22 @@ init vram modeRef = mdo
   pendingHDMA <- newIORef None
 
   let loadHDMATargets = do
-        hdma1 <- readPort portHDMA1
-        hdma2 <- readPort portHDMA2
-        hdma3 <- readPort portHDMA3
-        hdma4 <- readPort portHDMA4
+        hdma1 <- Port.read portHDMA1
+        hdma2 <- Port.read portHDMA2
+        hdma3 <- Port.read portHDMA3
+        hdma4 <- Port.read portHDMA4
         writeUnboxedRef hdmaSource (makeHDMASource hdma1 hdma2)
         writeUnboxedRef hdmaDestination (makeHDMADestination hdma3 hdma4)
 
-  portDMA <- newPort 0x00 0xFF $ \_ dma -> do
+  portDMA <- Port.new 0x00 0xFF $ \_ dma -> do
     writeUnboxedRef dmaOffset (oamBytes + 2)
     writeUnboxedRef dmaBase (fromIntegral dma .<<. 8)
     pure dma
 
-  portHDMA1 <- cgbOnlyPort modeRef 0x00 0xFF alwaysUpdate
-  portHDMA2 <- cgbOnlyPort modeRef 0x00 0xF0 alwaysUpdate
-  portHDMA3 <- cgbOnlyPort modeRef 0x00 0x1F alwaysUpdate
-  portHDMA4 <- cgbOnlyPort modeRef 0x00 0xF0 alwaysUpdate
+  portHDMA1 <- cgbOnlyPort modeRef 0x00 0xFF Port.alwaysUpdate
+  portHDMA2 <- cgbOnlyPort modeRef 0x00 0xF0 Port.alwaysUpdate
+  portHDMA3 <- cgbOnlyPort modeRef 0x00 0x1F Port.alwaysUpdate
+  portHDMA4 <- cgbOnlyPort modeRef 0x00 0xF0 Port.alwaysUpdate
   portHDMA5 <- cgbOnlyPort modeRef 0x00 0xFF $ \_ hdma5' ->
     if hdma5' .&. 0x80 /= 0
       then do
@@ -152,8 +153,8 @@ doHBlank State {..} = do
     liftIO $ do
       writeUnboxedRef hdmaSource (source + 16)
       writeUnboxedRef hdmaDestination (destination + 16)
-      hdma5 <- directReadPort portHDMA5
-      directWritePort portHDMA5 (hdma5 - 1)
+      hdma5 <- Port.readDirect portHDMA5
+      Port.writeDirect portHDMA5 (hdma5 - 1)
       when (hdma5 == 0) $ writeIORef hdmaActive False
 
     Bus.delayClocks 8

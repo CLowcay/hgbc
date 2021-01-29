@@ -30,23 +30,10 @@ import qualified Machine.GBC.CPU.Interrupts as Interrupt
 import Machine.GBC.Graphics.VRAM (VRAM)
 import qualified Machine.GBC.Graphics.VRAM as VRAM
 import Machine.GBC.Mode (EmulatorMode (..), cgbOnlyPort)
-import Machine.GBC.Primitive
-  ( Port,
-    StateCycle,
-    UpdateResult (HasChangedTo),
-    alwaysUpdate,
-    directReadPort,
-    directWritePort,
-    getStateCycle,
-    getUpdateResult,
-    neverUpdate,
-    newPort,
-    newStateCycle,
-    readPort,
-    resetStateCycle,
-    updateStateCycle,
-    writePort,
-  )
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
+import Machine.GBC.Primitive.StateCycle (StateCycle)
+import qualified Machine.GBC.Primitive.StateCycle as StateCycle
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util (isFlagSet, (.<<.), (.>>.))
 import Prelude hiding (init)
@@ -119,55 +106,55 @@ lcdLines = [0 .. 153] <&> (,456)
 -- | The initial graphics state.
 init :: VRAM -> IORef EmulatorMode -> Ptr Word8 -> Port -> IO State
 init vram modeRef frameBufferBytes portIF = mdo
-  lcdState <- newStateCycle lcdStates
-  lcdLine <- newStateCycle lcdLines
+  lcdState <- StateCycle.new lcdStates
+  lcdLine <- StateCycle.new lcdLines
   statSignal <- newIORef True
 
-  portLCDC <- newPort 0xFF 0xFF $ \lcdc lcdc' -> do
+  portLCDC <- Port.new 0xFF 0xFF $ \lcdc lcdc' -> do
     let lcdEnabled = isFlagSet flagLCDEnable lcdc
     let lcdEnabled' = isFlagSet flagLCDEnable lcdc'
     when (lcdEnabled' && not lcdEnabled) $ do
-      resetStateCycle lcdLine lcdLines
-      resetStateCycle lcdState lcdStates
-      directWritePort portLY 0
-      stat <- directReadPort portSTAT
-      directWritePort portSTAT (modifyBits maskMode stat 1)
-      ly <- directReadPort portLY
-      lyc <- directReadPort portLYC
-      checkStatInterrupt portIF portSTAT statSignal ly lyc =<< getStateCycle lcdState
+      StateCycle.reset lcdLine lcdLines
+      StateCycle.reset lcdState lcdStates
+      Port.writeDirect portLY 0
+      stat <- Port.readDirect portSTAT
+      Port.writeDirect portSTAT (modifyBits maskMode stat 1)
+      ly <- Port.readDirect portLY
+      lyc <- Port.readDirect portLYC
+      checkStatInterrupt portIF portSTAT statSignal ly lyc =<< StateCycle.getState lcdState
     when (not lcdEnabled' && lcdEnabled) $ do
-      stat <- directReadPort portSTAT
-      directWritePort portSTAT (stat .&. 0xFC)
-      directWritePort portLY 0
+      stat <- Port.readDirect portSTAT
+      Port.writeDirect portSTAT (stat .&. 0xFC)
+      Port.writeDirect portLY 0
     pure lcdc'
-  portSTAT <- newPort 0x80 0x78 alwaysUpdate
-  portSCY <- newPort 0x00 0xFF alwaysUpdate
-  portSCX <- newPort 0x00 0xFF alwaysUpdate
-  portLY <- newPort 0x00 0x00 neverUpdate
-  portLYC <- newPort 0x00 0xFF $ \_ lyc -> do
-    ly <- directReadPort portLY
-    checkStatInterrupt portIF portSTAT statSignal ly lyc =<< getStateCycle lcdState
+  portSTAT <- Port.new 0x80 0x78 Port.alwaysUpdate
+  portSCY <- Port.new 0x00 0xFF Port.alwaysUpdate
+  portSCX <- Port.new 0x00 0xFF Port.alwaysUpdate
+  portLY <- Port.new 0x00 0x00 Port.neverUpdate
+  portLYC <- Port.new 0x00 0xFF $ \_ lyc -> do
+    ly <- Port.readDirect portLY
+    checkStatInterrupt portIF portSTAT statSignal ly lyc =<< StateCycle.getState lcdState
     pure lyc
-  portBGP <- newPort 0xFF 0xFF alwaysUpdate
-  portOBP0 <- newPort 0xFF 0xFF alwaysUpdate
-  portOBP1 <- newPort 0xFF 0xFF alwaysUpdate
-  portWY <- newPort 0x00 0xFF alwaysUpdate
-  portWX <- newPort 0x00 0xFF alwaysUpdate
-  portBCPS <- newPort 0x40 0xBF $
-    \_ bcps' -> bcps' <$ (directWritePort portBCPD =<< VRAM.readPalette vram False bcps')
+  portBGP <- Port.new 0xFF 0xFF Port.alwaysUpdate
+  portOBP0 <- Port.new 0xFF 0xFF Port.alwaysUpdate
+  portOBP1 <- Port.new 0xFF 0xFF Port.alwaysUpdate
+  portWY <- Port.new 0x00 0xFF Port.alwaysUpdate
+  portWX <- Port.new 0x00 0xFF Port.alwaysUpdate
+  portBCPS <- Port.new 0x40 0xBF $
+    \_ bcps' -> bcps' <$ (Port.writeDirect portBCPD =<< VRAM.readPalette vram False bcps')
   portBCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ bcpd' ->
     bcpd' <$ do
-      bcps <- readPort portBCPS
+      bcps <- Port.read portBCPS
       VRAM.writePalette vram False bcps bcpd'
-      when (isFlagSet flagPaletteIncrement bcps) $ writePort portBCPS ((bcps .&. 0xBF) + 1)
-  portOCPS <- newPort 0x40 0xBF $
-    \_ ocps' -> ocps' <$ (directWritePort portOCPD =<< VRAM.readPalette vram True ocps')
+      when (isFlagSet flagPaletteIncrement bcps) $ Port.write portBCPS ((bcps .&. 0xBF) + 1)
+  portOCPS <- Port.new 0x40 0xBF $
+    \_ ocps' -> ocps' <$ (Port.writeDirect portOCPD =<< VRAM.readPalette vram True ocps')
   portOCPD <- cgbOnlyPort modeRef 0x00 0xFF $ \_ ocpd' ->
     ocpd' <$ do
-      ocps <- readPort portOCPS
+      ocps <- Port.read portOCPS
       VRAM.writePalette vram True ocps ocpd'
-      when (isFlagSet flagPaletteIncrement ocps) $ writePort portOCPS ((ocps .&. 0xBF) + 1)
-  portVBK <- newPort 0xFE 0x01 $
+      when (isFlagSet flagPaletteIncrement ocps) $ Port.write portOCPS ((ocps .&. 0xBF) + 1)
+  portVBK <- Port.new 0xFE 0x01 $
     \_ vbk' -> vbk' <$ VRAM.setBank vram (if vbk' .&. 1 == 0 then 0 else 0x2000)
 
   assemblySpace <- VUM.replicate 168 (0, (0, 0, False))
@@ -258,9 +245,9 @@ modeBits ReadVRAM = 3
 
 checkLY :: Port -> Word8 -> Word8 -> IO Word8
 checkLY portSTAT ly lyc = do
-  stat <- directReadPort portSTAT
+  stat <- Port.readDirect portSTAT
   let stat' = (stat .&. complement matchMask) .|. if ly == lyc then matchMask else 0
-  stat' <$ directWritePort portSTAT stat'
+  stat' <$ Port.writeDirect portSTAT stat'
 
 updateStatSignal :: IORef Bool -> Mode -> Word8 -> IO Bool
 updateStatSignal signalRef mode stat = do
@@ -284,22 +271,22 @@ data BusEvent = NoGraphicsEvent | HBlankEvent deriving (Eq, Ord, Show)
 {-# INLINEABLE step #-}
 step :: State -> Sync -> Int -> IO BusEvent
 step graphicsState@State {..} graphicsSync clockAdvance = do
-  lcdc <- directReadPort portLCDC
+  lcdc <- Port.readDirect portLCDC
   let lcdEnabled = isFlagSet flagLCDEnable lcdc
   if not lcdEnabled
     then pure NoGraphicsEvent
     else do
-      line' <- getUpdateResult <$> updateStateCycle lcdLine clockAdvance (directWritePort portLY)
-      modeUpdate <- updateStateCycle lcdState clockAdvance $ \mode' -> do
+      line' <- StateCycle.getUpdateResult <$> StateCycle.update lcdLine clockAdvance (Port.writeDirect portLY)
+      modeUpdate <- StateCycle.update lcdState clockAdvance $ \mode' -> do
         -- Update STAT register
-        stat <- directReadPort portSTAT
-        directWritePort portSTAT (modifyBits maskMode (modeBits mode') stat)
+        stat <- Port.readDirect portSTAT
+        Port.writeDirect portSTAT (modifyBits maskMode (modeBits mode') stat)
 
         when (mode' == ScanOAM) $ VRAM.setOAMAccessible vram False
         when (mode' == ReadVRAM) $ VRAM.setAccessible vram False
 
         -- Raise interrupts
-        lyc <- directReadPort portLYC
+        lyc <- Port.readDirect portLYC
         checkStatInterrupt portIF portSTAT statSignal line' lyc mode'
         when (mode' == VBlank) $ Interrupt.raise portIF Interrupt.VBlank
 
@@ -315,7 +302,7 @@ step graphicsState@State {..} graphicsSync clockAdvance = do
           takeMVar (bufferAvailable graphicsSync)
 
       pure $ case modeUpdate of
-        HasChangedTo HBlank -> HBlankEvent
+        StateCycle.HasChangedTo HBlank -> HBlankEvent
         _ -> NoGraphicsEvent
 
 dmgBackgroundTileAttrs :: Word8
@@ -335,11 +322,11 @@ getSpriteBlendInfo attrs =
 
 renderLine :: State -> EmulatorMode -> Word8 -> Ptr Word8 -> IO ()
 renderLine State {..} mode line outputBase = do
-  scx <- directReadPort portSCX
-  scy <- directReadPort portSCY
-  wx <- directReadPort portWX
-  wy <- directReadPort portWY
-  lcdc <- directReadPort portLCDC
+  scx <- Port.readDirect portSCX
+  scy <- Port.readDirect portSCY
+  wx <- Port.readDirect portWX
+  wy <- Port.readDirect portWY
+  lcdc <- Port.readDirect portLCDC
 
   let bgEnabled = isFlagSet flagBackgroundEnable lcdc
   let windowEnabled = isFlagSet flagWindowEnable lcdc && line >= wy && wx <= 166
@@ -486,9 +473,9 @@ renderLine State {..} mode line outputBase = do
     -- Generate actual pixel data in the frame texture buffer based on the data in
     -- the assembly area.
     applyDMGPalettes = do
-      bgp <- directReadPort portBGP
-      obp0 <- directReadPort portOBP0
-      obp1 <- directReadPort portOBP1
+      bgp <- Port.readDirect portBGP
+      obp0 <- Port.readDirect portOBP0
+      obp1 <- Port.readDirect portOBP1
 
       let go !offset = do
             (index, (layer, _, _)) <- VUM.unsafeRead assemblySpace offset

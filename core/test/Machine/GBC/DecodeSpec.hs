@@ -14,7 +14,7 @@ import Data.Word (Word8)
 import Machine.GBC.CPU.Decode (MonadFetch (..), decodeAndExecute)
 import Machine.GBC.CPU.ISA (MonadSm83x (..))
 import Machine.GBC.Util (formatHex)
-import Test.Hspec ( Spec, describe, expectationFailure, it, shouldBe,)
+import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe)
 
 newtype DecodeM a = DecodeM {runDecodeM :: StateT [Word8] Maybe a}
   deriving (Monad, Applicative, Functor)

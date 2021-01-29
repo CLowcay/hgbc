@@ -19,7 +19,10 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word16, Word8)
 import qualified Machine.GBC.CPU.Interrupts as Interrupt
 import Machine.GBC.Mode (EmulatorMode (DMG))
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util ((.<<.))
@@ -56,15 +59,15 @@ newSync = do
 
 init :: Sync -> Port -> IORef EmulatorMode -> IO State
 init sync portIF modeRef = do
-  shiftClock <- newCounter 0
+  shiftClock <- Counter.new 0
   bitCounter <- newUnboxedRef 0
   incoming <- newUnboxedRef 0xFF
   clockPeriod <- newUnboxedRef 0
   transferActiveRef <- newIORef False
 
-  portSB <- newPort 0x00 0xFF alwaysUpdate
+  portSB <- Port.new 0x00 0xFF Port.alwaysUpdate
   portSC <-
-    newPortWithReadAction
+    Port.newWithReadAction
       0x7C
       0x83
       ( \sc -> do
@@ -76,7 +79,7 @@ init sync portIF modeRef = do
             when (sc' `testBit` flagInternalClock) $ do
               if sc' `testBit` flagTransferStart
                 then do
-                  putMVar (out sync) =<< directReadPort portSB
+                  putMVar (out sync) =<< Port.readDirect portSB
                   writeIORef transferActiveRef True
                 else writeIORef transferActiveRef False
               mode <- readIORef modeRef
@@ -90,7 +93,7 @@ ports State {..} = [(R.SB, portSB), (R.SC, portSC)]
 -- | Notify an incoming passive transfer
 notifyIncoming :: State -> Int -> Word8 -> IO ()
 notifyIncoming State {..} period incomingValue = do
-  sc <- directReadPort portSC
+  sc <- Port.readDirect portSC
   unless (sc `testBit` flagInternalClock) $ do
     putMVar (inp sync) incomingValue
     writeUnboxedRef clockPeriod period
@@ -101,7 +104,7 @@ update :: State -> IO ()
 update State {..} = do
   transferActive <- readIORef transferActiveRef
   when transferActive $
-    updateCounter shiftClock 1 $ do
+    Counter.update shiftClock 1 $ do
       counter <- readUnboxedRef bitCounter
       writeUnboxedRef bitCounter =<< clockSerial counter
       readUnboxedRef clockPeriod
@@ -114,15 +117,15 @@ update State {..} = do
             v <- takeMVar (inp sync)
             v <$ writeUnboxedRef incoming v
 
-      sb <- directReadPort portSB
+      sb <- Port.readDirect portSB
       let value' = rotateL value 1
       writeUnboxedRef incoming value'
-      directWritePort portSB (sb .<<. 1 .|. (value' .&. 1))
+      Port.writeDirect portSB (sb .<<. 1 .|. (value' .&. 1))
 
       let counter' = (counter + 1) .&. 3
       when (counter' == 0) $ do
-        sc <- directReadPort portSC
-        directWritePort portSC (sc .&. 0x7F)
+        sc <- Port.readDirect portSC
+        Port.writeDirect portSC (sc .&. 0x7F)
         Interrupt.raise portIF Interrupt.EndSerialTransfer
         writeIORef transferActiveRef False
       pure counter'

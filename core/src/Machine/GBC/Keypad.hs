@@ -15,7 +15,8 @@ import Data.Bits (Bits (complement, testBit, (.&.), (.|.)))
 import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
 import Data.Word (Word16, Word8)
 import qualified Machine.GBC.CPU.Interrupts as Interrupt
-import Machine.GBC.Primitive (Port, newPort, readPort)
+import Machine.GBC.Primitive.Port (Port)
+import qualified Machine.GBC.Primitive.Port as Port
 import qualified Machine.GBC.Registers as R
 import Machine.GBC.Util ((.>>.))
 import Prelude hiding (init)
@@ -24,7 +25,7 @@ import Prelude hiding (init)
 init :: Port -> IO State
 init portIF = do
   keypadRef <- newIORef 0x00
-  portP1 <- newPort 0x00 0x30 $ \old new -> do
+  portP1 <- Port.new 0x00 0x30 $ \old new -> do
     keypad <- readIORef keypadRef
     refreshKeypad keypad portIF old new
   pure State {..}
@@ -84,7 +85,7 @@ release state@State {..} key = do
 updateKeypadState :: State -> Word8 -> IO ()
 updateKeypadState State {..} keypad = do
   atomicWriteIORef keypadRef $! keypad
-  p1 <- readPort portP1
+  p1 <- Port.read portP1
   void $ refreshKeypad keypad portIF p1 p1
 
 ports :: State -> [(Word16, Port)]

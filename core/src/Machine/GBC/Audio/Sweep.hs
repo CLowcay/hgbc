@@ -15,7 +15,9 @@ import Data.Bits (Bits ((.&.)))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word8)
 import Machine.GBC.Audio.Common (updateFrequency)
-import Machine.GBC.Primitive
+import Machine.GBC.Primitive.Counter (Counter)
+import qualified Machine.GBC.Primitive.Counter as Counter
+import Machine.GBC.Primitive.Port (Port)
 import Machine.GBC.Primitive.UnboxedRef (UnboxedRef, newUnboxedRef, readUnboxedRef, writeUnboxedRef)
 import Machine.GBC.Util (isFlagSet, (.>>.))
 
@@ -33,14 +35,14 @@ newSweep port3 port4 = do
   enable <- newIORef False
   hasNegated <- newIORef False
   frequencyRef <- newUnboxedRef 0
-  counter <- newCounter 7
+  counter <- Counter.new 7
   pure Sweep {..}
 
 initSweep :: Sweep -> Int -> Word8 -> IO () -> IO ()
 initSweep sweep@Sweep {..} frequency0 register disableIO = do
   writeIORef hasNegated False
   writeUnboxedRef frequencyRef frequency0
-  reloadCounter counter (getPeriod register)
+  Counter.reload counter (getPeriod register)
   writeIORef enable (getPeriod register /= 0 || getShift register /= 0)
   when (getShift register /= 0) $ void $ overflowCheck sweep register disableIO
 
@@ -57,7 +59,7 @@ overflowCheck Sweep {..} register disableIO = do
   if frequency' > 2047 then frequency <$ disableIO else pure frequency'
 
 clockSweep :: Sweep -> Word8 -> IO () -> IO ()
-clockSweep sweep@Sweep {..} register disableIO = updateCounter counter 1 $ do
+clockSweep sweep@Sweep {..} register disableIO = Counter.update counter 1 $ do
   isEnabled <- readIORef enable
   when (isEnabled && getPeriod register /= 0) $ do
     frequency' <- overflowCheck sweep register disableIO
