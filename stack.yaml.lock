@@ -3,10 +3,24 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: htoml-megaparsec-2.1.0.4@sha256:6c2d9e3d747567c21f5f847317ec62b45143b9d8a01573e3759372c19ae2f16b,3504
+    pantry-tree:
+      size: 10518
+      sha256: 9cc332c7ff4ce73d79832d7024a5223e55726dc916a65057fa72cbb478974a97
+  original:
+    hackage: htoml-megaparsec-2.1.0.4@sha256:6c2d9e3d747567c21f5f847317ec62b45143b9d8a01573e3759372c19ae2f16b,3504
+- completed:
+    hackage: composition-prelude-3.0.0.2@sha256:1ffed216bd28d810fce0b5be83a661e2a892696d73b3f8de5c0f5edb9b5f0090,1216
+    pantry-tree:
+      size: 284
+      sha256: 94fc1c55e9065ae575315ac52a552d0e03beaefef4669a58a9745c6d71b4dd6b
+  original:
+    hackage: composition-prelude-3.0.0.2@sha256:1ffed216bd28d810fce0b5be83a661e2a892696d73b3f8de5c0f5edb9b5f0090,1216
 snapshots:
 - completed:
-    size: 587546
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/18/10.yaml
-    sha256: 88b4f81e162ba3adc230a9fcccc4d19ac116377656bab56c7382ca88598b257a
-  original: lts-18.10
+    size: 616897
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/0.yaml
+    sha256: bbf2be02f17940bac1f87cb462d4fb0c3355de6dcfc53d84f4f9ad3ee2164f65
+  original: lts-19.0

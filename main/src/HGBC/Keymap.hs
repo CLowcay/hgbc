@@ -19,7 +19,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Machine.GBC.Keypad as GBC
-import qualified Text.Toml.Types as Toml
+import qualified Text.Toml as Toml
 import Prelude hiding (lookup)
 
 type ScancodeDecoder k = T.Text -> Maybe (k, [Modifier])

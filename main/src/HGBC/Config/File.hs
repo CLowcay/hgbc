@@ -28,7 +28,6 @@ import qualified HGBC.Keymap as Keymap
 import qualified Machine.GBC.Color as Color
 import Machine.GBC.Mode (EmulatorMode)
 import qualified Text.Toml as Toml
-import qualified Text.Toml.Types as Toml
 
 type family HKD f a where
   HKD Identity a = a
